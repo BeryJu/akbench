@@ -170,7 +170,11 @@ func resolveToken(ctx context.Context, c client.Client, namespace, secretName st
 // what decides whether /clusters can list anything beyond the management
 // cluster itself.
 func hasCAPI(cfg *rest.Config) bool {
-	mapper, err := apiutil.NewDynamicRESTMapper(cfg, nil)
+	httpClient, err := rest.HTTPClientFor(cfg)
+	if err != nil {
+		return false
+	}
+	mapper, err := apiutil.NewDynamicRESTMapper(cfg, httpClient)
 	if err != nil {
 		return false
 	}
