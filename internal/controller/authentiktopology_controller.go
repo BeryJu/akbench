@@ -172,14 +172,37 @@ func (r *AuthentikTopologyReconciler) reconcileDelete(ctx context.Context, topo 
 	if !controllerutil.ContainsFinalizer(topo, authentikTopologyFinalizer) {
 		return ctrl.Result{}, nil
 	}
-	// The HelmRelease/HelmRepository this controller owns live beside the
-	// AuthentikTopology CR and are garbage-collected via ownerReferences
-	// (applyOwned). Everything else - the chart's rendered workloads, and the
-	// AUTHENTIK_SECRET_KEY/postgres-password Secrets ensureRandomSecret
-	// created - lives in spec.namespace, a *different* namespace an
-	// ownerReference can't reach, so deleting that namespace is what actually
-	// cleans it up. From M2/M4 on, a remote CNPG Cluster on another cluster
-	// needs the same explicit treatment via the multicluster tracker.
+
+	// Delete the HelmRelease first and wait for helm-controller's own
+	// finalizer to finish running `helm uninstall`, instead of deleting
+	// spec.namespace immediately. `helm uninstall` is what correctly removes
+	// resources the chart renders as cluster-scoped (e.g. authentik's own
+	// ClusterRole/ClusterRoleBinding) - those live in neither the
+	// HelmRelease's namespace nor spec.namespace, so a namespace delete can
+	// never reach them, and an orphaned one then blocks every future install
+	// under the same release name with an ownership-conflict error.
+	var hr helmv2.HelmRelease
+	err := r.Get(ctx, types.NamespacedName{Name: render.HelmReleaseName(topo), Namespace: topo.Namespace}, &hr)
+	switch {
+	case apierrors.IsNotFound(err):
+		// Already gone - fall through to the namespace sweep below.
+	case err != nil:
+		return ctrl.Result{}, fmt.Errorf("get HelmRelease: %w", err)
+	default:
+		if hr.DeletionTimestamp.IsZero() {
+			if err := r.Delete(ctx, &hr); err != nil && !apierrors.IsNotFound(err) {
+				return ctrl.Result{}, fmt.Errorf("delete HelmRelease: %w", err)
+			}
+		}
+		return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
+	}
+
+	// Everything else - the AUTHENTIK_SECRET_KEY/postgres-password Secrets
+	// ensureRandomSecret created, and (CNPG mode) the Cluster this controller
+	// owns - lives in spec.namespace, a *different* namespace an
+	// ownerReference can't reach, so deleting that namespace is what cleans
+	// those up. From M4 on, a remote topology's namespace needs the same
+	// explicit treatment via the multicluster tracker.
 	if topo.Spec.Namespace != "" {
 		ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: topo.Spec.Namespace}}
 		if err := r.Delete(ctx, ns); err != nil && !apierrors.IsNotFound(err) {
