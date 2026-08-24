@@ -85,6 +85,11 @@ setup-test-e2e: ## Set up a Kind cluster for e2e tests if it does not exist
 			$(KIND) create cluster --name $(KIND_CLUSTER) ;; \
 	esac
 
+.PHONY: test-webui
+test-webui: setup-envtest ## Run the web UI end-to-end suite (envtest + Next.js + Playwright, no cluster needed).
+	KUBEBUILDER_ASSETS="$(shell "$(ENVTEST)" use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path)" \
+		hack/webui-e2e.sh
+
 .PHONY: test-e2e
 test-e2e: setup-test-e2e manifests generate fmt vet ## Run the e2e tests. Expected an isolated environment using Kind.
 	KIND=$(KIND) KIND_CLUSTER=$(KIND_CLUSTER) go test -tags=e2e ./test/e2e/ -v -ginkgo.v
@@ -112,9 +117,22 @@ lint-config: golangci-lint ## Verify golangci-lint linter configuration
 build: manifests generate fmt vet ## Build manager binary.
 	go build -o bin/manager cmd/main.go
 
+.PHONY: build-apiserver
+build-apiserver: fmt vet ## Build the web UI backend binary.
+	go build -o bin/apiserver ./cmd/apiserver
+
 .PHONY: run
 run: manifests generate fmt vet ## Run a controller from your host.
 	go run ./cmd/main.go
+
+.PHONY: run-apiserver
+run-apiserver: fmt vet ## Run the web UI backend against the current kubeconfig context.
+	BENCH_API_TOKEN=$${BENCH_API_TOKEN:-dev-token} go run ./cmd/apiserver
+
+.PHONY: run-webui
+run-webui: ## Run the frontend dev server against a backend on :8080.
+	cd web/frontend && npm install --no-audit --no-fund && \
+		BENCH_API_URL=http://127.0.0.1:8080 BENCH_API_TOKEN=$${BENCH_API_TOKEN:-dev-token} npm run dev
 
 # If you wish to build the manager image targeting other platforms you can use the --platform flag.
 # (i.e. docker build --platform linux/arm64). However, you must enable docker buildKit for it.

@@ -1,0 +1,172 @@
+/*
+Copyright 2026.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package api
+
+import (
+	"bytes"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+
+	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
+)
+
+const (
+	testNamespace = "authentik-bench"
+	testToken     = "s3cret-token"
+)
+
+func testScheme(t *testing.T) *runtime.Scheme {
+	t.Helper()
+	s := runtime.NewScheme()
+	if err := clientgoscheme.AddToScheme(s); err != nil {
+		t.Fatalf("add client-go scheme: %v", err)
+	}
+	if err := benchv1alpha1.AddToScheme(s); err != nil {
+		t.Fatalf("add bench scheme: %v", err)
+	}
+	return s
+}
+
+// newServer builds a Server over a fake management cluster seeded with the
+// given objects. The fake client is enough here because the backend only ever
+// does plain CRUD - everything that needs a real API server (defaulting,
+// CRD validation) is the operator's envtest suite's job.
+func newServer(t *testing.T, cfg Config, objects ...client.Object) (*Server, client.Client) {
+	t.Helper()
+	c := fake.NewClientBuilder().
+		WithScheme(testScheme(t)).
+		WithObjects(objects...).
+		WithStatusSubresource(&benchv1alpha1.AuthentikTopology{}, &benchv1alpha1.TestCase{}, &benchv1alpha1.TestRun{}).
+		Build()
+	if cfg.Namespace == "" {
+		cfg.Namespace = testNamespace
+	}
+	if cfg.Token == "" {
+		cfg.Token = testToken
+	}
+	return New(c, cfg), c
+}
+
+// do issues an authenticated request against the router and returns the
+// recorded response.
+func do(t *testing.T, s *Server, method, target string, body any) *httptest.ResponseRecorder {
+	t.Helper()
+	var reader *bytes.Reader
+	if body != nil {
+		raw, err := json.Marshal(body)
+		if err != nil {
+			t.Fatalf("marshal body: %v", err)
+		}
+		reader = bytes.NewReader(raw)
+	} else {
+		reader = bytes.NewReader(nil)
+	}
+	req := httptest.NewRequest(method, target, reader)
+	req.Header.Set("Authorization", "Bearer "+testToken)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	s.Router().ServeHTTP(rec, req)
+	return rec
+}
+
+func decodeBody[T any](t *testing.T, rec *httptest.ResponseRecorder) T {
+	t.Helper()
+	var out T
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode response %q: %v", rec.Body.String(), err)
+	}
+	return out
+}
+
+func requireStatus(t *testing.T, rec *httptest.ResponseRecorder, want int) {
+	t.Helper()
+	if rec.Code != want {
+		t.Fatalf("got status %d, want %d (body: %s)", rec.Code, want, rec.Body.String())
+	}
+}
+
+// sampleTopology is a Ready topology, since a TestCase referencing one that
+// is not Ready is the operator's problem rather than the API's.
+func sampleTopology(name string) *benchv1alpha1.AuthentikTopology {
+	return &benchv1alpha1.AuthentikTopology{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: testNamespace},
+		Spec: benchv1alpha1.AuthentikTopologySpec{
+			Namespace: "ak-" + name,
+			Server:    benchv1alpha1.WorkloadSpec{Replicas: 2},
+			Worker:    benchv1alpha1.WorkloadSpec{Replicas: 1},
+			Postgres:  benchv1alpha1.PostgresSpec{Mode: benchv1alpha1.PostgresEmbedded},
+		},
+		Status: benchv1alpha1.AuthentikTopologyStatus{
+			ServiceEndpoint: "authentik-" + name + "-server.ak-" + name + ".svc.cluster.local:80",
+			Conditions: []metav1.Condition{{
+				Type:               benchv1alpha1.ConditionReady,
+				Status:             metav1.ConditionTrue,
+				Reason:             benchv1alpha1.ReasonReady,
+				LastTransitionTime: metav1.Now(),
+			}},
+		},
+	}
+}
+
+func sampleTestCase(name, topology string, profile benchv1alpha1.TestProfile) *benchv1alpha1.TestCase {
+	return &benchv1alpha1.TestCase{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: testNamespace},
+		Spec: benchv1alpha1.TestCaseSpec{
+			TopologyRef: corev1.LocalObjectReference{Name: topology},
+			Profile:     profile,
+			Script:      "login.ts",
+			VUs:         8,
+			Iterations:  1000,
+		},
+	}
+}
+
+// fakePrometheus serves the instant-query shape the compare endpoint parses,
+// answering every query with the value the test hands it.
+func fakePrometheus(t *testing.T, handler func(query string) (string, bool)) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		value, ok := handler(r.URL.Query().Get("query"))
+		w.Header().Set("Content-Type", "application/json")
+		if !ok {
+			_, _ = w.Write([]byte(`{"status":"success","data":{"resultType":"vector","result":[]}}`))
+			return
+		}
+		body := map[string]any{
+			"status": "success",
+			"data": map[string]any{
+				"resultType": "vector",
+				"result": []any{map[string]any{
+					"metric": map[string]string{},
+					"value":  []any{1700000000, value},
+				}},
+			},
+		}
+		_ = json.NewEncoder(w).Encode(body)
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}

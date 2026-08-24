@@ -1,0 +1,31 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Each dashboard becomes a ConfigMap that kube-prometheus-stack's Grafana
+# sidecar picks up and loads, which is why the label below matters more than
+# the ConfigMap names.
+configMapGenerator:
+  - name: akbench-dashboard-compare-tests
+    files:
+      - compare-tests.json
+  - name: akbench-dashboard-k6
+    files:
+      - k6.json
+  - name: akbench-dashboard-authentik
+    files:
+      - authentik.json
+  - name: akbench-dashboard-postgres
+    files:
+      - postgres.json
+  - name: akbench-dashboard-nodes
+    files:
+      - nodes.json
+
+generatorOptions:
+  # The sidecar reloads a dashboard in place when its ConfigMap changes;
+  # hash suffixes would instead leave a new ConfigMap - and a duplicate
+  # dashboard - behind on every edit.
+  disableNameSuffixHash: true
+  labels:
+    grafana_dashboard: "1"
+    app.kubernetes.io/part-of: authentik-bench

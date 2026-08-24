@@ -66,8 +66,18 @@ func (r *TestRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	if !run.DeletionTimestamp.IsZero() {
 		return r.reconcileDelete(ctx, &run)
 	}
-	if !controllerutil.ContainsFinalizer(&run, testRunFinalizer) {
+	// The finalizer and the test-case label are both metadata the run needs
+	// before anything else happens, so they go on in one update: the label is
+	// what makes `kubectl get testruns -l bench.goauthentik.io/testcase=<name>`
+	// a run history, and a TestRun created by hand would otherwise not have it.
+	needsFinalizer := !controllerutil.ContainsFinalizer(&run, testRunFinalizer)
+	needsLabel := run.Labels[benchv1alpha1.LabelTestCase] != run.Spec.TestCaseRef.Name
+	if needsFinalizer || needsLabel {
 		controllerutil.AddFinalizer(&run, testRunFinalizer)
+		if run.Labels == nil {
+			run.Labels = map[string]string{}
+		}
+		run.Labels[benchv1alpha1.LabelTestCase] = run.Spec.TestCaseRef.Name
 		if err := r.Update(ctx, &run); err != nil {
 			return ctrl.Result{}, err
 		}

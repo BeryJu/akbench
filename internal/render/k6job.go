@@ -137,8 +137,8 @@ func (p K6WorkloadParams) volumes() ([]corev1.Volume, []corev1.VolumeMount) {
 func (p K6WorkloadParams) PodTemplate() corev1.PodTemplateSpec {
 	volumes, mounts := p.volumes()
 	labels := map[string]string{
-		"bench.goauthentik.io/testcase": p.TestCase.Name,
-		"bench.goauthentik.io/profile":  k6ProfileValue(p.TestCase.Spec.Profile),
+		benchv1alpha1.LabelTestCase: p.TestCase.Name,
+		benchv1alpha1.LabelProfile:  k6ProfileValue(p.TestCase.Spec.Profile),
 	}
 	return corev1.PodTemplateSpec{
 		ObjectMeta: metav1.ObjectMeta{Labels: labels},
@@ -185,7 +185,7 @@ func BurnDeployment(name, namespace string, p K6WorkloadParams) *appsv1.Deployme
 	tmpl := p.PodTemplate()
 	tmpl.Spec.RestartPolicy = corev1.RestartPolicyAlways
 	selector := &metav1.LabelSelector{MatchLabels: map[string]string{
-		"bench.goauthentik.io/testcase": p.TestCase.Name,
+		benchv1alpha1.LabelTestCase: p.TestCase.Name,
 	}}
 	return &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
