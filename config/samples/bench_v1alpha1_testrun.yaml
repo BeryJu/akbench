@@ -1,0 +1,10 @@
+apiVersion: bench.goauthentik.io/v1alpha1
+kind: TestRun
+metadata:
+  labels:
+    app.kubernetes.io/name: authentik-bench
+    app.kubernetes.io/managed-by: kustomize
+  name: login-baseline-run-1
+spec:
+  testCaseRef:
+    name: login-baseline

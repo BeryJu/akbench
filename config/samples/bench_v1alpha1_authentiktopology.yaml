@@ -1,0 +1,15 @@
+apiVersion: bench.goauthentik.io/v1alpha1
+kind: AuthentikTopology
+metadata:
+  labels:
+    app.kubernetes.io/name: authentik-bench
+    app.kubernetes.io/managed-by: kustomize
+  name: authentik-1
+spec:
+  namespace: authentik-1
+  server:
+    replicas: 2
+  worker:
+    replicas: 1
+  postgres:
+    mode: Embedded

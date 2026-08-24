@@ -1,0 +1,206 @@
+/*
+Copyright 2026.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package controller
+
+import (
+	"context"
+	"fmt"
+
+	helmv2 "github.com/fluxcd/helm-controller/api/v2"
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
+	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	logf "sigs.k8s.io/controller-runtime/pkg/log"
+
+	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
+	"github.com/goauthentik/authentik-bench/internal/render"
+)
+
+// authentikTopologyFinalizer guards the remote (in later milestones,
+// cross-cluster) objects an AuthentikTopology owns that Kubernetes garbage
+// collection cannot reach on its own.
+const authentikTopologyFinalizer = "bench.goauthentik.io/remote-cleanup"
+
+// AuthentikTopologyReconciler reconciles an AuthentikTopology object.
+//
+// M1 scope: operates only on the cluster the operator itself runs on
+// (spec.clusterRef is rejected with a NotImplemented condition until the
+// multicluster tracker lands in M4) and only supports Postgres mode
+// Embedded (CNPG/External are rejected the same way until M2).
+type AuthentikTopologyReconciler struct {
+	client.Client
+	Scheme *runtime.Scheme
+}
+
+// +kubebuilder:rbac:groups=bench.goauthentik.io,resources=authentiktopologies,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=bench.goauthentik.io,resources=authentiktopologies/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=bench.goauthentik.io,resources=authentiktopologies/finalizers,verbs=update
+// +kubebuilder:rbac:groups=helm.toolkit.fluxcd.io,resources=helmreleases,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=source.toolkit.fluxcd.io,resources=helmrepositories,verbs=get;list;watch;create;update;patch;delete
+
+func (r *AuthentikTopologyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	log := logf.FromContext(ctx)
+
+	var topo benchv1alpha1.AuthentikTopology
+	if err := r.Get(ctx, req.NamespacedName, &topo); err != nil {
+		return ctrl.Result{}, client.IgnoreNotFound(err)
+	}
+
+	if !topo.DeletionTimestamp.IsZero() {
+		return r.reconcileDelete(ctx, &topo)
+	}
+	if !controllerutil.ContainsFinalizer(&topo, authentikTopologyFinalizer) {
+		controllerutil.AddFinalizer(&topo, authentikTopologyFinalizer)
+		if err := r.Update(ctx, &topo); err != nil {
+			return ctrl.Result{}, err
+		}
+	}
+
+	if topo.Spec.ClusterRef.Name != "" {
+		setCondition(&topo.Status.Conditions, topo.Generation, benchv1alpha1.ConditionReady, metav1.ConditionFalse,
+			benchv1alpha1.ReasonNotImplemented, "multi-cluster clusterRef is not implemented until M4; leave it unset to deploy on the management cluster")
+		return ctrl.Result{}, r.Status().Update(ctx, &topo)
+	}
+
+	if topo.Spec.Postgres.Mode != benchv1alpha1.PostgresEmbedded {
+		setCondition(&topo.Status.Conditions, topo.Generation, benchv1alpha1.ConditionPostgresReady, metav1.ConditionFalse,
+			benchv1alpha1.ReasonNotImplemented, fmt.Sprintf("postgres mode %s lands in M2; use Embedded for now", topo.Spec.Postgres.Mode))
+		setCondition(&topo.Status.Conditions, topo.Generation, benchv1alpha1.ConditionReady, metav1.ConditionFalse,
+			benchv1alpha1.ReasonNotImplemented, "waiting on postgres mode support")
+		return ctrl.Result{}, r.Status().Update(ctx, &topo)
+	}
+	setCondition(&topo.Status.Conditions, topo.Generation, benchv1alpha1.ConditionPostgresReady, metav1.ConditionTrue,
+		benchv1alpha1.ReasonReady, "using the authentik chart's bundled postgresql subchart")
+
+	if err := r.ensureNamespace(ctx, topo.Spec.Namespace); err != nil {
+		return ctrl.Result{}, fmt.Errorf("ensure namespace: %w", err)
+	}
+
+	repo := render.HelmRepository(topo.Namespace, topo.Spec.Chart)
+	if err := r.applyOwned(ctx, &topo, repo); err != nil {
+		return ctrl.Result{}, fmt.Errorf("apply HelmRepository: %w", err)
+	}
+
+	values, err := render.HelmValues(&topo, nil)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("build helm values: %w", err)
+	}
+	hr := render.HelmRelease(&topo, "", values)
+	if err := r.applyOwned(ctx, &topo, hr); err != nil {
+		return ctrl.Result{}, fmt.Errorf("apply HelmRelease: %w", err)
+	}
+
+	var existing helmv2.HelmRelease
+	helmReleaseReady := metav1.ConditionFalse
+	helmReleaseMessage := "waiting for helm-controller to reconcile"
+	if err := r.Get(ctx, types.NamespacedName{Name: hr.Name, Namespace: hr.Namespace}, &existing); err != nil {
+		if !apierrors.IsNotFound(err) {
+			return ctrl.Result{}, fmt.Errorf("get HelmRelease: %w", err)
+		}
+	} else if cond := meta.FindStatusCondition(existing.Status.Conditions, "Ready"); cond != nil {
+		if cond.Status == metav1.ConditionTrue {
+			helmReleaseReady = metav1.ConditionTrue
+			helmReleaseMessage = "HelmRelease is Ready"
+		} else {
+			helmReleaseMessage = cond.Message
+		}
+	}
+	setCondition(&topo.Status.Conditions, topo.Generation, benchv1alpha1.ConditionHelmReleaseReady, helmReleaseReady,
+		benchv1alpha1.ReasonReady, helmReleaseMessage)
+
+	topo.Status.HelmReleaseRef = &corev1.LocalObjectReference{Name: hr.Name}
+	topo.Status.ServiceEndpoint = render.ServiceEndpoint(&topo)
+	topo.Status.ObservedGeneration = topo.Generation
+
+	if helmReleaseReady == metav1.ConditionTrue {
+		setCondition(&topo.Status.Conditions, topo.Generation, benchv1alpha1.ConditionReady, metav1.ConditionTrue,
+			benchv1alpha1.ReasonReady, "authentik chart installed and ready")
+	} else {
+		setCondition(&topo.Status.Conditions, topo.Generation, benchv1alpha1.ConditionReady, metav1.ConditionFalse,
+			benchv1alpha1.ReasonReconciling, helmReleaseMessage)
+	}
+
+	if err := r.Status().Update(ctx, &topo); err != nil {
+		return ctrl.Result{}, err
+	}
+	log.Info("reconciled AuthentikTopology", "ready", helmReleaseReady)
+	return ctrl.Result{}, nil
+}
+
+func (r *AuthentikTopologyReconciler) reconcileDelete(ctx context.Context, topo *benchv1alpha1.AuthentikTopology) (ctrl.Result, error) {
+	if !controllerutil.ContainsFinalizer(topo, authentikTopologyFinalizer) {
+		return ctrl.Result{}, nil
+	}
+	// M1: everything this controller owns lives on the local cluster and is
+	// already garbage-collected via ownerReferences (applyOwned below). From
+	// M2/M4 on, remote CNPG Clusters and cross-cluster objects must be
+	// explicitly deleted here via the multicluster tracker before the
+	// finalizer is removed.
+	controllerutil.RemoveFinalizer(topo, authentikTopologyFinalizer)
+	return ctrl.Result{}, r.Update(ctx, topo)
+}
+
+func (r *AuthentikTopologyReconciler) ensureNamespace(ctx context.Context, name string) error {
+	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: name}}
+	err := r.Get(ctx, types.NamespacedName{Name: name}, ns)
+	if err == nil {
+		return nil
+	}
+	if !apierrors.IsNotFound(err) {
+		return err
+	}
+	if err := r.Create(ctx, ns); err != nil && !apierrors.IsAlreadyExists(err) {
+		return err
+	}
+	return nil
+}
+
+// applyOwned creates or updates obj, setting topo as its controller owner so
+// deleting the AuthentikTopology garbage-collects it (local-cluster objects
+// only - see the finalizer note above for remote objects).
+func (r *AuthentikTopologyReconciler) applyOwned(ctx context.Context, topo *benchv1alpha1.AuthentikTopology, obj client.Object) error {
+	if err := controllerutil.SetControllerReference(topo, obj, r.Scheme); err != nil {
+		return err
+	}
+	if err := r.Create(ctx, obj); err != nil {
+		if !apierrors.IsAlreadyExists(err) {
+			return err
+		}
+		existing := obj.DeepCopyObject().(client.Object)
+		if err := r.Get(ctx, types.NamespacedName{Name: obj.GetName(), Namespace: obj.GetNamespace()}, existing); err != nil {
+			return err
+		}
+		obj.SetResourceVersion(existing.GetResourceVersion())
+		return r.Update(ctx, obj)
+	}
+	return nil
+}
+
+// SetupWithManager sets up the controller with the Manager.
+func (r *AuthentikTopologyReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	return ctrl.NewControllerManagedBy(mgr).
+		For(&benchv1alpha1.AuthentikTopology{}).
+		Owns(&helmv2.HelmRelease{}).
+		Named("authentiktopology").
+		Complete(r)
+}

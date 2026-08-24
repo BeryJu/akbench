@@ -1,0 +1,270 @@
+/*
+Copyright 2026.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package v1alpha1
+
+import (
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+)
+
+// PlacementMode decides how an AuthentikTopology's pods are scheduled, which
+// is the "alone on nodes vs shared nodes" knob the benchmark compares.
+// +kubebuilder:validation:Enum=Default;Dedicated
+type PlacementMode string
+
+const (
+	// PlacementDefault leaves scheduling to the default scheduler, so pods
+	// may land on nodes shared with other workloads (the noisy-neighbor case).
+	PlacementDefault PlacementMode = "Default"
+	// PlacementDedicated requires one pod per node (via pod anti-affinity) and
+	// applies the given tolerations/nodeSelector, so pods land alone on
+	// pre-tainted/pre-labeled nodes. The operator does not create node pools
+	// itself - the target cluster must already have suitable nodes.
+	PlacementDedicated PlacementMode = "Dedicated"
+)
+
+// PlacementSpec controls pod scheduling for an AuthentikTopology's server and
+// worker pods.
+type PlacementSpec struct {
+	// mode selects Default (shared nodes) or Dedicated (one pod per node).
+	// +kubebuilder:default=Default
+	// +optional
+	Mode PlacementMode `json:"mode,omitempty"`
+
+	// nodeSelector is applied to server/worker pods in Dedicated mode.
+	// +optional
+	NodeSelector map[string]string `json:"nodeSelector,omitempty"`
+
+	// tolerations are applied to server/worker pods in Dedicated mode, so
+	// they can land on tainted, dedicated nodes.
+	// +optional
+	Tolerations []corev1.Toleration `json:"tolerations,omitempty"`
+
+	// topologyKey is the anti-affinity topology key used in Dedicated mode.
+	// +kubebuilder:default=kubernetes.io/hostname
+	// +optional
+	TopologyKey string `json:"topologyKey,omitempty"`
+}
+
+// PostgresMode selects which of the three benchmarked Postgres backends an
+// AuthentikTopology uses.
+// +kubebuilder:validation:Enum=Embedded;CNPG;External
+type PostgresMode string
+
+const (
+	// PostgresEmbedded uses the authentik chart's own bundled postgresql
+	// subchart (single instance).
+	PostgresEmbedded PostgresMode = "Embedded"
+	// PostgresCNPG provisions a CloudNativePG Cluster (multi-instance, HA)
+	// and points the authentik chart at its connection secret.
+	PostgresCNPG PostgresMode = "CNPG"
+	// PostgresExternal points the authentik chart at a user-supplied,
+	// operator-unmanaged external Postgres via a connection secret.
+	PostgresExternal PostgresMode = "External"
+)
+
+// EmbeddedPostgresSpec configures the authentik chart's bundled postgresql
+// subchart.
+type EmbeddedPostgresSpec struct {
+	// +optional
+	StorageSize string `json:"storageSize,omitempty"`
+	// +optional
+	StorageClassName string `json:"storageClassName,omitempty"`
+}
+
+// CNPGPostgresSpec configures a CloudNativePG Cluster provisioned for this
+// topology.
+type CNPGPostgresSpec struct {
+	// instances is the number of CNPG cluster instances (>1 for HA).
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:default=3
+	Instances int32 `json:"instances,omitempty"`
+	// +optional
+	StorageSize string `json:"storageSize,omitempty"`
+	// +optional
+	StorageClassName string `json:"storageClassName,omitempty"`
+}
+
+// ExternalPostgresSpec points at an operator-unmanaged Postgres instance.
+type ExternalPostgresSpec struct {
+	// secretRef names a Secret on the target cluster with host/port/database/
+	// username/password keys.
+	SecretRef corev1.LocalObjectReference `json:"secretRef"`
+	// +kubebuilder:default=require
+	// +optional
+	SSLMode string `json:"sslMode,omitempty"`
+}
+
+// PostgresSpec selects and configures one of the three benchmarked Postgres
+// backends.
+type PostgresSpec struct {
+	// +kubebuilder:default=Embedded
+	Mode PostgresMode `json:"mode,omitempty"`
+	// +optional
+	Embedded *EmbeddedPostgresSpec `json:"embedded,omitempty"`
+	// +optional
+	CNPG *CNPGPostgresSpec `json:"cnpg,omitempty"`
+	// +optional
+	External *ExternalPostgresSpec `json:"external,omitempty"`
+}
+
+// WorkloadSpec sizes one of the authentik chart's workloads (server or
+// worker).
+type WorkloadSpec struct {
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:default=1
+	Replicas int32 `json:"replicas,omitempty"`
+	// +optional
+	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
+}
+
+// ErrorReportingSpec mirrors authentik's error_reporting config section, used
+// both for Sentry (released images) and for OTLP export (the
+// goauthentik/authentik#25412 branch). Off by default - see the design notes
+// in the repo README about authentik's OTel support being work in progress.
+type ErrorReportingSpec struct {
+	// +kubebuilder:default=false
+	// +optional
+	Enabled bool `json:"enabled,omitempty"`
+	// tracingEndpoint is the OTLP base endpoint spans are exported to.
+	// +optional
+	TracingEndpoint string `json:"tracingEndpoint,omitempty"`
+	// +kubebuilder:default="0.1"
+	// +optional
+	SampleRate string `json:"sampleRate,omitempty"`
+}
+
+// AuthentikSpec configures the authentik chart install itself.
+type AuthentikSpec struct {
+	// +kubebuilder:default="ghcr.io/goauthentik/server"
+	// +optional
+	Image string `json:"image,omitempty"`
+	// +optional
+	Tag string `json:"tag,omitempty"`
+	// +optional
+	LogLevel string `json:"logLevel,omitempty"`
+	// +optional
+	ErrorReporting ErrorReportingSpec `json:"errorReporting,omitempty"`
+	// pyroscopeHost is where authentik sends continuous profiles.
+	// +optional
+	PyroscopeHost string `json:"pyroscopeHost,omitempty"`
+	// extraValuesRef names a ConfigMap (a "values.yaml" key) merged over the
+	// generated Helm values last, as an escape hatch.
+	// +optional
+	ExtraValuesRef *corev1.LocalObjectReference `json:"extraValuesRef,omitempty"`
+}
+
+// ChartSpec pins the authentik Helm chart source used to install this
+// topology.
+type ChartSpec struct {
+	// +kubebuilder:default="https://charts.goauthentik.io"
+	// +optional
+	Repo string `json:"repo,omitempty"`
+	// +optional
+	Version string `json:"version,omitempty"`
+}
+
+// AuthentikTopologySpec defines one benchmarkable authentik deployment shape:
+// which cluster it runs on, how many server/worker replicas, how its pods are
+// scheduled, and which of the three Postgres backends it uses.
+type AuthentikTopologySpec struct {
+	// clusterRef names a cluster.x-k8s.io/v1beta1 Cluster this topology is
+	// deployed onto. Empty means the cluster the operator itself runs on.
+	// +optional
+	ClusterRef corev1.LocalObjectReference `json:"clusterRef,omitempty"`
+
+	// targetName is the identity this deployment is known by everywhere else:
+	// the `target` label Prometheus attaches to its metrics, and the `target`
+	// a TestCase names. Defaults to metadata.name.
+	// +optional
+	TargetName string `json:"targetName,omitempty"`
+
+	// namespace is the namespace this topology is installed into on the
+	// target cluster.
+	Namespace string `json:"namespace"`
+
+	// +optional
+	Chart ChartSpec `json:"chart,omitempty"`
+
+	Server WorkloadSpec `json:"server"`
+	Worker WorkloadSpec `json:"worker"`
+
+	// +optional
+	Placement PlacementSpec `json:"placement,omitempty"`
+
+	Postgres PostgresSpec `json:"postgres"`
+
+	// +optional
+	Authentik AuthentikSpec `json:"authentik,omitempty"`
+}
+
+// AuthentikTopologyStatus defines the observed state of AuthentikTopology.
+type AuthentikTopologyStatus struct {
+	// conditions report Ready, PostgresReady and HelmReleaseReady.
+	// +listType=map
+	// +listMapKey=type
+	// +optional
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
+
+	// +optional
+	HelmReleaseRef *corev1.LocalObjectReference `json:"helmReleaseRef,omitempty"`
+	// +optional
+	CNPGClusterRef *corev1.LocalObjectReference `json:"cnpgClusterRef,omitempty"`
+	// serviceEndpoint is the in-cluster host:port a TestCase drives, e.g.
+	// <release>-server.<namespace>.svc.cluster.local:80.
+	// +optional
+	ServiceEndpoint string `json:"serviceEndpoint,omitempty"`
+	// +optional
+	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
+}
+
+// +kubebuilder:object:root=true
+// +kubebuilder:subresource:status
+// +kubebuilder:printcolumn:name="Target",type=string,JSONPath=`.spec.targetName`
+// +kubebuilder:printcolumn:name="Postgres",type=string,JSONPath=`.spec.postgres.mode`
+// +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=="Ready")].status`
+
+// AuthentikTopology is the Schema for the authentiktopologies API
+type AuthentikTopology struct {
+	metav1.TypeMeta `json:",inline"`
+
+	// +optional
+	metav1.ObjectMeta `json:"metadata,omitzero"`
+
+	// +required
+	Spec AuthentikTopologySpec `json:"spec"`
+
+	// +optional
+	Status AuthentikTopologyStatus `json:"status,omitzero"`
+}
+
+// +kubebuilder:object:root=true
+
+// AuthentikTopologyList contains a list of AuthentikTopology
+type AuthentikTopologyList struct {
+	metav1.TypeMeta `json:",inline"`
+	metav1.ListMeta `json:"metadata,omitzero"`
+	Items           []AuthentikTopology `json:"items"`
+}
+
+func init() {
+	SchemeBuilder.Register(func(s *runtime.Scheme) error {
+		s.AddKnownTypes(SchemeGroupVersion, &AuthentikTopology{}, &AuthentikTopologyList{})
+		return nil
+	})
+}

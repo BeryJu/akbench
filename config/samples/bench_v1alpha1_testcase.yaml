@@ -1,0 +1,14 @@
+apiVersion: bench.goauthentik.io/v1alpha1
+kind: TestCase
+metadata:
+  labels:
+    app.kubernetes.io/name: authentik-bench
+    app.kubernetes.io/managed-by: kustomize
+  name: login-baseline
+spec:
+  topologyRef:
+    name: authentik-1
+  profile: Quick
+  vus: 8
+  iterations: 1000
+  flow: default-authentication-flow
