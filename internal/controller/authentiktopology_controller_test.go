@@ -119,10 +119,12 @@ var _ = Describe("AuthentikTopology Controller", func() {
 			Expect(k8sClient.Get(context.Background(), typeNamespacedName, &hr)).To(Succeed())
 			var values render.AuthentikTopologyHelmValues
 			Expect(json.Unmarshal(hr.Spec.Values.Raw, &values)).To(Succeed())
-			serverAffinity, _ := values.Server["affinity"].(map[string]any)
-			Expect(serverAffinity["podAntiAffinity"]).To(Equal("hard"))
-			workerAffinity, _ := values.Worker["affinity"].(map[string]any)
-			Expect(workerAffinity["podAntiAffinity"]).To(Equal("hard"))
+			// global.affinity.podAntiAffinity, not server.affinity/worker.affinity:
+			// those per-component fields are a raw corev1.Affinity override in
+			// this chart, not the preset mechanism - a string there fails to
+			// unmarshal (verified against a live install of this exact bug).
+			affinity, _ := values.Global["affinity"].(map[string]any)
+			Expect(affinity["podAntiAffinity"]).To(Equal("hard"))
 		})
 	})
 

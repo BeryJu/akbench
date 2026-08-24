@@ -115,14 +115,19 @@ func (r *AuthentikTopologyReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	// The chart does not generate AUTHENTIK_SECRET_KEY itself - authentik
 	// refuses to start without one - so the operator generates and caches it
 	// once, the same way the Ansible harness's credentials/ directory does.
-	authentikSecretName := topo.Name + "-authentik-config"
-	if _, err := ensureRandomSecret(ctx, r.Client,
-		types.NamespacedName{Name: authentikSecretName, Namespace: topo.Spec.Namespace},
-		"AUTHENTIK_SECRET_KEY", 32); err != nil {
+	// Passed as a literal value (authentik.secret_key), not via
+	// authentik.existingSecret: existingSecret tells the chart to skip
+	// rendering its own authentik.env-derived config Secret entirely, which
+	// is also where postgresql.*/log_level/error_reporting get baked into
+	// AUTHENTIK_* env vars - existingSecret would silently drop all of those.
+	secretKey, err := ensureRandomSecret(ctx, r.Client,
+		types.NamespacedName{Name: topo.Name + "-authentik-config", Namespace: topo.Spec.Namespace},
+		"AUTHENTIK_SECRET_KEY", 32)
+	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("ensure authentik secret key: %w", err)
 	}
 
-	values, err := render.HelmValues(&topo, authentikSecretName, pgConn)
+	values, err := render.HelmValues(&topo, secretKey, pgConn)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("build helm values: %w", err)
 	}

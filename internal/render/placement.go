@@ -8,18 +8,27 @@ import (
 	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
 )
 
-// AffinityPreset returns the authentik chart's own affinity-preset value
-// (server.affinity.podAntiAffinity / worker.affinity.podAntiAffinity: one of
-// "none", "soft", "hard" - see charts.goauthentik.io/authentik's
-// _helpers.tpl) for the given placement mode. Dedicated maps to "hard"
-// (required pod anti-affinity, one pod per node - the topology key the chart
-// uses for "hard" is fixed at kubernetes.io/hostname, matching
-// PlacementSpec's own default; PlacementSpec.TopologyKey has no effect here
-// since the chart doesn't expose it as a value - use ExtraValuesRef for a
-// custom key). Default maps to "none": the chart's own root default is
-// "soft", which would already bias pods apart, so Default must say "none"
-// explicitly to let pods land on the same node (the noisy-neighbor case the
-// benchmark compares against).
+// AffinityPreset returns the authentik chart's own affinity-preset value for
+// global.affinity.podAntiAffinity (one of "none", "soft", "hard" - see
+// charts.goauthentik.io/authentik's _helpers.tpl, "authentik.affinity") for
+// the given placement mode.
+//
+// This must go under global.affinity, not server.affinity/worker.affinity:
+// the per-component fields are a *different* knob that, if set to anything
+// non-empty at all, the chart uses verbatim as the Pod's real
+// corev1.Affinity - a preset string like "hard" there fails to unmarshal.
+// global.affinity is the only place the preset mechanism itself lives, and
+// it applies to both server and worker uniformly, which is fine since
+// Dedicated/Default both apply symmetrically to both.
+//
+// Dedicated maps to "hard" (required pod anti-affinity, one pod per node -
+// the topology key the chart uses for "hard" is fixed at
+// kubernetes.io/hostname, matching PlacementSpec's own default;
+// PlacementSpec.TopologyKey has no effect here since the chart doesn't
+// expose it as a value - use ExtraValuesRef for a custom key). Default maps
+// to "none": the chart's own root default is "soft", which would already
+// bias pods apart, so Default must say "none" explicitly to let pods land on
+// the same node (the noisy-neighbor case the benchmark compares against).
 func AffinityPreset(spec benchv1alpha1.PlacementSpec) string {
 	if spec.Mode == benchv1alpha1.PlacementDedicated {
 		return "hard"

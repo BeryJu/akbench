@@ -12,21 +12,29 @@ Cluster API and a central, mTLS-secured metrics pipeline.
 See the design plan this repo implements for the full architecture and
 phased delivery milestones (M1-M4).
 
-## Status: M1 (single cluster, kubectl only)
+## Status: M2 (single cluster, all postgres modes + placement)
 
 Implemented so far:
 
 - **CRDs** (`bench.goauthentik.io/v1alpha1`): `AuthentikTopology`, `TestCase`,
-  `TestRun`. Full spec shape from the design plan (placement modes, all three
-  Postgres modes, multi-cluster `clusterRef`s) is defined now so the schema
-  doesn't churn across milestones, but the M1 controllers only implement:
-  Postgres mode `Embedded`, placement mode `Default`, and topologies/test
-  cases on the operator's own cluster (`clusterRef`/`runnerClusterRef` report
-  a `NotImplemented` condition until M4's multicluster tracker lands).
+  `TestRun`. Multi-cluster `clusterRef`/`runnerClusterRef` report a
+  `NotImplemented` condition until M4's multicluster tracker lands; everything
+  else in the spec is implemented.
 - **`AuthentikTopologyReconciler`**: renders a Flux `HelmRelease` +
   `HelmRepository` installing the official authentik chart
   (`charts.goauthentik.io`) with the topology's replica/resource/placement
-  values.
+  values. All three Postgres modes work: `Embedded` (bundled subchart, with a
+  generated password pinned on both sides so they agree), `CNPG` (renders a
+  `postgresql.cnpg.io/v1 Cluster`, waits for it healthy, reads its generated
+  app secret), `External` (reads a user-supplied secret directly). Placement's
+  `Dedicated` mode uses the chart's own `affinity.podAntiAffinity: hard`
+  preset; `Default` explicitly sets `none` so pods can share a node (the
+  chart's own root default is `soft`, which would already bias them apart).
+  Deleting a topology deletes its `HelmRelease` first and waits for
+  helm-controller's own `helm uninstall` before sweeping the target
+  namespace - required because the chart's `ClusterRole`/`ClusterRoleBinding`
+  are cluster-scoped and a plain namespace delete can never reach them,
+  orphaning them to block every future install under the same release name.
 - **`TestCaseReconciler`**: `Burn` profile owns a self-healing k6
   `Deployment`; `Quick` profile just validates readiness (execution belongs
   to a `TestRun`). Mirrors the built-in k6 script into a `ConfigMap`.
@@ -41,10 +49,10 @@ Implemented so far:
   (`TEST_ID`/`TARGET`/`BENCH_HOST`/... ), guarded by `test/contract`.
 - **Fixtures**: `fixtures/gen-blueprint.py` ported unchanged.
 
-Not yet implemented (see the plan's milestones): CNPG/External postgres,
-`Dedicated` placement, the web UI, multi-cluster (`AdoptedCluster` CAPI
-provider), the mTLS central metrics receiver, and Flux-managed GitOps for the
-metrics stack itself.
+Not yet implemented (see the plan's milestones): the web UI, multi-cluster
+(a `WorkloadCluster` controller provisioning real clusters via the Incus CAPI
+infrastructure provider), the mTLS central metrics receiver, and
+Flux-managed GitOps for the metrics stack itself.
 
 ### Running the tests
 

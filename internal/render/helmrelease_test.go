@@ -32,7 +32,7 @@ func decodeValues(t *testing.T, raw json.RawMessage) AuthentikTopologyHelmValues
 
 func TestHelmValuesEmbedded(t *testing.T) {
 	topo := exampleTopology()
-	raw, err := HelmValues(topo, "authentik-1-authentik-config", &PostgresConnection{Password: "pw"})
+	raw, err := HelmValues(topo, "the-secret-key", &PostgresConnection{Password: "pw"})
 	if err != nil {
 		t.Fatalf("HelmValues: %v", err)
 	}
@@ -52,9 +52,41 @@ func TestHelmValuesEmbedded(t *testing.T) {
 	if akPg["password"] != "pw" {
 		t.Errorf("authentik.postgresql.password = %v, want pw (must match the bundled subchart's own password)", akPg["password"])
 	}
-	existingSecret, _ := values.Authentik["existingSecret"].(map[string]any)
-	if existingSecret["secretName"] != "authentik-1-authentik-config" {
-		t.Errorf("authentik.existingSecret.secretName = %v, want authentik-1-authentik-config", existingSecret["secretName"])
+	// authentik.secret_key as a literal value, not authentik.existingSecret:
+	// existingSecret makes the chart skip rendering its own config Secret
+	// entirely, silently dropping postgresql.*/log_level/error_reporting too
+	// (verified against a live install of this exact bug).
+	if values.Authentik["secret_key"] != "the-secret-key" {
+		t.Errorf("authentik.secret_key = %v, want the-secret-key", values.Authentik["secret_key"])
+	}
+	if _, ok := values.Authentik["existingSecret"]; ok {
+		t.Error("authentik.existingSecret must not be set")
+	}
+}
+
+// TestHelmValuesPlacementUsesGlobalAffinityPreset guards against regressing
+// into setting server.affinity/worker.affinity directly: verified against a
+// live chart install that those fields are a raw corev1.Affinity override in
+// this chart (not the preset mechanism), so a preset string there fails with
+// "cannot unmarshal string into Go struct field ... PodAntiAffinity".
+func TestHelmValuesPlacementUsesGlobalAffinityPreset(t *testing.T) {
+	topo := exampleTopology()
+	topo.Spec.Placement = benchv1alpha1.PlacementSpec{Mode: benchv1alpha1.PlacementDedicated}
+	raw, err := HelmValues(topo, "secret", &PostgresConnection{Password: "pw"})
+	if err != nil {
+		t.Fatalf("HelmValues: %v", err)
+	}
+	values := decodeValues(t, raw.Raw)
+
+	if _, ok := values.Server["affinity"]; ok {
+		t.Error("server.affinity must not be set - it's a raw corev1.Affinity override in this chart, not the preset mechanism")
+	}
+	if _, ok := values.Worker["affinity"]; ok {
+		t.Error("worker.affinity must not be set - it's a raw corev1.Affinity override in this chart, not the preset mechanism")
+	}
+	affinity, _ := values.Global["affinity"].(map[string]any)
+	if affinity["podAntiAffinity"] != "hard" {
+		t.Errorf("global.affinity.podAntiAffinity = %v, want hard", affinity["podAntiAffinity"])
 	}
 }
 

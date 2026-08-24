@@ -55,24 +55,19 @@ type AuthentikTopologyHelmValues struct {
 
 // HelmValues builds the authentik chart values for a topology, per the
 // chart's actual schema (charts.goauthentik.io/authentik, values.yaml):
-// global.image.{repository,tag}, server/worker.{replicas,resources,
-// nodeSelector,tolerations,affinity}, authentik.{log_level,error_reporting,
-// postgresql.*,existingSecret}, and top-level postgresql.enabled/auth for the
-// bundled subchart.
+// global.{image,affinity}, server/worker.{replicas,resources,nodeSelector,
+// tolerations}, authentik.{secret_key,log_level,error_reporting,
+// postgresql.*}, and top-level postgresql.enabled/auth for the bundled
+// subchart.
 //
-// authentikSecretName must name a Secret (created by the caller, see
-// internal/controller's ensureRandomSecret) holding AUTHENTIK_SECRET_KEY -
-// the chart does not generate one itself, and authentik refuses to start
-// without it. pgConn carries the resolved Postgres connection: for Embedded
-// mode only Password is set (paired with the bundled subchart's own
-// generated auth.password so both sides agree on the same value); for CNPG/
-// External modes the full connection is set and the bundled subchart stays
-// disabled.
-//
-// Only Embedded postgres and Default placement are wired up for M1; CNPG and
-// External postgres, and Dedicated placement, are added in M2 (see the repo
-// plan).
-func HelmValues(t *benchv1alpha1.AuthentikTopology, authentikSecretName string, pgConn *PostgresConnection) (*apiextensionsv1.JSON, error) {
+// secretKey is AUTHENTIK_SECRET_KEY's plaintext value (generated and cached
+// by the caller, see internal/controller's ensureRandomSecret) - the chart
+// does not generate one itself, and authentik refuses to start without it.
+// pgConn carries the resolved Postgres connection: for Embedded mode only
+// Password is set (paired with the bundled subchart's own generated
+// auth.password so both sides agree on the same value); for CNPG/External
+// modes the full connection is set and the bundled subchart stays disabled.
+func HelmValues(t *benchv1alpha1.AuthentikTopology, secretKey string, pgConn *PostgresConnection) (*apiextensionsv1.JSON, error) {
 	embedded := t.Spec.Postgres.Mode == benchv1alpha1.PostgresEmbedded
 	values := AuthentikTopologyHelmValues{
 		Server: map[string]any{
@@ -81,19 +76,37 @@ func HelmValues(t *benchv1alpha1.AuthentikTopology, authentikSecretName string, 
 		Worker: map[string]any{
 			"replicas": t.Spec.Worker.Replicas,
 		},
+		// secret_key as a literal value, not authentik.existingSecret: the
+		// chart only renders its authentik.env-derived config Secret (which
+		// is where postgresql.*/log_level/error_reporting all actually get
+		// baked into AUTHENTIK_* env vars) when existingSecret.secretName is
+		// unset - existingSecret means "you own that whole secret yourself,"
+		// not "just override the key" (verified against a live install of
+		// this exact bug: postgresql.host silently never made it to the pod).
 		Authentik: map[string]any{
-			"existingSecret": map[string]any{"secretName": authentikSecretName},
+			"secret_key": secretKey,
 		},
 		Postgres: map[string]any{
 			"enabled": embedded,
 		},
 	}
 
+	values.Global = map[string]any{
+		// global.affinity.podAntiAffinity is the chart's *preset* mechanism
+		// (_helpers.tpl's "authentik.affinity"). server.affinity/
+		// worker.affinity are a different, raw-override knob: if set to
+		// anything non-empty at all, the chart uses that value verbatim as
+		// the Pod's real corev1.Affinity - a string like "hard" there fails
+		// to unmarshal. The preset only has one, chart-wide value, which is
+		// fine here since Dedicated/Default both apply symmetrically to
+		// server and worker.
+		"affinity": map[string]any{"podAntiAffinity": AffinityPreset(t.Spec.Placement)},
+	}
 	if img := t.Spec.Authentik.Image; img != "" {
-		values.Global = map[string]any{"image": map[string]any{
+		values.Global["image"] = map[string]any{
 			"repository": img,
 			"tag":        t.Spec.Authentik.Tag,
-		}}
+		}
 	}
 	if t.Spec.Authentik.LogLevel != "" {
 		values.Authentik["log_level"] = t.Spec.Authentik.LogLevel
@@ -111,7 +124,6 @@ func HelmValues(t *benchv1alpha1.AuthentikTopology, authentikSecretName string, 
 		if tol := Tolerations(t.Spec.Placement); len(tol) > 0 {
 			w["tolerations"] = tol
 		}
-		w["affinity"] = map[string]any{"podAntiAffinity": AffinityPreset(t.Spec.Placement)}
 	}
 	applyPlacement(values.Server)
 	applyPlacement(values.Worker)
