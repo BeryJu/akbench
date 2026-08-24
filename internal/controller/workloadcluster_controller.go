@@ -86,32 +86,25 @@ func (r *WorkloadClusterReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		}
 	}
 
+	// applyCreateOnly, not applyOwned: CAPI's own webhooks/defaulting mutate
+	// these objects' specs after creation (rollout strategy defaults, etc.)
+	// in ways this operator's freshly-rendered object never has, so a
+	// spec-equality check against them never matches - see applyCreateOnly's
+	// doc comment for what that caused when this used applyOwned instead.
 	for _, obj := range []client.Object{
 		render.LXCCluster(&wc),
 		render.ControlPlaneLXCMachineTemplate(&wc),
 		render.WorkerLXCMachineTemplate(&wc),
 		render.WorkerKubeadmConfigTemplate(&wc),
-		render.KubeadmControlPlane(&wc),
 	} {
-		if err := applyOwned(ctx, r.Client, r.Scheme, &wc, obj); err != nil {
+		if err := applyCreateOnly(ctx, r.Client, r.Scheme, &wc, obj); err != nil {
 			return ctrl.Result{}, fmt.Errorf("apply %s: %w", obj.GetObjectKind().GroupVersionKind().Kind, err)
 		}
 	}
 
-	// The Cluster itself is applied last: CAPI's core controller starts
-	// reconciling as soon as it exists, and it expects the
-	// control-plane/infrastructure objects it references to already be
-	// present.
 	cluster := render.Cluster(&wc)
-	if err := applyOwned(ctx, r.Client, r.Scheme, &wc, cluster); err != nil {
+	if err := applyCreateOnly(ctx, r.Client, r.Scheme, &wc, cluster); err != nil {
 		return ctrl.Result{}, fmt.Errorf("apply Cluster: %w", err)
-	}
-
-	// MachineDeployment is applied only once the Cluster exists - CAPI's own
-	// webhook/validation rejects a MachineDeployment naming a Cluster that
-	// isn't there yet.
-	if err := applyOwned(ctx, r.Client, r.Scheme, &wc, render.MachineDeployment(&wc)); err != nil {
-		return ctrl.Result{}, fmt.Errorf("apply MachineDeployment: %w", err)
 	}
 
 	var existing clusterv1.Cluster
@@ -122,6 +115,32 @@ func (r *WorkloadClusterReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		setCondition(&wc.Status.Conditions, wc.Generation, benchv1alpha1.ConditionReady, metav1.ConditionFalse,
 			"Reconciling", "waiting for Cluster to be created")
 		return ctrl.Result{}, r.Status().Update(ctx, &wc)
+	}
+
+	// KubeadmControlPlane/MachineDeployment must not be created until the
+	// Cluster's controlPlaneEndpoint is populated (copied up from
+	// LXCCluster.status once Incus provisions the load balancer): the
+	// kubeadm bootstrap provider bakes controlPlaneEndpoint into the very
+	// first control-plane machine's ClusterConfiguration, which is also what
+	// tells kubeadm to add it as an apiserver certificate SAN. Created
+	// before that, the machine boots with a cert that's only valid for its
+	// own IP, and every client going through the load balancer's IP/DNS -
+	// including this operator's own multicluster tracker - fails TLS
+	// verification permanently for that machine's lifetime.
+	if existing.Spec.ControlPlaneEndpoint.Host == "" {
+		setCondition(&wc.Status.Conditions, wc.Generation, benchv1alpha1.ConditionReady, metav1.ConditionFalse,
+			"Reconciling", "waiting for the load balancer's controlPlaneEndpoint before creating the control plane")
+		return ctrl.Result{RequeueAfter: 2 * time.Second}, r.Status().Update(ctx, &wc)
+	}
+
+	if err := applyCreateOnly(ctx, r.Client, r.Scheme, &wc, render.KubeadmControlPlane(&wc)); err != nil {
+		return ctrl.Result{}, fmt.Errorf("apply KubeadmControlPlane: %w", err)
+	}
+	// MachineDeployment is applied only once the Cluster exists - CAPI's own
+	// webhook/validation rejects a MachineDeployment naming a Cluster that
+	// isn't there yet.
+	if err := applyCreateOnly(ctx, r.Client, r.Scheme, &wc, render.MachineDeployment(&wc)); err != nil {
+		return ctrl.Result{}, fmt.Errorf("apply MachineDeployment: %w", err)
 	}
 
 	wc.Status.Phase = existing.Status.Phase

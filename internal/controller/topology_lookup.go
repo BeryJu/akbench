@@ -19,12 +19,15 @@ package controller
 import (
 	"context"
 	"errors"
+	"fmt"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
+	"github.com/goauthentik/authentik-bench/internal/multicluster"
 )
 
 // errTopologyNotReady is returned by resolveReadyTopology when the topology
@@ -55,4 +58,25 @@ func resolveReadyTopology(ctx context.Context, c client.Client, namespace, name 
 		return topo, targetName, "", 0, err
 	}
 	return topo, targetName, host, port, nil
+}
+
+// resolveRunnerClient returns the client TestCaseReconciler/TestRunReconciler
+// should use for the k6 workload itself: runnerClusterRef if set, else the
+// topology's own clusterRef, else local. The bool result is true when this
+// is a different (remote) cluster than local - callers should skip
+// ownerReferences (meaningless across clusters) and rely on periodic
+// requeues rather than a local-only Owns() watch.
+func resolveRunnerClient(ctx context.Context, tracker *multicluster.Tracker, local client.Client, namespace string, runnerClusterRef *corev1.LocalObjectReference, topoClusterRef corev1.LocalObjectReference) (client.Client, bool, error) {
+	name := topoClusterRef.Name
+	if runnerClusterRef != nil && runnerClusterRef.Name != "" {
+		name = runnerClusterRef.Name
+	}
+	if name == "" {
+		return local, false, nil
+	}
+	if tracker == nil {
+		return nil, true, fmt.Errorf("multicluster tracker not configured")
+	}
+	rc, err := tracker.GetClient(ctx, client.ObjectKey{Namespace: namespace, Name: name})
+	return rc, true, err
 }

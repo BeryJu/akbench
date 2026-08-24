@@ -20,9 +20,13 @@ import (
 	"net/http"
 	"testing"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+
+	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
 )
 
 // Without Cluster API installed the picker still needs one entry, or the UI
@@ -59,9 +63,9 @@ func TestGetUnknownClusterWithoutCAPI(t *testing.T) {
 	requireStatus(t, do(t, s, http.MethodGet, "/api/v1/clusters/workload-1", nil), http.StatusNotFound)
 }
 
-// Provisioning clusters is the multi-cluster milestone's job; until then the
-// endpoint has to say so rather than half-work.
-func TestRegisterClusterIsNotImplemented(t *testing.T) {
+// Without Cluster API installed, registering/deprovisioning has to say so
+// rather than half-work.
+func TestRegisterClusterWithoutCAPI(t *testing.T) {
 	s, _ := newServer(t, Config{})
 	requireStatus(t, do(t, s, http.MethodPost, "/api/v1/clusters", map[string]any{"name": "workload-1"}),
 		http.StatusNotImplemented)
@@ -79,7 +83,7 @@ func TestListClustersWithCAPI(t *testing.T) {
 	if err := unstructured.SetNestedField(workload.Object, "Provisioned", "status", "phase"); err != nil {
 		t.Fatalf("build cluster: %v", err)
 	}
-	if err := unstructured.SetNestedField(workload.Object, true, "status", "controlPlaneReady"); err != nil {
+	if err := unstructured.SetNestedField(workload.Object, true, "status", "initialization", "controlPlaneInitialized"); err != nil {
 		t.Fatalf("build cluster: %v", err)
 	}
 
@@ -100,6 +104,40 @@ func TestListClustersWithCAPI(t *testing.T) {
 	got := body.Items[1]
 	if got.Name != "workload-1" || got.Phase != "Provisioned" || !got.ControlPlaneReady || got.Management {
 		t.Fatalf("workload cluster mapped as %+v", got)
+	}
+}
+
+// With Cluster API installed, registering a cluster creates a WorkloadCluster
+// CR the operator provisions from, and deleting it removes that CR again -
+// the actual CAPI/Incus teardown is WorkloadClusterReconciler's job, not the
+// API's.
+func TestRegisterAndDeleteClusterWithCAPI(t *testing.T) {
+	s, k8s := newServer(t, Config{CAPIAvailable: true})
+
+	body := map[string]any{
+		"metadata": map[string]any{"name": "workload-1"},
+		"spec": map[string]any{
+			"kubernetesVersion": "v1.31.0",
+			"lxcSecretRef":      map[string]any{"name": "lxc-secret"},
+		},
+	}
+	rec := do(t, s, http.MethodPost, "/api/v1/clusters", body)
+	requireStatus(t, rec, http.StatusCreated)
+
+	var wc benchv1alpha1.WorkloadCluster
+	if err := k8s.Get(t.Context(), client.ObjectKey{Name: "workload-1", Namespace: testNamespace}, &wc); err != nil {
+		t.Fatalf("expected WorkloadCluster to be created: %v", err)
+	}
+	if wc.Spec.KubernetesVersion != "v1.31.0" {
+		t.Fatalf("got kubernetesVersion %q, want v1.31.0", wc.Spec.KubernetesVersion)
+	}
+
+	requireStatus(t, do(t, s, http.MethodPost, "/api/v1/clusters", map[string]any{"metadata": map[string]any{"name": ManagementClusterName}}),
+		http.StatusBadRequest)
+
+	requireStatus(t, do(t, s, http.MethodDelete, "/api/v1/clusters/workload-1", nil), http.StatusNoContent)
+	if err := k8s.Get(t.Context(), client.ObjectKey{Name: "workload-1", Namespace: testNamespace}, &wc); !apierrors.IsNotFound(err) {
+		t.Fatalf("expected WorkloadCluster to be deleted, got err=%v", err)
 	}
 }
 

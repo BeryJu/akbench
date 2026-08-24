@@ -23,6 +23,7 @@ import (
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -90,17 +91,37 @@ var _ = Describe("WorkloadCluster Controller", func() {
 			})
 			Expect(err).NotTo(HaveOccurred())
 
-			By("rendering the CAPI Cluster and KubeadmControlPlane it owns")
+			By("rendering the CAPI Cluster, but not yet the control plane")
 			var cluster clusterv1.Cluster
 			Expect(k8sClient.Get(ctx, typeNamespacedName, &cluster)).To(Succeed())
 			Expect(cluster.Spec.InfrastructureRef.Kind).To(Equal("LXCCluster"))
 			Expect(cluster.Spec.ControlPlaneRef.Name).To(Equal(resourceName + "-control-plane"))
 
+			// No real Incus/CAPI infrastructure controller runs in envtest to
+			// provision a load balancer and copy its address up into
+			// Cluster.spec.controlPlaneEndpoint, so the KubeadmControlPlane
+			// must not exist yet - creating it before controlPlaneEndpoint is
+			// set is exactly the bug that produced a control-plane apiserver
+			// certificate missing the load balancer's IP as a SAN.
 			var kcp controlplanev1.KubeadmControlPlane
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: resourceName + "-control-plane", Namespace: resourceNamespace}, &kcp)).
+				To(MatchError(errors.IsNotFound, "IsNotFound"))
+			Expect(k8sClient.Get(ctx, typeNamespacedName, workloadcluster)).To(Succeed())
+			ready := meta.FindStatusCondition(workloadcluster.Status.Conditions, benchv1alpha1.ConditionReady)
+			Expect(ready).NotTo(BeNil())
+			Expect(ready.Message).To(ContainSubstring("controlPlaneEndpoint"))
+
+			By("simulating the infrastructure provider populating controlPlaneEndpoint")
+			cluster.Spec.ControlPlaneEndpoint = clusterv1.APIEndpoint{Host: "10.0.0.1", Port: 6443}
+			Expect(k8sClient.Update(ctx, &cluster)).To(Succeed())
+
+			By("reconciling again and confirming the control plane now renders")
+			_, err = controllerReconciler.Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
+			Expect(err).NotTo(HaveOccurred())
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: resourceName + "-control-plane", Namespace: resourceNamespace}, &kcp)).To(Succeed())
 			Expect(*kcp.Spec.Replicas).To(Equal(int32(1)))
 
-			By("reconciling again and confirming the status reflects the (not-yet-ready) Cluster")
+			By("reconciling once more and confirming the status reflects the (not-yet-ready) Cluster")
 			_, err = controllerReconciler.Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(k8sClient.Get(ctx, typeNamespacedName, workloadcluster)).To(Succeed())

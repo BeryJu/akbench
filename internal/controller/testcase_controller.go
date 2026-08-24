@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -35,6 +36,7 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
+	"github.com/goauthentik/authentik-bench/internal/multicluster"
 	"github.com/goauthentik/authentik-bench/internal/render"
 	k6scripts "github.com/goauthentik/authentik-bench/k6/scripts"
 )
@@ -56,11 +58,14 @@ func envOrDefault(key, def string) string {
 
 // TestCaseReconciler reconciles a TestCase object.
 //
-// M1 scope: runnerClusterRef is rejected (multi-cluster lands in M4); the
-// TestCase always runs on the same cluster as its topology.
+// The k6 workload runs on spec.runnerClusterRef if set, else the topology's
+// own spec.clusterRef, else the management cluster - resolved fresh every
+// reconcile via Tracker, since a workload cluster's reachability can change
+// over time.
 type TestCaseReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
+	Scheme  *runtime.Scheme
+	Tracker *multicluster.Tracker
 }
 
 // +kubebuilder:rbac:groups=bench.goauthentik.io,resources=testcases,verbs=get;list;watch;create;update;patch;delete
@@ -88,13 +93,7 @@ func (r *TestCaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		}
 	}
 
-	if tc.Spec.RunnerClusterRef != nil && tc.Spec.RunnerClusterRef.Name != "" {
-		setCondition(&tc.Status.Conditions, tc.Generation, benchv1alpha1.ConditionReady, metav1.ConditionFalse,
-			benchv1alpha1.ReasonNotImplemented, "runnerClusterRef is not implemented until M4; leave it unset to run on the topology's own cluster")
-		return ctrl.Result{}, r.Status().Update(ctx, &tc)
-	}
-
-	_, targetName, host, port, err := resolveReadyTopology(ctx, r.Client, tc.Namespace, tc.Spec.TopologyRef.Name)
+	topo, targetName, host, port, err := resolveReadyTopology(ctx, r.Client, tc.Namespace, tc.Spec.TopologyRef.Name)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			setCondition(&tc.Status.Conditions, tc.Generation, benchv1alpha1.ConditionTopologyReady, metav1.ConditionFalse,
@@ -115,7 +114,22 @@ func (r *TestCaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	setCondition(&tc.Status.Conditions, tc.Generation, benchv1alpha1.ConditionTopologyReady, metav1.ConditionTrue,
 		benchv1alpha1.ReasonReady, "topology is Ready")
 
-	scriptCM, err := r.ensureScriptConfigMap(ctx, &tc)
+	rc, remote, err := resolveRunnerClient(ctx, r.Tracker, r.Client, tc.Namespace, tc.Spec.RunnerClusterRef, topo.Spec.ClusterRef)
+	if err != nil {
+		setCondition(&tc.Status.Conditions, tc.Generation, benchv1alpha1.ConditionReady, metav1.ConditionFalse,
+			benchv1alpha1.ReasonDependencyNotReady, fmt.Sprintf("waiting for runner cluster to be reachable: %v", err))
+		if err := r.Status().Update(ctx, &tc); err != nil {
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+	}
+	if remote {
+		if err := ensureNamespace(ctx, rc, tc.Namespace); err != nil {
+			return ctrl.Result{}, fmt.Errorf("ensure runner namespace: %w", err)
+		}
+	}
+
+	scriptCM, err := r.ensureScriptConfigMap(ctx, rc, remote, &tc)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("ensure script configmap: %w", err)
 	}
@@ -134,14 +148,14 @@ func (r *TestCaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 
 	switch tc.Spec.Profile {
 	case benchv1alpha1.ProfileBurn:
-		if err := r.reconcileBurn(ctx, &tc, params); err != nil {
+		if err := r.reconcileBurn(ctx, rc, remote, &tc, params); err != nil {
 			return ctrl.Result{}, fmt.Errorf("reconcile burn deployment: %w", err)
 		}
 	case benchv1alpha1.ProfileQuick:
 		// Execution is a TestRun's job - nothing to reconcile continuously
 		// here besides removing a stale burn Deployment if the profile was
 		// switched from Burn to Quick.
-		if err := r.deleteBurnDeployment(ctx, &tc); err != nil {
+		if err := r.deleteBurnDeployment(ctx, rc, &tc); err != nil {
 			return ctrl.Result{}, fmt.Errorf("remove stale burn deployment: %w", err)
 		}
 		tc.Status.BurnWorkloadRef = nil
@@ -165,8 +179,27 @@ func (r *TestCaseReconciler) reconcileDelete(ctx context.Context, tc *benchv1alp
 	if !controllerutil.ContainsFinalizer(tc, testCaseFinalizer) {
 		return ctrl.Result{}, nil
 	}
-	if err := r.deleteBurnDeployment(ctx, tc); err != nil {
-		return ctrl.Result{}, err
+
+	// Resolve the runner cluster the same way Reconcile does, so a Burn
+	// Deployment on a remote cluster gets cleaned up there too. If the
+	// topology or its cluster is already gone, skip remote cleanup rather
+	// than block finalizer removal forever on a cluster that may never come
+	// back.
+	rc := client.Client(r.Client)
+	var topo benchv1alpha1.AuthentikTopology
+	if err := r.Get(ctx, types.NamespacedName{Name: tc.Spec.TopologyRef.Name, Namespace: tc.Namespace}, &topo); err == nil {
+		resolved, _, err := resolveRunnerClient(ctx, r.Tracker, r.Client, tc.Namespace, tc.Spec.RunnerClusterRef, topo.Spec.ClusterRef)
+		if err != nil {
+			logf.FromContext(ctx).Info("runner cluster unreachable during delete, skipping remote cleanup", "error", err.Error())
+			rc = nil
+		} else {
+			rc = resolved
+		}
+	}
+	if rc != nil {
+		if err := r.deleteBurnDeployment(ctx, rc, tc); err != nil {
+			return ctrl.Result{}, err
+		}
 	}
 	controllerutil.RemoveFinalizer(tc, testCaseFinalizer)
 	return ctrl.Result{}, r.Update(ctx, tc)
@@ -176,32 +209,39 @@ func (r *TestCaseReconciler) burnDeploymentName(tc *benchv1alpha1.TestCase) stri
 	return "k6-" + tc.Name
 }
 
-func (r *TestCaseReconciler) deleteBurnDeployment(ctx context.Context, tc *benchv1alpha1.TestCase) error {
+func (r *TestCaseReconciler) deleteBurnDeployment(ctx context.Context, rc client.Client, tc *benchv1alpha1.TestCase) error {
 	dep := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: r.burnDeploymentName(tc), Namespace: tc.Namespace}}
-	if err := r.Delete(ctx, dep); err != nil && !apierrors.IsNotFound(err) {
+	if err := rc.Delete(ctx, dep); err != nil && !apierrors.IsNotFound(err) {
 		return err
 	}
 	return nil
 }
 
-func (r *TestCaseReconciler) reconcileBurn(ctx context.Context, tc *benchv1alpha1.TestCase, params render.K6WorkloadParams) error {
+// reconcileBurn applies the k6 burn Deployment via rc. An ownerReference is
+// only set when the Deployment lives on the local cluster (remote==false):
+// a cross-cluster ownerReference would carry a UID the remote cluster's
+// garbage collector can never recognize, so remote cleanup instead goes
+// through the finalizer-driven deleteBurnDeployment above.
+func (r *TestCaseReconciler) reconcileBurn(ctx context.Context, rc client.Client, remote bool, tc *benchv1alpha1.TestCase, params render.K6WorkloadParams) error {
 	name := r.burnDeploymentName(tc)
 	dep := render.BurnDeployment(name, tc.Namespace, params)
-	if err := controllerutil.SetControllerReference(tc, dep, r.Scheme); err != nil {
-		return err
+	if !remote {
+		if err := controllerutil.SetControllerReference(tc, dep, r.Scheme); err != nil {
+			return err
+		}
 	}
 	existing := &appsv1.Deployment{}
-	err := r.Get(ctx, types.NamespacedName{Name: name, Namespace: tc.Namespace}, existing)
+	err := rc.Get(ctx, types.NamespacedName{Name: name, Namespace: tc.Namespace}, existing)
 	switch {
 	case apierrors.IsNotFound(err):
-		if err := r.Create(ctx, dep); err != nil {
+		if err := rc.Create(ctx, dep); err != nil {
 			return err
 		}
 	case err != nil:
 		return err
 	default:
 		existing.Spec = dep.Spec
-		if err := r.Update(ctx, existing); err != nil {
+		if err := rc.Update(ctx, existing); err != nil {
 			return err
 		}
 	}
@@ -210,9 +250,9 @@ func (r *TestCaseReconciler) reconcileBurn(ctx context.Context, tc *benchv1alpha
 }
 
 // ensureScriptConfigMap mirrors the built-in k6 script (or a user-supplied
-// scriptConfigMapRef's content) into the ConfigMap the k6 pod mounts,
+// scriptConfigMapRef's content) into the ConfigMap the k6 pod mounts on rc,
 // returning its name.
-func (r *TestCaseReconciler) ensureScriptConfigMap(ctx context.Context, tc *benchv1alpha1.TestCase) (string, error) {
+func (r *TestCaseReconciler) ensureScriptConfigMap(ctx context.Context, rc client.Client, remote bool, tc *benchv1alpha1.TestCase) (string, error) {
 	if tc.Spec.ScriptConfigMapRef != nil {
 		// BYO script: used directly, nothing to mirror.
 		return tc.Spec.ScriptConfigMapRef.Name, nil
@@ -230,21 +270,23 @@ func (r *TestCaseReconciler) ensureScriptConfigMap(ctx context.Context, tc *benc
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: tc.Namespace},
 		Data:       map[string]string{script: content},
 	}
-	if err := controllerutil.SetControllerReference(tc, cm, r.Scheme); err != nil {
-		return "", err
+	if !remote {
+		if err := controllerutil.SetControllerReference(tc, cm, r.Scheme); err != nil {
+			return "", err
+		}
 	}
 	existing := &corev1.ConfigMap{}
-	err := r.Get(ctx, types.NamespacedName{Name: name, Namespace: tc.Namespace}, existing)
+	err := rc.Get(ctx, types.NamespacedName{Name: name, Namespace: tc.Namespace}, existing)
 	switch {
 	case apierrors.IsNotFound(err):
-		if err := r.Create(ctx, cm); err != nil {
+		if err := rc.Create(ctx, cm); err != nil {
 			return "", err
 		}
 	case err != nil:
 		return "", err
 	default:
 		existing.Data = cm.Data
-		if err := r.Update(ctx, existing); err != nil {
+		if err := rc.Update(ctx, existing); err != nil {
 			return "", err
 		}
 	}

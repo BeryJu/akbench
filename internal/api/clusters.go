@@ -97,10 +97,16 @@ func (s *Server) getCluster(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, r, http.StatusOK, capiCluster(obj))
 }
 
+// capiCluster reads a cluster.x-k8s.io/v1beta2 Cluster's readiness fields:
+// status.initialization.{controlPlaneInitialized,infrastructureProvisioned}
+// are the contract fields CAPI itself defines and never revises after first
+// becoming true, unlike the higher-level Available/Ready conditions which
+// can flap during normal operation (a health-check probe blip, a control
+// plane node rolling) - not useful for "is this safe to deploy onto yet".
 func capiCluster(obj *unstructured.Unstructured) Cluster {
 	phase, _, _ := unstructured.NestedString(obj.Object, "status", "phase")
-	controlPlaneReady, _, _ := unstructured.NestedBool(obj.Object, "status", "controlPlaneReady")
-	infraReady, _, _ := unstructured.NestedBool(obj.Object, "status", "infrastructureReady")
+	controlPlaneReady, _, _ := unstructured.NestedBool(obj.Object, "status", "initialization", "controlPlaneInitialized")
+	infraReady, _, _ := unstructured.NestedBool(obj.Object, "status", "initialization", "infrastructureProvisioned")
 	return Cluster{
 		Name:                obj.GetName(),
 		Phase:               phase,
@@ -109,16 +115,64 @@ func capiCluster(obj *unstructured.Unstructured) Cluster {
 	}
 }
 
-// registerCluster and deleteCluster are the multi-cluster milestone's job:
-// clusters are provisioned by a WorkloadCluster CR the operator renders into
-// Cluster API objects, not by uploading a kubeconfig here. They answer 501 so
-// the UI can grey out the button against a reason rather than guess.
+// workloadClusterKind is the WorkloadCluster CRD registerCluster/deleteCluster
+// provision through - the same generic resourceKind resources.go already
+// serves at /api/v1/workloadclusters, reused here so /api/v1/clusters can
+// offer a single "register/deprovision" action without duplicating the
+// create/delete logic.
+var workloadClusterKind = resourceKinds["workloadclusters"]
+
+// registerCluster provisions a new workload cluster: the request body is a
+// WorkloadCluster's metadata+spec (kubernetesVersion, lxcSecretRef,
+// controlPlane/workers sizing), rendered by WorkloadClusterReconciler into
+// real Cluster API objects on the Incus infrastructure provider.
 func (s *Server) registerCluster(w http.ResponseWriter, r *http.Request) {
-	writeError(w, r, http.StatusNotImplemented,
-		"cluster provisioning is not implemented yet; topologies currently deploy onto the management cluster")
+	if !s.cfg.CAPIAvailable {
+		writeError(w, r, http.StatusNotImplemented,
+			"Cluster API is not installed on this management cluster")
+		return
+	}
+	obj, err := s.decodeInto(w, r, workloadClusterKind)
+	if err != nil {
+		writeError(w, r, http.StatusBadRequest, err.Error())
+		return
+	}
+	if obj.GetName() == "" {
+		writeError(w, r, http.StatusBadRequest, "metadata.name is required")
+		return
+	}
+	if obj.GetName() == ManagementClusterName {
+		writeError(w, r, http.StatusBadRequest, "name is reserved for the management cluster")
+		return
+	}
+	if err := s.client.Create(r.Context(), obj); err != nil {
+		writeAPIError(w, r, err)
+		return
+	}
+	writeJSON(w, r, http.StatusCreated, obj)
 }
 
+// deleteCluster deprovisions a workload cluster: deleting the WorkloadCluster
+// object lets WorkloadClusterReconciler tear down its Cluster API Cluster
+// (and, through it, every machine CAPI/Incus created for it) before removing
+// its own finalizer.
 func (s *Server) deleteCluster(w http.ResponseWriter, r *http.Request) {
-	writeError(w, r, http.StatusNotImplemented,
-		"cluster deprovisioning is not implemented yet")
+	name := chi.URLParam(r, "name")
+	if name == ManagementClusterName {
+		writeError(w, r, http.StatusBadRequest, "cannot deprovision the management cluster")
+		return
+	}
+	if !s.cfg.CAPIAvailable {
+		writeError(w, r, http.StatusNotImplemented,
+			"Cluster API is not installed on this management cluster")
+		return
+	}
+	obj := workloadClusterKind.newObject()
+	obj.SetName(name)
+	obj.SetNamespace(s.cfg.Namespace)
+	if err := s.client.Delete(r.Context(), obj); err != nil {
+		writeAPIError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }

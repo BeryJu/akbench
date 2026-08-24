@@ -66,6 +66,50 @@ func applyOwned(ctx context.Context, c client.Client, scheme *runtime.Scheme, ow
 	return nil
 }
 
+// applyCreateOnly creates obj (setting owner as its controller owner) and
+// does nothing if it already exists - never updates it. Cluster API's own
+// webhooks/defaulting mutate a Cluster/KubeadmControlPlane/MachineDeployment/
+// LXCCluster's spec after creation (rollout strategy defaults, etc.) in ways
+// this operator's freshly-rendered "desired" object never has, so comparing
+// specs the way applyOwned does for our own HelmRelease/HelmRepository kinds
+// always finds a difference - verified live: that made
+// WorkloadClusterReconciler update every reconcile, each Update re-triggering
+// its own Owns() watch, in an infinite loop racing CAPI's own controllers for
+// the same objects. Provisioning is create-once for now; day-2 resize/
+// upgrade of an existing WorkloadCluster is not yet supported.
+func applyCreateOnly(ctx context.Context, c client.Client, scheme *runtime.Scheme, owner client.Object, obj client.Object) error {
+	if err := controllerutil.SetControllerReference(owner, obj, scheme); err != nil {
+		return err
+	}
+	if err := c.Create(ctx, obj); err != nil && !apierrors.IsAlreadyExists(err) {
+		return err
+	}
+	return nil
+}
+
+// applyUnowned is applyOwned without the ownerReference: for objects applied
+// to a client that may be a different cluster than the owner lives on,
+// where an ownerReference would carry a UID the remote cluster's garbage
+// collector can never recognize. Callers are responsible for their own
+// cleanup (typically: delete the namespace this object lives in).
+func applyUnowned(ctx context.Context, c client.Client, obj client.Object) error {
+	if err := c.Create(ctx, obj); err != nil {
+		if !apierrors.IsAlreadyExists(err) {
+			return err
+		}
+		existing := obj.DeepCopyObject().(client.Object)
+		if err := c.Get(ctx, types.NamespacedName{Name: obj.GetName(), Namespace: obj.GetNamespace()}, existing); err != nil {
+			return err
+		}
+		if specEqual(existing, obj) {
+			return nil
+		}
+		obj.SetResourceVersion(existing.GetResourceVersion())
+		return c.Update(ctx, obj)
+	}
+	return nil
+}
+
 // specEqual compares the parts of existing/desired that applyOwned actually
 // renders, for every kind any controller in this package owns. Unknown types
 // return false (always update) rather than risk silently dropping a real

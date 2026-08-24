@@ -185,8 +185,8 @@ var _ = Describe("AuthentikTopology Controller", func() {
 		})
 	})
 
-	Context("clusterRef set (deferred to M4)", func() {
-		It("reports NotImplemented instead of touching a remote cluster", func() {
+	Context("clusterRef set without a multicluster tracker wired up", func() {
+		It("reports DependencyNotReady and requeues instead of touching a remote cluster", func() {
 			topo := &benchv1alpha1.AuthentikTopology{
 				ObjectMeta: metav1.ObjectMeta{Name: "topology-remote", Namespace: "default"},
 				Spec: benchv1alpha1.AuthentikTopologySpec{
@@ -200,16 +200,20 @@ var _ = Describe("AuthentikTopology Controller", func() {
 			Expect(k8sClient.Create(context.Background(), topo)).To(Succeed())
 			defer forceDelete(context.Background(), topo)
 
+			// No Tracker configured (this suite only unit-tests reconcile
+			// logic directly, without a running manager/ClusterCache) -
+			// resolveClient must report this as "not ready yet", not panic.
 			r := &AuthentikTopologyReconciler{Client: k8sClient, Scheme: k8sClient.Scheme()}
 			key := types.NamespacedName{Name: topo.Name, Namespace: topo.Namespace}
-			_, err := r.Reconcile(context.Background(), reconcile.Request{NamespacedName: key})
+			result, err := r.Reconcile(context.Background(), reconcile.Request{NamespacedName: key})
 			Expect(err).NotTo(HaveOccurred())
+			Expect(result.RequeueAfter).To(BeNumerically(">", 0))
 
 			Expect(k8sClient.Get(context.Background(), key, topo)).To(Succeed())
 			ready := meta.FindStatusCondition(topo.Status.Conditions, benchv1alpha1.ConditionReady)
 			Expect(ready).NotTo(BeNil())
 			Expect(ready.Status).To(Equal(metav1.ConditionFalse))
-			Expect(ready.Reason).To(Equal(benchv1alpha1.ReasonNotImplemented))
+			Expect(ready.Reason).To(Equal(benchv1alpha1.ReasonDependencyNotReady))
 		})
 	})
 })

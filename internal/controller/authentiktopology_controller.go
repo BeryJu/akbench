@@ -36,23 +36,56 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
+	"github.com/goauthentik/authentik-bench/internal/multicluster"
 	"github.com/goauthentik/authentik-bench/internal/render"
 )
 
-// authentikTopologyFinalizer guards the remote (in later milestones,
-// cross-cluster) objects an AuthentikTopology owns that Kubernetes garbage
-// collection cannot reach on its own.
+// authentikTopologyFinalizer guards the remote objects (namespace, CNPG
+// Cluster, generated Secrets - everything spec.clusterRef puts on a
+// different cluster than the AuthentikTopology object itself) that
+// Kubernetes garbage collection cannot reach on its own.
 const authentikTopologyFinalizer = "bench.goauthentik.io/remote-cleanup"
+
+// kubeconfigSecretName is the Secret name convention Cluster API itself
+// defines for a Cluster's admin kubeconfig - the same one
+// render.KubeconfigSecretName (internal/render/workloadcluster.go) produces,
+// duplicated here rather than imported to avoid a dependency from
+// render (WorkloadCluster) back onto AuthentikTopology's naming.
+func kubeconfigSecretName(clusterName string) string {
+	return clusterName + "-kubeconfig"
+}
 
 // AuthentikTopologyReconciler reconciles an AuthentikTopology object.
 //
-// M1/M2 scope: operates only on the cluster the operator itself runs on -
-// spec.clusterRef is rejected with a NotImplemented condition until the
-// multicluster tracker lands in M4. All three Postgres modes (Embedded,
-// CNPG, External) and both placement modes are implemented.
+// spec.clusterRef (a cluster.x-k8s.io Cluster name in the same namespace)
+// deploys onto any cluster Tracker can reach - a Cluster API-managed
+// WorkloadCluster or a pre-existing one - via the "<cluster>-kubeconfig"
+// Secret convention CAPI defines. Empty deploys onto the management cluster
+// the operator itself runs on. The HelmRelease/HelmRepository Flux objects
+// always live on the management cluster regardless (Flux's own
+// spec.kubeConfig.secretRef is what points helm-controller at the remote
+// cluster) - only the namespace, postgres backend, and the Secrets this
+// controller generates move with clusterRef.
 type AuthentikTopologyReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
+	Scheme  *runtime.Scheme
+	Tracker *multicluster.Tracker
+}
+
+// resolveClient returns the client this reconcile should use for
+// everything except the HelmRelease/HelmRepository themselves: r.Client
+// when spec.clusterRef is empty, or a live client for the named Cluster via
+// Tracker otherwise. A non-nil error here always means "not ready yet,
+// requeue" (multicluster.ErrClusterNotConnected) rather than a permanent
+// failure.
+func (r *AuthentikTopologyReconciler) resolveClient(ctx context.Context, topo *benchv1alpha1.AuthentikTopology) (client.Client, error) {
+	if topo.Spec.ClusterRef.Name == "" {
+		return r.Client, nil
+	}
+	if r.Tracker == nil {
+		return nil, fmt.Errorf("multicluster tracker not configured")
+	}
+	return r.Tracker.GetClient(ctx, client.ObjectKey{Namespace: topo.Namespace, Name: topo.Spec.ClusterRef.Name})
 }
 
 // +kubebuilder:rbac:groups=bench.goauthentik.io,resources=authentiktopologies,verbs=get;list;watch;create;update;patch;delete
@@ -82,17 +115,21 @@ func (r *AuthentikTopologyReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		}
 	}
 
-	if topo.Spec.ClusterRef.Name != "" {
+	rc, err := r.resolveClient(ctx, &topo)
+	if err != nil {
 		setCondition(&topo.Status.Conditions, topo.Generation, benchv1alpha1.ConditionReady, metav1.ConditionFalse,
-			benchv1alpha1.ReasonNotImplemented, "multi-cluster clusterRef is not implemented until M4; leave it unset to deploy on the management cluster")
-		return ctrl.Result{}, r.Status().Update(ctx, &topo)
+			benchv1alpha1.ReasonDependencyNotReady, fmt.Sprintf("waiting for cluster %q to be reachable: %v", topo.Spec.ClusterRef.Name, err))
+		if err := r.Status().Update(ctx, &topo); err != nil {
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 	}
 
-	if err := r.ensureNamespace(ctx, topo.Spec.Namespace); err != nil {
+	if err := ensureNamespace(ctx, rc, topo.Spec.Namespace); err != nil {
 		return ctrl.Result{}, fmt.Errorf("ensure namespace: %w", err)
 	}
 
-	pgConn, pgReady, err := r.resolvePostgres(ctx, &topo)
+	pgConn, pgReady, err := r.resolvePostgres(ctx, rc, &topo)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("resolve postgres: %w", err)
 	}
@@ -118,7 +155,7 @@ func (r *AuthentikTopologyReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	// rendering its own authentik.env-derived config Secret entirely, which
 	// is also where postgresql.*/log_level/error_reporting get baked into
 	// AUTHENTIK_* env vars - existingSecret would silently drop all of those.
-	secretKey, err := ensureRandomSecret(ctx, r.Client,
+	secretKey, err := ensureRandomSecret(ctx, rc,
 		types.NamespacedName{Name: topo.Name + "-authentik-config", Namespace: topo.Spec.Namespace},
 		"AUTHENTIK_SECRET_KEY", 32)
 	if err != nil {
@@ -129,7 +166,11 @@ func (r *AuthentikTopologyReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("build helm values: %w", err)
 	}
-	hr := render.HelmRelease(&topo, "", values)
+	kubeConfigSecretName := ""
+	if topo.Spec.ClusterRef.Name != "" {
+		kubeConfigSecretName = kubeconfigSecretName(topo.Spec.ClusterRef.Name)
+	}
+	hr := render.HelmRelease(&topo, kubeConfigSecretName, values)
 	if err := applyOwned(ctx, r.Client, r.Scheme, &topo, hr); err != nil {
 		return ctrl.Result{}, fmt.Errorf("apply HelmRelease: %w", err)
 	}
@@ -172,6 +213,7 @@ func (r *AuthentikTopologyReconciler) Reconcile(ctx context.Context, req ctrl.Re
 }
 
 func (r *AuthentikTopologyReconciler) reconcileDelete(ctx context.Context, topo *benchv1alpha1.AuthentikTopology) (ctrl.Result, error) {
+	log := logf.FromContext(ctx)
 	if !controllerutil.ContainsFinalizer(topo, authentikTopologyFinalizer) {
 		return ctrl.Result{}, nil
 	}
@@ -202,14 +244,23 @@ func (r *AuthentikTopologyReconciler) reconcileDelete(ctx context.Context, topo 
 
 	// Everything else - the AUTHENTIK_SECRET_KEY/postgres-password Secrets
 	// ensureRandomSecret created, and (CNPG mode) the Cluster this controller
-	// owns - lives in spec.namespace, a *different* namespace an
-	// ownerReference can't reach, so deleting that namespace is what cleans
-	// those up. From M4 on, a remote topology's namespace needs the same
-	// explicit treatment via the multicluster tracker.
+	// applies - lives in spec.namespace, a *different* namespace an
+	// ownerReference can't reach (and, with clusterRef set, a different
+	// cluster entirely), so deleting that namespace on whichever cluster it's
+	// on is what cleans those up.
 	if topo.Spec.Namespace != "" {
-		ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: topo.Spec.Namespace}}
-		if err := r.Delete(ctx, ns); err != nil && !apierrors.IsNotFound(err) {
-			return ctrl.Result{}, fmt.Errorf("delete target namespace %q: %w", topo.Spec.Namespace, err)
+		rc, err := r.resolveClient(ctx, topo)
+		if err != nil {
+			// The remote cluster is unreachable - most likely its
+			// WorkloadCluster was already torn down, taking spec.namespace
+			// with it. Don't block finalizer removal forever on a cluster
+			// that may never come back.
+			log.Info("cluster unreachable during delete, skipping remote namespace cleanup", "clusterRef", topo.Spec.ClusterRef.Name, "error", err.Error())
+		} else {
+			ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: topo.Spec.Namespace}}
+			if err := rc.Delete(ctx, ns); err != nil && !apierrors.IsNotFound(err) {
+				return ctrl.Result{}, fmt.Errorf("delete target namespace %q: %w", topo.Spec.Namespace, err)
+			}
 		}
 	}
 	controllerutil.RemoveFinalizer(topo, authentikTopologyFinalizer)
@@ -222,23 +273,23 @@ func (r *AuthentikTopologyReconciler) reconcileDelete(ctx context.Context, topo 
 // whether the backend is ready for the authentik chart to be installed
 // against. A false ready with a nil error means "still reconciling, check
 // back later" (e.g. CNPG cluster not healthy yet), not a failure.
-func (r *AuthentikTopologyReconciler) resolvePostgres(ctx context.Context, topo *benchv1alpha1.AuthentikTopology) (*render.PostgresConnection, bool, error) {
+func (r *AuthentikTopologyReconciler) resolvePostgres(ctx context.Context, rc client.Client, topo *benchv1alpha1.AuthentikTopology) (*render.PostgresConnection, bool, error) {
 	switch topo.Spec.Postgres.Mode {
 	case benchv1alpha1.PostgresCNPG:
-		return r.resolveCNPGPostgres(ctx, topo)
+		return r.resolveCNPGPostgres(ctx, rc, topo)
 	case benchv1alpha1.PostgresExternal:
-		return r.resolveExternalPostgres(ctx, topo)
+		return r.resolveExternalPostgres(ctx, rc, topo)
 	default: // PostgresEmbedded
-		return r.resolveEmbeddedPostgres(ctx, topo)
+		return r.resolveEmbeddedPostgres(ctx, rc, topo)
 	}
 }
 
-func (r *AuthentikTopologyReconciler) resolveEmbeddedPostgres(ctx context.Context, topo *benchv1alpha1.AuthentikTopology) (*render.PostgresConnection, bool, error) {
+func (r *AuthentikTopologyReconciler) resolveEmbeddedPostgres(ctx context.Context, rc client.Client, topo *benchv1alpha1.AuthentikTopology) (*render.PostgresConnection, bool, error) {
 	// Pin the bundled postgresql subchart's own auth.password to a value we
 	// generate, so it matches what we also hand authentik as
 	// AUTHENTIK_POSTGRESQL__PASSWORD - the two are otherwise generated
 	// independently and would never agree.
-	pw, err := ensureRandomSecret(ctx, r.Client,
+	pw, err := ensureRandomSecret(ctx, rc,
 		types.NamespacedName{Name: topo.Name + "-authentik-postgres", Namespace: topo.Spec.Namespace},
 		"password", 24)
 	if err != nil {
@@ -249,9 +300,16 @@ func (r *AuthentikTopologyReconciler) resolveEmbeddedPostgres(ctx context.Contex
 	return &render.PostgresConnection{Password: pw}, true, nil
 }
 
-func (r *AuthentikTopologyReconciler) resolveCNPGPostgres(ctx context.Context, topo *benchv1alpha1.AuthentikTopology) (*render.PostgresConnection, bool, error) {
+// resolveCNPGPostgres applies the CNPG Cluster via rc (the management
+// cluster when clusterRef is empty, otherwise a remote client) rather than
+// applyOwned: a cross-cluster ownerReference is meaningless (the owning
+// AuthentikTopology's UID doesn't exist in the remote cluster's etcd for its
+// garbage collector to recognize), and cleanup already goes through
+// reconcileDelete's namespace sweep on whichever cluster this is, so no
+// finalizer-tracked per-object cleanup is needed either.
+func (r *AuthentikTopologyReconciler) resolveCNPGPostgres(ctx context.Context, rc client.Client, topo *benchv1alpha1.AuthentikTopology) (*render.PostgresConnection, bool, error) {
 	cluster := render.CNPGCluster(topo)
-	if err := applyOwned(ctx, r.Client, r.Scheme, topo, cluster); err != nil {
+	if err := applyUnowned(ctx, rc, cluster); err != nil {
 		return nil, false, fmt.Errorf("apply CNPG Cluster: %w", err)
 	}
 	topo.Status.CNPGClusterRef = &corev1.LocalObjectReference{Name: cluster.GetName()}
@@ -259,7 +317,7 @@ func (r *AuthentikTopologyReconciler) resolveCNPGPostgres(ctx context.Context, t
 	existing := &unstructured.Unstructured{}
 	existing.SetAPIVersion(cluster.GetAPIVersion())
 	existing.SetKind(cluster.GetKind())
-	if err := r.Get(ctx, types.NamespacedName{Name: cluster.GetName(), Namespace: cluster.GetNamespace()}, existing); err != nil {
+	if err := rc.Get(ctx, types.NamespacedName{Name: cluster.GetName(), Namespace: cluster.GetNamespace()}, existing); err != nil {
 		return nil, false, fmt.Errorf("get CNPG Cluster: %w", err)
 	}
 	if !render.CNPGReady(existing) {
@@ -270,7 +328,7 @@ func (r *AuthentikTopologyReconciler) resolveCNPGPostgres(ctx context.Context, t
 
 	secretName := render.CNPGAppSecretName(topo)
 	var sec corev1.Secret
-	if err := r.Get(ctx, types.NamespacedName{Name: secretName, Namespace: topo.Spec.Namespace}, &sec); err != nil {
+	if err := rc.Get(ctx, types.NamespacedName{Name: secretName, Namespace: topo.Spec.Namespace}, &sec); err != nil {
 		if apierrors.IsNotFound(err) {
 			setCondition(&topo.Status.Conditions, topo.Generation, benchv1alpha1.ConditionPostgresReady, metav1.ConditionFalse,
 				benchv1alpha1.ReasonReconciling, "waiting for CNPG's generated app secret")
@@ -283,13 +341,13 @@ func (r *AuthentikTopologyReconciler) resolveCNPGPostgres(ctx context.Context, t
 	return connectionFromSecret(sec, "host", "port", "dbname", "username", "password"), true, nil
 }
 
-func (r *AuthentikTopologyReconciler) resolveExternalPostgres(ctx context.Context, topo *benchv1alpha1.AuthentikTopology) (*render.PostgresConnection, bool, error) {
+func (r *AuthentikTopologyReconciler) resolveExternalPostgres(ctx context.Context, rc client.Client, topo *benchv1alpha1.AuthentikTopology) (*render.PostgresConnection, bool, error) {
 	ext := topo.Spec.Postgres.External
 	if ext == nil {
 		return nil, false, fmt.Errorf("postgres mode External requires spec.postgres.external")
 	}
 	var sec corev1.Secret
-	if err := r.Get(ctx, types.NamespacedName{Name: ext.SecretRef.Name, Namespace: topo.Spec.Namespace}, &sec); err != nil {
+	if err := rc.Get(ctx, types.NamespacedName{Name: ext.SecretRef.Name, Namespace: topo.Spec.Namespace}, &sec); err != nil {
 		if apierrors.IsNotFound(err) {
 			setCondition(&topo.Status.Conditions, topo.Generation, benchv1alpha1.ConditionPostgresReady, metav1.ConditionFalse,
 				benchv1alpha1.ReasonDependencyNotReady, fmt.Sprintf("external postgres secret %q not found", ext.SecretRef.Name))
@@ -319,16 +377,16 @@ func connectionFromSecret(sec corev1.Secret, hostKey, portKey, dbKey, userKey, p
 	}
 }
 
-func (r *AuthentikTopologyReconciler) ensureNamespace(ctx context.Context, name string) error {
+func ensureNamespace(ctx context.Context, rc client.Client, name string) error {
 	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: name}}
-	err := r.Get(ctx, types.NamespacedName{Name: name}, ns)
+	err := rc.Get(ctx, types.NamespacedName{Name: name}, ns)
 	if err == nil {
 		return nil
 	}
 	if !apierrors.IsNotFound(err) {
 		return err
 	}
-	if err := r.Create(ctx, ns); err != nil && !apierrors.IsAlreadyExists(err) {
+	if err := rc.Create(ctx, ns); err != nil && !apierrors.IsAlreadyExists(err) {
 		return err
 	}
 	return nil

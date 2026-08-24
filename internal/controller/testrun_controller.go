@@ -35,6 +35,7 @@ import (
 
 	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
 	"github.com/goauthentik/authentik-bench/internal/grafana"
+	"github.com/goauthentik/authentik-bench/internal/multicluster"
 	"github.com/goauthentik/authentik-bench/internal/render"
 )
 
@@ -42,13 +43,15 @@ const testRunFinalizer = "bench.goauthentik.io/remote-cleanup"
 
 // TestRunReconciler executes one bounded (Quick) run of a TestCase.
 //
-// M1 scope: the runner is always the local cluster (see TestCaseReconciler);
-// Grafana annotations are posted only when internal/grafana.FromEnv reports
-// Enabled(), since M1 has no Grafana deployed yet.
+// The Job runs on the same cluster TestCaseReconciler resolves for its
+// TestCase (spec.runnerClusterRef, else the topology's own clusterRef, else
+// local), resolved fresh via Tracker. Grafana annotations are posted only
+// when internal/grafana.FromEnv reports Enabled().
 type TestRunReconciler struct {
 	client.Client
 	Scheme  *runtime.Scheme
 	Grafana *grafana.Client
+	Tracker *multicluster.Tracker
 }
 
 // +kubebuilder:rbac:groups=bench.goauthentik.io,resources=testruns,verbs=get;list;watch;create;update;patch;delete
@@ -118,7 +121,7 @@ func (r *TestRunReconciler) start(ctx context.Context, run *benchv1alpha1.TestRu
 	resolvedTC := tc.DeepCopy()
 	resolvedTC.Spec = *resolved
 
-	_, targetName, host, port, err := resolveReadyTopology(ctx, r.Client, tc.Namespace, tc.Spec.TopologyRef.Name)
+	topo, targetName, host, port, err := resolveReadyTopology(ctx, r.Client, tc.Namespace, tc.Spec.TopologyRef.Name)
 	if err != nil {
 		if errors.Is(err, errTopologyNotReady) {
 			setCondition(&run.Status.Conditions, run.Generation, benchv1alpha1.ConditionReady, metav1.ConditionFalse,
@@ -126,6 +129,18 @@ func (r *TestRunReconciler) start(ctx context.Context, run *benchv1alpha1.TestRu
 			return ctrl.Result{RequeueAfter: 5 * time.Second}, r.Status().Update(ctx, run)
 		}
 		return ctrl.Result{}, fmt.Errorf("resolve topology: %w", err)
+	}
+
+	rc, remote, err := resolveRunnerClient(ctx, r.Tracker, r.Client, run.Namespace, tc.Spec.RunnerClusterRef, topo.Spec.ClusterRef)
+	if err != nil {
+		setCondition(&run.Status.Conditions, run.Generation, benchv1alpha1.ConditionReady, metav1.ConditionFalse,
+			benchv1alpha1.ReasonDependencyNotReady, fmt.Sprintf("waiting for runner cluster to be reachable: %v", err))
+		return ctrl.Result{RequeueAfter: 10 * time.Second}, r.Status().Update(ctx, run)
+	}
+	if remote {
+		if err := ensureNamespace(ctx, rc, run.Namespace); err != nil {
+			return ctrl.Result{}, fmt.Errorf("ensure runner namespace: %w", err)
+		}
 	}
 
 	scriptCMName := "k6-script-" + tc.Name
@@ -144,10 +159,15 @@ func (r *TestRunReconciler) start(ctx context.Context, run *benchv1alpha1.TestRu
 	}
 	jobName := "testrun-" + run.Name
 	job := render.QuickJob(jobName, run.Namespace, params)
-	if err := controllerutil.SetControllerReference(run, job, r.Scheme); err != nil {
-		return ctrl.Result{}, err
+	// A cross-cluster ownerReference would carry a UID the remote cluster's
+	// garbage collector can never recognize, so remote cleanup instead goes
+	// through the finalizer-driven reconcileDelete below.
+	if !remote {
+		if err := controllerutil.SetControllerReference(run, job, r.Scheme); err != nil {
+			return ctrl.Result{}, err
+		}
 	}
-	if err := r.Create(ctx, job); err != nil && !apierrors.IsAlreadyExists(err) {
+	if err := rc.Create(ctx, job); err != nil && !apierrors.IsAlreadyExists(err) {
 		return ctrl.Result{}, fmt.Errorf("create quick job: %w", err)
 	}
 
@@ -172,9 +192,30 @@ func (r *TestRunReconciler) start(ctx context.Context, run *benchv1alpha1.TestRu
 	return ctrl.Result{RequeueAfter: 2 * time.Second}, r.Status().Update(ctx, run)
 }
 
+// resolveRunRunnerClient re-derives the cluster a TestRun's Job runs on from
+// its own status.resolvedSpec (captured at start time), so pollJob/
+// reconcileDelete don't need to re-fetch the live TestCase, which may have
+// since changed or been deleted.
+func (r *TestRunReconciler) resolveRunRunnerClient(ctx context.Context, run *benchv1alpha1.TestRun) (client.Client, error) {
+	if run.Status.ResolvedSpec == nil {
+		return r.Client, nil
+	}
+	var topo benchv1alpha1.AuthentikTopology
+	var topoClusterRef corev1.LocalObjectReference
+	if err := r.Get(ctx, types.NamespacedName{Name: run.Status.ResolvedSpec.TopologyRef.Name, Namespace: run.Namespace}, &topo); err == nil {
+		topoClusterRef = topo.Spec.ClusterRef
+	}
+	rc, _, err := resolveRunnerClient(ctx, r.Tracker, r.Client, run.Namespace, run.Status.ResolvedSpec.RunnerClusterRef, topoClusterRef)
+	return rc, err
+}
+
 func (r *TestRunReconciler) pollJob(ctx context.Context, run *benchv1alpha1.TestRun) (ctrl.Result, error) {
+	rc, err := r.resolveRunRunnerClient(ctx, run)
+	if err != nil {
+		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+	}
 	var job batchv1.Job
-	if err := r.Get(ctx, types.NamespacedName{Name: run.Status.JobRef.Name, Namespace: run.Namespace}, &job); err != nil {
+	if err := rc.Get(ctx, types.NamespacedName{Name: run.Status.JobRef.Name, Namespace: run.Namespace}, &job); err != nil {
 		if apierrors.IsNotFound(err) {
 			run.Status.Phase = benchv1alpha1.TestRunFailed
 			setCondition(&run.Status.Conditions, run.Generation, benchv1alpha1.ConditionReady, metav1.ConditionFalse,
@@ -223,10 +264,15 @@ func (r *TestRunReconciler) reconcileDelete(ctx context.Context, run *benchv1alp
 		return ctrl.Result{}, nil
 	}
 	if run.Status.JobRef != nil {
-		job := &batchv1.Job{ObjectMeta: metav1.ObjectMeta{Name: run.Status.JobRef.Name, Namespace: run.Namespace}}
-		propagation := client.PropagationPolicy(metav1.DeletePropagationBackground)
-		if err := r.Delete(ctx, job, propagation); err != nil && !apierrors.IsNotFound(err) {
-			return ctrl.Result{}, err
+		rc, err := r.resolveRunRunnerClient(ctx, run)
+		if err != nil {
+			logf.FromContext(ctx).Info("runner cluster unreachable during delete, skipping remote job cleanup", "error", err.Error())
+		} else {
+			job := &batchv1.Job{ObjectMeta: metav1.ObjectMeta{Name: run.Status.JobRef.Name, Namespace: run.Namespace}}
+			propagation := client.PropagationPolicy(metav1.DeletePropagationBackground)
+			if err := rc.Delete(ctx, job, propagation); err != nil && !apierrors.IsNotFound(err) {
+				return ctrl.Result{}, err
+			}
 		}
 	}
 	controllerutil.RemoveFinalizer(run, testRunFinalizer)
