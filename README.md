@@ -12,7 +12,7 @@ Cluster API and a central, mTLS-secured metrics pipeline.
 See the design plan this repo implements for the full architecture and
 phased delivery milestones (M1-M4).
 
-## Status: M2 (single cluster, all postgres modes + placement)
+## Status: M3 (single cluster, all postgres modes + placement + web UI)
 
 Implemented so far:
 
@@ -48,16 +48,32 @@ Implemented so far:
   `testid`/`target`/`profile` tag scheme and env var contract
   (`TEST_ID`/`TARGET`/`BENCH_HOST`/... ), guarded by `test/contract`.
 - **Fixtures**: `fixtures/gen-blueprint.py` ported unchanged.
+- **Web UI**: `internal/api` is a REST/JSON backend (chi router, bearer-token
+  auth, 80% test coverage) that CRUDs the three CRDs as unstructured objects
+  (the CRD schema stays the single source of truth), proxies PromQL for the
+  compare view, and builds allowlisted Grafana embed URLs. `web/frontend` is
+  a Next.js app (topologies/test cases/test runs/compare/clusters pages) that
+  never sees the bearer token directly - a server-side route handler
+  (`app/api/bench/[...path]`) holds it and proxies to the backend. Verified
+  with a real browser: `make test-webui` spins up an envtest control plane +
+  stub Prometheus + the real API + a built-and-started Next.js server, then
+  drives it with Playwright (`web/frontend/e2e/flow.spec.ts`) through the
+  whole flow - define a topology, define a test case, run it, see it in
+  history, compare metrics.
 
-Not yet implemented (see the plan's milestones): the web UI, multi-cluster
-(a `WorkloadCluster` controller provisioning real clusters via the Incus CAPI
-infrastructure provider), the mTLS central metrics receiver, and
-Flux-managed GitOps for the metrics stack itself.
+Not yet implemented (see the plan's milestones): multi-cluster (a
+`WorkloadCluster` controller provisioning real clusters via the Incus CAPI
+infrastructure provider, at which point `/clusters` also gains
+register/deprovision beyond just listing), the mTLS central metrics
+receiver, and Flux-managed GitOps for the metrics stack itself (dashboard
+JSON already lives in `gitops/dashboards/`, not yet wired to a Flux
+Kustomization).
 
 ### Running the tests
 
 ```sh
 make test          # envtest (real apiserver, no real controllers e.g. Flux/CNPG) + contract tests
+make test-webui     # backend + Next.js + Playwright, no Kubernetes cluster needed
 go test ./test/contract/...   # just the k6 tag/env parity guard
 ```
 
