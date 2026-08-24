@@ -35,6 +35,10 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
+	bootstrapv1 "sigs.k8s.io/cluster-api/api/bootstrap/kubeadm/v1beta2"
+	controlplanev1 "sigs.k8s.io/cluster-api/api/controlplane/kubeadm/v1beta2"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
+
 	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
 	// +kubebuilder:scaffold:imports
 )
@@ -66,6 +70,9 @@ var _ = BeforeSuite(func() {
 	Expect(err).NotTo(HaveOccurred())
 	Expect(helmv2.AddToScheme(scheme.Scheme)).To(Succeed())
 	Expect(sourcev1.AddToScheme(scheme.Scheme)).To(Succeed())
+	Expect(clusterv1.AddToScheme(scheme.Scheme)).To(Succeed())
+	Expect(controlplanev1.AddToScheme(scheme.Scheme)).To(Succeed())
+	Expect(bootstrapv1.AddToScheme(scheme.Scheme)).To(Succeed())
 
 	// +kubebuilder:scaffold:scheme
 
@@ -73,9 +80,12 @@ var _ = BeforeSuite(func() {
 	testEnv = &envtest.Environment{
 		CRDDirectoryPaths: []string{
 			filepath.Join("..", "..", "config", "crd", "bases"),
-			// Flux's HelmRelease/HelmRepository CRDs: AuthentikTopologyReconciler
-			// applies real objects of these kinds, so envtest's apiserver needs
-			// to know about them even though no helm-controller runs here.
+			// Flux's HelmRelease/HelmRepository CRDs (AuthentikTopologyReconciler),
+			// Cluster API core/kubeadm bootstrap+control-plane CRDs, and the Incus
+			// infrastructure provider's LXCCluster/LXCMachineTemplate CRDs
+			// (WorkloadClusterReconciler) - envtest's apiserver needs to know
+			// about all of these even though none of their real controllers run
+			// here.
 			filepath.Join("..", "..", "config", "crd", "third-party"),
 		},
 		ErrorIfCRDPathMissing: true,

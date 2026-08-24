@@ -1,0 +1,189 @@
+/*
+Copyright 2026.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package controller
+
+import (
+	"context"
+	"fmt"
+	"time"
+
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
+	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	logf "sigs.k8s.io/controller-runtime/pkg/log"
+
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
+
+	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
+	"github.com/goauthentik/authentik-bench/internal/render"
+)
+
+// capiDeleteRequeueInterval is how often reconcileDelete polls while waiting
+// for CAPI to finish tearing down a Cluster's machines.
+const capiDeleteRequeueInterval = 5 * time.Second
+
+// workloadClusterFinalizer guards deletion so the operator can wait for
+// CAPI's own Cluster deletion (which tears down machines one at a time) to
+// finish before removing the WorkloadCluster - it does not need to reach any
+// object on a different cluster, since everything a WorkloadCluster renders
+// (the CAPI Cluster and its infrastructure/bootstrap objects) lives on the
+// management cluster.
+const workloadClusterFinalizer = "bench.goauthentik.io/workload-cluster-cleanup"
+
+// WorkloadClusterReconciler reconciles a WorkloadCluster object: it renders
+// the CAPI Cluster/LXCCluster/KubeadmControlPlane/MachineDeployment set
+// described in internal/render/workloadcluster.go via the Incus
+// infrastructure provider already installed on the management cluster, and
+// mirrors the resulting CAPI Cluster's readiness back onto its own status.
+type WorkloadClusterReconciler struct {
+	client.Client
+	Scheme *runtime.Scheme
+}
+
+// +kubebuilder:rbac:groups=bench.goauthentik.io,resources=workloadclusters,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=bench.goauthentik.io,resources=workloadclusters/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=bench.goauthentik.io,resources=workloadclusters/finalizers,verbs=update
+// +kubebuilder:rbac:groups=cluster.x-k8s.io,resources=clusters;machinedeployments,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=controlplane.cluster.x-k8s.io,resources=kubeadmcontrolplanes,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=bootstrap.cluster.x-k8s.io,resources=kubeadmconfigtemplates,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=lxcclusters;lxcmachinetemplates,verbs=get;list;watch;create;update;patch;delete
+
+func (r *WorkloadClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	log := logf.FromContext(ctx)
+
+	var wc benchv1alpha1.WorkloadCluster
+	if err := r.Get(ctx, req.NamespacedName, &wc); err != nil {
+		return ctrl.Result{}, client.IgnoreNotFound(err)
+	}
+
+	if !wc.DeletionTimestamp.IsZero() {
+		return r.reconcileDelete(ctx, &wc)
+	}
+	if !controllerutil.ContainsFinalizer(&wc, workloadClusterFinalizer) {
+		controllerutil.AddFinalizer(&wc, workloadClusterFinalizer)
+		if err := r.Update(ctx, &wc); err != nil {
+			return ctrl.Result{}, err
+		}
+	}
+
+	for _, obj := range []client.Object{
+		render.LXCCluster(&wc),
+		render.ControlPlaneLXCMachineTemplate(&wc),
+		render.WorkerLXCMachineTemplate(&wc),
+		render.WorkerKubeadmConfigTemplate(&wc),
+		render.KubeadmControlPlane(&wc),
+	} {
+		if err := applyOwned(ctx, r.Client, r.Scheme, &wc, obj); err != nil {
+			return ctrl.Result{}, fmt.Errorf("apply %s: %w", obj.GetObjectKind().GroupVersionKind().Kind, err)
+		}
+	}
+
+	// The Cluster itself is applied last: CAPI's core controller starts
+	// reconciling as soon as it exists, and it expects the
+	// control-plane/infrastructure objects it references to already be
+	// present.
+	cluster := render.Cluster(&wc)
+	if err := applyOwned(ctx, r.Client, r.Scheme, &wc, cluster); err != nil {
+		return ctrl.Result{}, fmt.Errorf("apply Cluster: %w", err)
+	}
+
+	// MachineDeployment is applied only once the Cluster exists - CAPI's own
+	// webhook/validation rejects a MachineDeployment naming a Cluster that
+	// isn't there yet.
+	if err := applyOwned(ctx, r.Client, r.Scheme, &wc, render.MachineDeployment(&wc)); err != nil {
+		return ctrl.Result{}, fmt.Errorf("apply MachineDeployment: %w", err)
+	}
+
+	var existing clusterv1.Cluster
+	if err := r.Get(ctx, types.NamespacedName{Name: cluster.Name, Namespace: cluster.Namespace}, &existing); err != nil {
+		if !apierrors.IsNotFound(err) {
+			return ctrl.Result{}, fmt.Errorf("get Cluster: %w", err)
+		}
+		setCondition(&wc.Status.Conditions, wc.Generation, benchv1alpha1.ConditionReady, metav1.ConditionFalse,
+			"Reconciling", "waiting for Cluster to be created")
+		return ctrl.Result{}, r.Status().Update(ctx, &wc)
+	}
+
+	wc.Status.Phase = existing.Status.Phase
+	wc.Status.ControlPlaneReady = existing.Status.Initialization.ControlPlaneInitialized != nil && *existing.Status.Initialization.ControlPlaneInitialized
+	wc.Status.InfrastructureReady = existing.Status.Initialization.InfrastructureProvisioned != nil && *existing.Status.Initialization.InfrastructureProvisioned
+	wc.Status.ObservedGeneration = wc.Generation
+
+	if wc.Status.ControlPlaneReady {
+		wc.Status.KubeconfigSecretRef = &corev1.LocalObjectReference{Name: render.KubeconfigSecretName(&wc)}
+	}
+
+	ready := metav1.ConditionFalse
+	message := "waiting for Cluster to become ready"
+	if cond := meta.FindStatusCondition(existing.Status.Conditions, clusterv1.ClusterAvailableCondition); cond != nil {
+		message = cond.Message
+	}
+	if wc.Status.ControlPlaneReady && wc.Status.InfrastructureReady {
+		ready = metav1.ConditionTrue
+		message = "control plane and infrastructure ready"
+	}
+	setCondition(&wc.Status.Conditions, wc.Generation, benchv1alpha1.ConditionReady, ready, "Ready", message)
+
+	if err := r.Status().Update(ctx, &wc); err != nil {
+		return ctrl.Result{}, err
+	}
+	log.Info("reconciled WorkloadCluster", "phase", wc.Status.Phase, "ready", ready)
+	return ctrl.Result{}, nil
+}
+
+func (r *WorkloadClusterReconciler) reconcileDelete(ctx context.Context, wc *benchv1alpha1.WorkloadCluster) (ctrl.Result, error) {
+	if !controllerutil.ContainsFinalizer(wc, workloadClusterFinalizer) {
+		return ctrl.Result{}, nil
+	}
+
+	// Deleting the owned Cluster (rather than relying on GC once the
+	// WorkloadCluster itself disappears) lets CAPI actually tear down its
+	// machines before this finalizer is removed - the LXCMachineTemplates/
+	// KubeadmControlPlane/MachineDeployment all get garbage-collected as the
+	// Cluster's owned objects once CAPI is done with them.
+	var cluster clusterv1.Cluster
+	err := r.Get(ctx, types.NamespacedName{Name: wc.Name, Namespace: wc.Namespace}, &cluster)
+	switch {
+	case apierrors.IsNotFound(err):
+		controllerutil.RemoveFinalizer(wc, workloadClusterFinalizer)
+		return ctrl.Result{}, r.Update(ctx, wc)
+	case err != nil:
+		return ctrl.Result{}, fmt.Errorf("get Cluster: %w", err)
+	default:
+		if cluster.DeletionTimestamp.IsZero() {
+			if err := r.Delete(ctx, &cluster); err != nil && !apierrors.IsNotFound(err) {
+				return ctrl.Result{}, fmt.Errorf("delete Cluster: %w", err)
+			}
+		}
+		return ctrl.Result{RequeueAfter: capiDeleteRequeueInterval}, nil
+	}
+}
+
+// SetupWithManager sets up the controller with the Manager.
+func (r *WorkloadClusterReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	return ctrl.NewControllerManagedBy(mgr).
+		For(&benchv1alpha1.WorkloadCluster{}).
+		Owns(&clusterv1.Cluster{}).
+		Named("workloadcluster").
+		Complete(r)
+}

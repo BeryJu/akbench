@@ -23,9 +23,7 @@ import (
 	"time"
 
 	helmv2 "github.com/fluxcd/helm-controller/api/v2"
-	sourcev1 "github.com/fluxcd/source-controller/api/v1"
 	corev1 "k8s.io/api/core/v1"
-	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -108,7 +106,7 @@ func (r *AuthentikTopologyReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	}
 
 	repo := render.HelmRepository(topo.Namespace, topo.Spec.Chart)
-	if err := r.applyOwned(ctx, &topo, repo); err != nil {
+	if err := applyOwned(ctx, r.Client, r.Scheme, &topo, repo); err != nil {
 		return ctrl.Result{}, fmt.Errorf("apply HelmRepository: %w", err)
 	}
 
@@ -132,7 +130,7 @@ func (r *AuthentikTopologyReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		return ctrl.Result{}, fmt.Errorf("build helm values: %w", err)
 	}
 	hr := render.HelmRelease(&topo, "", values)
-	if err := r.applyOwned(ctx, &topo, hr); err != nil {
+	if err := applyOwned(ctx, r.Client, r.Scheme, &topo, hr); err != nil {
 		return ctrl.Result{}, fmt.Errorf("apply HelmRelease: %w", err)
 	}
 
@@ -253,7 +251,7 @@ func (r *AuthentikTopologyReconciler) resolveEmbeddedPostgres(ctx context.Contex
 
 func (r *AuthentikTopologyReconciler) resolveCNPGPostgres(ctx context.Context, topo *benchv1alpha1.AuthentikTopology) (*render.PostgresConnection, bool, error) {
 	cluster := render.CNPGCluster(topo)
-	if err := r.applyOwned(ctx, topo, cluster); err != nil {
+	if err := applyOwned(ctx, r.Client, r.Scheme, topo, cluster); err != nil {
 		return nil, false, fmt.Errorf("apply CNPG Cluster: %w", err)
 	}
 	topo.Status.CNPGClusterRef = &corev1.LocalObjectReference{Name: cluster.GetName()}
@@ -334,56 +332,6 @@ func (r *AuthentikTopologyReconciler) ensureNamespace(ctx context.Context, name 
 		return err
 	}
 	return nil
-}
-
-// applyOwned creates or updates obj, setting topo as its controller owner so
-// deleting the AuthentikTopology garbage-collects it (local-cluster objects
-// only - see the finalizer note above for remote objects).
-//
-// Skips the Update entirely when the existing object's spec already matches:
-// an unconditional Update here bumps resourceVersion on every reconcile even
-// with no real change, which re-triggers this controller's own Owns() watch
-// *and* restarts Flux's in-flight reconcile of the object before it can
-// finish - the two controllers end up perpetually interrupting each other
-// and the HelmRelease never completes an install.
-func (r *AuthentikTopologyReconciler) applyOwned(ctx context.Context, topo *benchv1alpha1.AuthentikTopology, obj client.Object) error {
-	if err := controllerutil.SetControllerReference(topo, obj, r.Scheme); err != nil {
-		return err
-	}
-	if err := r.Create(ctx, obj); err != nil {
-		if !apierrors.IsAlreadyExists(err) {
-			return err
-		}
-		existing := obj.DeepCopyObject().(client.Object)
-		if err := r.Get(ctx, types.NamespacedName{Name: obj.GetName(), Namespace: obj.GetNamespace()}, existing); err != nil {
-			return err
-		}
-		if specEqual(existing, obj) {
-			return nil
-		}
-		obj.SetResourceVersion(existing.GetResourceVersion())
-		return r.Update(ctx, obj)
-	}
-	return nil
-}
-
-// specEqual compares the parts of existing/desired that applyOwned actually
-// renders, for the kinds this controller owns. Unknown types return false
-// (always update) rather than risk silently dropping a real change.
-func specEqual(existing, desired client.Object) bool {
-	switch d := desired.(type) {
-	case *helmv2.HelmRelease:
-		e, ok := existing.(*helmv2.HelmRelease)
-		return ok && apiequality.Semantic.DeepEqual(e.Spec, d.Spec)
-	case *sourcev1.HelmRepository:
-		e, ok := existing.(*sourcev1.HelmRepository)
-		return ok && apiequality.Semantic.DeepEqual(e.Spec, d.Spec)
-	case *unstructured.Unstructured:
-		e, ok := existing.(*unstructured.Unstructured)
-		return ok && apiequality.Semantic.DeepEqual(e.Object["spec"], d.Object["spec"])
-	default:
-		return false
-	}
 }
 
 // SetupWithManager sets up the controller with the Manager.

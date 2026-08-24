@@ -1,0 +1,17 @@
+apiVersion: bench.goauthentik.io/v1alpha1
+kind: WorkloadCluster
+metadata:
+  labels:
+    app.kubernetes.io/name: authentik-bench
+    app.kubernetes.io/managed-by: kustomize
+  name: workloadcluster-sample
+spec:
+  kubernetesVersion: v1.31.0
+  lxcSecretRef:
+    name: lxc-secret
+  controlPlane:
+    replicas: 1
+    flavor: c2-m4
+  workers:
+    replicas: 2
+    flavor: c2-m4

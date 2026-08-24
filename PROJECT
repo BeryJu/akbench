@@ -36,4 +36,13 @@ resources:
   kind: TestRun
   path: github.com/goauthentik/authentik-bench/api/v1alpha1
   version: v1alpha1
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
+  domain: goauthentik.io
+  group: bench
+  kind: WorkloadCluster
+  path: github.com/goauthentik/authentik-bench/api/v1alpha1
+  version: v1alpha1
 version: "3"
