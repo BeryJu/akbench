@@ -12,14 +12,28 @@ Cluster API and a central, mTLS-secured metrics pipeline.
 See the design plan this repo implements for the full architecture and
 phased delivery milestones (M1-M4).
 
-## Status: M3 (single cluster, all postgres modes + placement + web UI)
+## Status: M4 (multi-cluster provisioning + clusterRef wiring)
 
 Implemented so far:
 
 - **CRDs** (`bench.goauthentik.io/v1alpha1`): `AuthentikTopology`, `TestCase`,
-  `TestRun`. Multi-cluster `clusterRef`/`runnerClusterRef` report a
-  `NotImplemented` condition until M4's multicluster tracker lands; everything
-  else in the spec is implemented.
+  `TestRun`, `WorkloadCluster`.
+- **`WorkloadClusterReconciler`**: renders a full Cluster API cluster stack
+  (`Cluster`/`LXCCluster`/`KubeadmControlPlane`/`MachineDeployment` plus their
+  `LXCMachineTemplate`s and a worker `KubeadmConfigTemplate`) against the
+  Incus infrastructure provider already installed on the management cluster,
+  and mirrors the resulting `Cluster`'s readiness (and its
+  `<name>-kubeconfig` Secret) back onto its own status. Provisioning is
+  create-once for now - no day-2 resize/upgrade of an existing
+  `WorkloadCluster` yet.
+- **`clusterRef`/`runnerClusterRef`**: `AuthentikTopologyReconciler`,
+  `TestCaseReconciler`, and `TestRunReconciler` all resolve these to a live
+  client via `internal/multicluster.Tracker` (wrapping Cluster API's
+  `ClusterCache`), falling back to the management cluster when unset.
+  Cross-cluster objects (namespace, CNPG `Cluster`, k6 workloads, generated
+  Secrets) skip ownerReferences - a remote cluster's garbage collector can't
+  recognize a UID from a different cluster's etcd - and clean up through each
+  controller's finalizer instead.
 - **`AuthentikTopologyReconciler`**: renders a Flux `HelmRelease` +
   `HelmRepository` installing the official authentik chart
   (`charts.goauthentik.io`) with the topology's replica/resource/placement
@@ -49,22 +63,21 @@ Implemented so far:
   (`TEST_ID`/`TARGET`/`BENCH_HOST`/... ), guarded by `test/contract`.
 - **Fixtures**: `fixtures/gen-blueprint.py` ported unchanged.
 - **Web UI**: `internal/api` is a REST/JSON backend (chi router, bearer-token
-  auth, 80% test coverage) that CRUDs the three CRDs as unstructured objects
+  auth, ~79% test coverage) that CRUDs all four CRDs as unstructured objects
   (the CRD schema stays the single source of truth), proxies PromQL for the
-  compare view, and builds allowlisted Grafana embed URLs. `web/frontend` is
-  a Next.js app (topologies/test cases/test runs/compare/clusters pages) that
-  never sees the bearer token directly - a server-side route handler
-  (`app/api/bench/[...path]`) holds it and proxies to the backend. Verified
+  compare view, and builds allowlisted Grafana embed URLs. `/api/v1/clusters`
+  registers/deprovisions a `WorkloadCluster` directly (previously 501).
+  `web/frontend` is a Next.js app (topologies/test cases/test runs/compare/
+  clusters pages) that never sees the bearer token directly - a server-side
+  route handler (`app/api/bench/[...path]`) holds it and proxies to the
+  backend. Verified
   with a real browser: `make test-webui` spins up an envtest control plane +
   stub Prometheus + the real API + a built-and-started Next.js server, then
   drives it with Playwright (`web/frontend/e2e/flow.spec.ts`) through the
   whole flow - define a topology, define a test case, run it, see it in
   history, compare metrics.
 
-Not yet implemented (see the plan's milestones): multi-cluster (a
-`WorkloadCluster` controller provisioning real clusters via the Incus CAPI
-infrastructure provider, at which point `/clusters` also gains
-register/deprovision beyond just listing), the mTLS central metrics
+Not yet implemented (see the plan's milestones): the mTLS central metrics
 receiver, and Flux-managed GitOps for the metrics stack itself (dashboard
 JSON already lives in `gitops/dashboards/`, not yet wired to a Flux
 Kustomization).
