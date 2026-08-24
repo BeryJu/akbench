@@ -21,7 +21,9 @@ import (
 	"fmt"
 
 	helmv2 "github.com/fluxcd/helm-controller/api/v2"
+	sourcev1 "github.com/fluxcd/source-controller/api/v1"
 	corev1 "k8s.io/api/core/v1"
+	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -57,6 +59,8 @@ type AuthentikTopologyReconciler struct {
 // +kubebuilder:rbac:groups=bench.goauthentik.io,resources=authentiktopologies/finalizers,verbs=update
 // +kubebuilder:rbac:groups=helm.toolkit.fluxcd.io,resources=helmreleases,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=source.toolkit.fluxcd.io,resources=helmrepositories,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=core,resources=namespaces,verbs=get;list;watch;create;delete
+// +kubebuilder:rbac:groups=core,resources=secrets,verbs=get;list;watch;create;update
 
 func (r *AuthentikTopologyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
@@ -101,7 +105,32 @@ func (r *AuthentikTopologyReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		return ctrl.Result{}, fmt.Errorf("apply HelmRepository: %w", err)
 	}
 
-	values, err := render.HelmValues(&topo, nil)
+	// The chart does not generate AUTHENTIK_SECRET_KEY itself - authentik
+	// refuses to start without one - so the operator generates and caches it
+	// once, the same way the Ansible harness's credentials/ directory does.
+	authentikSecretName := topo.Name + "-authentik-config"
+	if _, err := ensureRandomSecret(ctx, r.Client,
+		types.NamespacedName{Name: authentikSecretName, Namespace: topo.Spec.Namespace},
+		"AUTHENTIK_SECRET_KEY", 32); err != nil {
+		return ctrl.Result{}, fmt.Errorf("ensure authentik secret key: %w", err)
+	}
+
+	var pgConn *render.PostgresConnection
+	if topo.Spec.Postgres.Mode == benchv1alpha1.PostgresEmbedded {
+		// Pin the bundled postgresql subchart's own auth.password to a value
+		// we generate, so it matches what we also hand authentik as
+		// AUTHENTIK_POSTGRESQL__PASSWORD - the two are otherwise generated
+		// independently and would never agree.
+		pw, err := ensureRandomSecret(ctx, r.Client,
+			types.NamespacedName{Name: topo.Name + "-authentik-postgres", Namespace: topo.Spec.Namespace},
+			"password", 24)
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("ensure postgres password: %w", err)
+		}
+		pgConn = &render.PostgresConnection{Password: pw}
+	}
+
+	values, err := render.HelmValues(&topo, authentikSecretName, pgConn)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("build helm values: %w", err)
 	}
@@ -151,11 +180,20 @@ func (r *AuthentikTopologyReconciler) reconcileDelete(ctx context.Context, topo 
 	if !controllerutil.ContainsFinalizer(topo, authentikTopologyFinalizer) {
 		return ctrl.Result{}, nil
 	}
-	// M1: everything this controller owns lives on the local cluster and is
-	// already garbage-collected via ownerReferences (applyOwned below). From
-	// M2/M4 on, remote CNPG Clusters and cross-cluster objects must be
-	// explicitly deleted here via the multicluster tracker before the
-	// finalizer is removed.
+	// The HelmRelease/HelmRepository this controller owns live beside the
+	// AuthentikTopology CR and are garbage-collected via ownerReferences
+	// (applyOwned). Everything else - the chart's rendered workloads, and the
+	// AUTHENTIK_SECRET_KEY/postgres-password Secrets ensureRandomSecret
+	// created - lives in spec.namespace, a *different* namespace an
+	// ownerReference can't reach, so deleting that namespace is what actually
+	// cleans it up. From M2/M4 on, a remote CNPG Cluster on another cluster
+	// needs the same explicit treatment via the multicluster tracker.
+	if topo.Spec.Namespace != "" {
+		ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: topo.Spec.Namespace}}
+		if err := r.Delete(ctx, ns); err != nil && !apierrors.IsNotFound(err) {
+			return ctrl.Result{}, fmt.Errorf("delete target namespace %q: %w", topo.Spec.Namespace, err)
+		}
+	}
 	controllerutil.RemoveFinalizer(topo, authentikTopologyFinalizer)
 	return ctrl.Result{}, r.Update(ctx, topo)
 }
@@ -178,6 +216,13 @@ func (r *AuthentikTopologyReconciler) ensureNamespace(ctx context.Context, name 
 // applyOwned creates or updates obj, setting topo as its controller owner so
 // deleting the AuthentikTopology garbage-collects it (local-cluster objects
 // only - see the finalizer note above for remote objects).
+//
+// Skips the Update entirely when the existing object's spec already matches:
+// an unconditional Update here bumps resourceVersion on every reconcile even
+// with no real change, which re-triggers this controller's own Owns() watch
+// *and* restarts Flux's in-flight reconcile of the object before it can
+// finish - the two controllers end up perpetually interrupting each other
+// and the HelmRelease never completes an install.
 func (r *AuthentikTopologyReconciler) applyOwned(ctx context.Context, topo *benchv1alpha1.AuthentikTopology, obj client.Object) error {
 	if err := controllerutil.SetControllerReference(topo, obj, r.Scheme); err != nil {
 		return err
@@ -190,10 +235,29 @@ func (r *AuthentikTopologyReconciler) applyOwned(ctx context.Context, topo *benc
 		if err := r.Get(ctx, types.NamespacedName{Name: obj.GetName(), Namespace: obj.GetNamespace()}, existing); err != nil {
 			return err
 		}
+		if specEqual(existing, obj) {
+			return nil
+		}
 		obj.SetResourceVersion(existing.GetResourceVersion())
 		return r.Update(ctx, obj)
 	}
 	return nil
+}
+
+// specEqual compares the parts of existing/desired that applyOwned actually
+// renders, for the two Flux kinds this controller owns. Unknown types return
+// false (always update) rather than risk silently dropping a real change.
+func specEqual(existing, desired client.Object) bool {
+	switch d := desired.(type) {
+	case *helmv2.HelmRelease:
+		e, ok := existing.(*helmv2.HelmRelease)
+		return ok && apiequality.Semantic.DeepEqual(e.Spec, d.Spec)
+	case *sourcev1.HelmRepository:
+		e, ok := existing.(*sourcev1.HelmRepository)
+		return ok && apiequality.Semantic.DeepEqual(e.Spec, d.Spec)
+	default:
+		return false
+	}
 }
 
 // SetupWithManager sets up the controller with the Manager.

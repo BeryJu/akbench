@@ -57,13 +57,23 @@ type AuthentikTopologyHelmValues struct {
 // chart's actual schema (charts.goauthentik.io/authentik, values.yaml):
 // global.image.{repository,tag}, server/worker.{replicas,resources,
 // nodeSelector,tolerations,affinity}, authentik.{log_level,error_reporting,
-// postgresql.*}, and top-level postgresql.enabled for the bundled subchart.
+// postgresql.*,existingSecret}, and top-level postgresql.enabled/auth for the
+// bundled subchart.
+//
+// authentikSecretName must name a Secret (created by the caller, see
+// internal/controller's ensureRandomSecret) holding AUTHENTIK_SECRET_KEY -
+// the chart does not generate one itself, and authentik refuses to start
+// without it. pgConn carries the resolved Postgres connection: for Embedded
+// mode only Password is set (paired with the bundled subchart's own
+// generated auth.password so both sides agree on the same value); for CNPG/
+// External modes the full connection is set and the bundled subchart stays
+// disabled.
 //
 // Only Embedded postgres and Default placement are wired up for M1; CNPG and
 // External postgres, and Dedicated placement, are added in M2 (see the repo
-// plan) - EmbeddedPostgres, CNPGConnection and ExternalConnection below are
-// the extension points for that.
-func HelmValues(t *benchv1alpha1.AuthentikTopology, pgConn *PostgresConnection) (*apiextensionsv1.JSON, error) {
+// plan).
+func HelmValues(t *benchv1alpha1.AuthentikTopology, authentikSecretName string, pgConn *PostgresConnection) (*apiextensionsv1.JSON, error) {
+	embedded := t.Spec.Postgres.Mode == benchv1alpha1.PostgresEmbedded
 	values := AuthentikTopologyHelmValues{
 		Server: map[string]any{
 			"replicas": t.Spec.Server.Replicas,
@@ -71,9 +81,11 @@ func HelmValues(t *benchv1alpha1.AuthentikTopology, pgConn *PostgresConnection) 
 		Worker: map[string]any{
 			"replicas": t.Spec.Worker.Replicas,
 		},
-		Authentik: map[string]any{},
+		Authentik: map[string]any{
+			"existingSecret": map[string]any{"secretName": authentikSecretName},
+		},
 		Postgres: map[string]any{
-			"enabled": t.Spec.Postgres.Mode == benchv1alpha1.PostgresEmbedded,
+			"enabled": embedded,
 		},
 	}
 
@@ -103,7 +115,14 @@ func HelmValues(t *benchv1alpha1.AuthentikTopology, pgConn *PostgresConnection) 
 	applyPlacement(values.Server)
 	applyPlacement(values.Worker)
 
-	if pgConn != nil {
+	switch {
+	case embedded && pgConn != nil:
+		// The bundled subchart auto-generates its own password unless told
+		// otherwise; we pin it to our generated value so authentik's own
+		// AUTHENTIK_POSTGRESQL__PASSWORD (below) actually matches it.
+		values.Postgres["auth"] = map[string]any{"password": pgConn.Password}
+		values.Authentik["postgresql"] = map[string]any{"password": pgConn.Password}
+	case !embedded && pgConn != nil:
 		values.Authentik["postgresql"] = map[string]any{
 			"host":     pgConn.Host,
 			"port":     pgConn.Port,
@@ -120,10 +139,11 @@ func HelmValues(t *benchv1alpha1.AuthentikTopology, pgConn *PostgresConnection) 
 	return &apiextensionsv1.JSON{Raw: raw}, nil
 }
 
-// PostgresConnection is the resolved connection info for CNPG or External
-// postgres modes, read from the relevant Secret by the caller (the operator
-// never manages the lifecycle of the secret itself for External, and only
-// reads CNPG's generated one for CNPG).
+// PostgresConnection is the resolved connection info passed to HelmValues.
+// For Embedded mode only Password is meaningful (see above); for CNPG/
+// External modes the full connection is read from the relevant Secret by the
+// caller - the operator never manages the lifecycle of that Secret itself
+// for External, and only reads CNPG's generated one for CNPG.
 type PostgresConnection struct {
 	Host     string
 	Port     int32
@@ -156,6 +176,11 @@ func HelmRelease(t *benchv1alpha1.AuthentikTopology, kubeConfigSecretName string
 		},
 		Spec: helmv2.HelmReleaseSpec{
 			Interval: metav1.Duration{Duration: helmRepoInterval},
+			// Explicit, rather than Flux's default "[TargetNamespace-]Name"
+			// composition, so ServiceEndpoint's "<release>-server" naming
+			// stays correct regardless of what the target namespace is
+			// named.
+			ReleaseName: HelmReleaseName(t),
 			Chart: &helmv2.HelmChartTemplate{
 				Spec: helmv2.HelmChartTemplateSpec{
 					Chart:   "authentik",
