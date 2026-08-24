@@ -16,7 +16,10 @@ const testCase = "e2e-login";
 test("defines a topology, a test case, and starts a run", async ({ page }) => {
   await test.step("the seeded topology is visible", async () => {
     await page.goto("/topologies");
-    await expect(page.getByRole("cell", { name: "seeded-topology" })).toBeVisible();
+    // The Name column links to the topology; the Target column repeats the
+    // same text (targetName defaults to the topology's name), so matching by
+    // "cell" here is ambiguous - the link is the one unique locator.
+    await expect(page.getByRole("link", { name: "seeded-topology" })).toBeVisible();
   });
 
   await test.step("create a topology", async () => {
@@ -31,7 +34,9 @@ test("defines a topology, a test case, and starts a run", async ({ page }) => {
     await page.getByRole("button", { name: "Create topology" }).click();
 
     await expect(page).toHaveURL(/\/topologies$/);
-    await expect(page.getByRole("cell", { name: topology, exact: true })).toBeVisible();
+    // Same ambiguity as above: Name and Target columns both show the
+    // topology's name when targetName is unset, so only the link is unique.
+    await expect(page.getByRole("link", { name: topology, exact: true })).toBeVisible();
     await expect(page.getByRole("row", { name: new RegExp(topology) })).toContainText("CNPG");
   });
 
@@ -90,12 +95,16 @@ test("defines a topology, a test case, and starts a run", async ({ page }) => {
 test("the home page counts what exists", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
-  await expect(page.getByText("Topologies", { exact: true })).toBeVisible();
-  await expect(page.getByRole("cell", { name: "seeded-topology" })).toBeVisible();
+  // "Topologies" also appears as the sidebar nav link and the stat card
+  // label - the section heading is the one place it's unique.
+  await expect(page.getByRole("heading", { name: "Topologies", level: 2 })).toBeVisible();
+  await expect(page.getByRole("link", { name: "seeded-topology" })).toBeVisible();
 });
 
 test("clusters lists the management cluster", async ({ page }) => {
   await page.goto("/clusters");
-  await expect(page.getByRole("cell", { name: "management" })).toBeVisible();
+  // Without exact:true this also matches the Role column's "Management" -
+  // Playwright's text matching is case-insensitive by default.
+  await expect(page.getByRole("cell", { name: "management", exact: true })).toBeVisible();
   await expect(page.getByRole("row", { name: /management/ })).toContainText("Management");
 });

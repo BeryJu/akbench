@@ -9,6 +9,13 @@
 # Usage: KUBEBUILDER_ASSETS=$(setup-envtest use -p path) hack/webui-e2e.sh
 # or just: make test-webui
 set -euo pipefail
+# Job control: puts each `&` job in its own process group, so cleanup can
+# signal "-$pid" (the group) rather than just $pid. Needed because both
+# background jobs below fork further (go run execs a temp binary; npm run
+# start execs next-server as a child) - killing only the tracked PID left
+# those actual servers running as orphans, still bound to :8080/:3000, which
+# broke the next invocation with EADDRINUSE.
+set -m
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 frontend="${root}/web/frontend"
@@ -21,7 +28,7 @@ fi
 pids=()
 cleanup() {
   for pid in "${pids[@]:-}"; do
-    kill "${pid}" 2>/dev/null || true
+    kill -TERM -- "-${pid}" 2>/dev/null || kill "${pid}" 2>/dev/null || true
   done
   wait 2>/dev/null || true
 }
