@@ -111,6 +111,7 @@ func HelmValues(t *benchv1alpha1.AuthentikTopology, authentikSecretName string, 
 		if tol := Tolerations(t.Spec.Placement); len(tol) > 0 {
 			w["tolerations"] = tol
 		}
+		w["affinity"] = map[string]any{"podAntiAffinity": AffinityPreset(t.Spec.Placement)}
 	}
 	applyPlacement(values.Server)
 	applyPlacement(values.Worker)

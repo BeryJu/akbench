@@ -87,6 +87,102 @@ var _ = Describe("AuthentikTopology Controller", func() {
 		})
 	})
 
+	Context("Dedicated placement", func() {
+		const resourceName = "topology-dedicated"
+		var typeNamespacedName types.NamespacedName
+
+		BeforeEach(func() {
+			typeNamespacedName = types.NamespacedName{Name: resourceName, Namespace: "default"}
+			topo := &benchv1alpha1.AuthentikTopology{
+				ObjectMeta: metav1.ObjectMeta{Name: resourceName, Namespace: "default"},
+				Spec: benchv1alpha1.AuthentikTopologySpec{
+					Namespace: "authentik-" + resourceName,
+					Server:    benchv1alpha1.WorkloadSpec{Replicas: 1},
+					Worker:    benchv1alpha1.WorkloadSpec{Replicas: 1},
+					Postgres:  benchv1alpha1.PostgresSpec{Mode: benchv1alpha1.PostgresEmbedded},
+					Placement: benchv1alpha1.PlacementSpec{Mode: benchv1alpha1.PlacementDedicated},
+				},
+			}
+			Expect(k8sClient.Create(ctx, topo)).To(Succeed())
+		})
+
+		AfterEach(func() {
+			forceDelete(ctx, &benchv1alpha1.AuthentikTopology{ObjectMeta: metav1.ObjectMeta{Name: resourceName, Namespace: "default"}})
+		})
+
+		It("renders the chart's hard pod anti-affinity preset", func() {
+			r := &AuthentikTopologyReconciler{Client: k8sClient, Scheme: k8sClient.Scheme()}
+			_, err := r.Reconcile(context.Background(), reconcile.Request{NamespacedName: typeNamespacedName})
+			Expect(err).NotTo(HaveOccurred())
+
+			var hr helmv2.HelmRelease
+			Expect(k8sClient.Get(context.Background(), typeNamespacedName, &hr)).To(Succeed())
+			var values render.AuthentikTopologyHelmValues
+			Expect(json.Unmarshal(hr.Spec.Values.Raw, &values)).To(Succeed())
+			serverAffinity, _ := values.Server["affinity"].(map[string]any)
+			Expect(serverAffinity["podAntiAffinity"]).To(Equal("hard"))
+			workerAffinity, _ := values.Worker["affinity"].(map[string]any)
+			Expect(workerAffinity["podAntiAffinity"]).To(Equal("hard"))
+		})
+	})
+
+	Context("External postgres", func() {
+		const resourceName = "topology-external"
+		var typeNamespacedName types.NamespacedName
+
+		BeforeEach(func() {
+			typeNamespacedName = types.NamespacedName{Name: resourceName, Namespace: "default"}
+			targetNs := "authentik-" + resourceName
+			Expect(k8sClient.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: targetNs}})).To(Succeed())
+			Expect(k8sClient.Create(ctx, &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{Name: "external-pg", Namespace: targetNs},
+				StringData: map[string]string{
+					"host": "pg.example.com", "port": "5432", "database": "authentik",
+					"username": "authentik", "password": "s3cret",
+				},
+			})).To(Succeed())
+			topo := &benchv1alpha1.AuthentikTopology{
+				ObjectMeta: metav1.ObjectMeta{Name: resourceName, Namespace: "default"},
+				Spec: benchv1alpha1.AuthentikTopologySpec{
+					Namespace: targetNs,
+					Server:    benchv1alpha1.WorkloadSpec{Replicas: 1},
+					Worker:    benchv1alpha1.WorkloadSpec{Replicas: 1},
+					Postgres: benchv1alpha1.PostgresSpec{
+						Mode:     benchv1alpha1.PostgresExternal,
+						External: &benchv1alpha1.ExternalPostgresSpec{SecretRef: corev1.LocalObjectReference{Name: "external-pg"}},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, topo)).To(Succeed())
+		})
+
+		AfterEach(func() {
+			forceDelete(ctx, &benchv1alpha1.AuthentikTopology{ObjectMeta: metav1.ObjectMeta{Name: resourceName, Namespace: "default"}})
+			forceDelete(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "authentik-" + resourceName}})
+		})
+
+		It("wires the referenced secret's connection into the chart values without touching CNPG", func() {
+			r := &AuthentikTopologyReconciler{Client: k8sClient, Scheme: k8sClient.Scheme()}
+			_, err := r.Reconcile(context.Background(), reconcile.Request{NamespacedName: typeNamespacedName})
+			Expect(err).NotTo(HaveOccurred())
+
+			var hr helmv2.HelmRelease
+			Expect(k8sClient.Get(context.Background(), typeNamespacedName, &hr)).To(Succeed())
+			var values render.AuthentikTopologyHelmValues
+			Expect(json.Unmarshal(hr.Spec.Values.Raw, &values)).To(Succeed())
+			Expect(values.Postgres["enabled"]).To(BeFalse())
+			pg, _ := values.Authentik["postgresql"].(map[string]any)
+			Expect(pg["host"]).To(Equal("pg.example.com"))
+			Expect(pg["password"]).To(Equal("s3cret"))
+
+			var topo benchv1alpha1.AuthentikTopology
+			Expect(k8sClient.Get(context.Background(), typeNamespacedName, &topo)).To(Succeed())
+			postgresReady := meta.FindStatusCondition(topo.Status.Conditions, benchv1alpha1.ConditionPostgresReady)
+			Expect(postgresReady).NotTo(BeNil())
+			Expect(postgresReady.Status).To(Equal(metav1.ConditionTrue))
+		})
+	})
+
 	Context("clusterRef set (deferred to M4)", func() {
 		It("reports NotImplemented instead of touching a remote cluster", func() {
 			topo := &benchv1alpha1.AuthentikTopology{

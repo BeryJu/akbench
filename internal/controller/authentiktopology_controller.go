@@ -19,6 +19,8 @@ package controller
 import (
 	"context"
 	"fmt"
+	"strconv"
+	"time"
 
 	helmv2 "github.com/fluxcd/helm-controller/api/v2"
 	sourcev1 "github.com/fluxcd/source-controller/api/v1"
@@ -27,6 +29,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -45,10 +48,10 @@ const authentikTopologyFinalizer = "bench.goauthentik.io/remote-cleanup"
 
 // AuthentikTopologyReconciler reconciles an AuthentikTopology object.
 //
-// M1 scope: operates only on the cluster the operator itself runs on
-// (spec.clusterRef is rejected with a NotImplemented condition until the
-// multicluster tracker lands in M4) and only supports Postgres mode
-// Embedded (CNPG/External are rejected the same way until M2).
+// M1/M2 scope: operates only on the cluster the operator itself runs on -
+// spec.clusterRef is rejected with a NotImplemented condition until the
+// multicluster tracker lands in M4. All three Postgres modes (Embedded,
+// CNPG, External) and both placement modes are implemented.
 type AuthentikTopologyReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
@@ -59,6 +62,7 @@ type AuthentikTopologyReconciler struct {
 // +kubebuilder:rbac:groups=bench.goauthentik.io,resources=authentiktopologies/finalizers,verbs=update
 // +kubebuilder:rbac:groups=helm.toolkit.fluxcd.io,resources=helmreleases,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=source.toolkit.fluxcd.io,resources=helmrepositories,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=postgresql.cnpg.io,resources=clusters,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=core,resources=namespaces,verbs=get;list;watch;create;delete
 // +kubebuilder:rbac:groups=core,resources=secrets,verbs=get;list;watch;create;update
 
@@ -86,18 +90,21 @@ func (r *AuthentikTopologyReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		return ctrl.Result{}, r.Status().Update(ctx, &topo)
 	}
 
-	if topo.Spec.Postgres.Mode != benchv1alpha1.PostgresEmbedded {
-		setCondition(&topo.Status.Conditions, topo.Generation, benchv1alpha1.ConditionPostgresReady, metav1.ConditionFalse,
-			benchv1alpha1.ReasonNotImplemented, fmt.Sprintf("postgres mode %s lands in M2; use Embedded for now", topo.Spec.Postgres.Mode))
-		setCondition(&topo.Status.Conditions, topo.Generation, benchv1alpha1.ConditionReady, metav1.ConditionFalse,
-			benchv1alpha1.ReasonNotImplemented, "waiting on postgres mode support")
-		return ctrl.Result{}, r.Status().Update(ctx, &topo)
-	}
-	setCondition(&topo.Status.Conditions, topo.Generation, benchv1alpha1.ConditionPostgresReady, metav1.ConditionTrue,
-		benchv1alpha1.ReasonReady, "using the authentik chart's bundled postgresql subchart")
-
 	if err := r.ensureNamespace(ctx, topo.Spec.Namespace); err != nil {
 		return ctrl.Result{}, fmt.Errorf("ensure namespace: %w", err)
+	}
+
+	pgConn, pgReady, err := r.resolvePostgres(ctx, &topo)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("resolve postgres: %w", err)
+	}
+	if !pgReady {
+		setCondition(&topo.Status.Conditions, topo.Generation, benchv1alpha1.ConditionReady, metav1.ConditionFalse,
+			benchv1alpha1.ReasonReconciling, "waiting on postgres backend")
+		if err := r.Status().Update(ctx, &topo); err != nil {
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 	}
 
 	repo := render.HelmRepository(topo.Namespace, topo.Spec.Chart)
@@ -113,21 +120,6 @@ func (r *AuthentikTopologyReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		types.NamespacedName{Name: authentikSecretName, Namespace: topo.Spec.Namespace},
 		"AUTHENTIK_SECRET_KEY", 32); err != nil {
 		return ctrl.Result{}, fmt.Errorf("ensure authentik secret key: %w", err)
-	}
-
-	var pgConn *render.PostgresConnection
-	if topo.Spec.Postgres.Mode == benchv1alpha1.PostgresEmbedded {
-		// Pin the bundled postgresql subchart's own auth.password to a value
-		// we generate, so it matches what we also hand authentik as
-		// AUTHENTIK_POSTGRESQL__PASSWORD - the two are otherwise generated
-		// independently and would never agree.
-		pw, err := ensureRandomSecret(ctx, r.Client,
-			types.NamespacedName{Name: topo.Name + "-authentik-postgres", Namespace: topo.Spec.Namespace},
-			"password", 24)
-		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("ensure postgres password: %w", err)
-		}
-		pgConn = &render.PostgresConnection{Password: pw}
 	}
 
 	values, err := render.HelmValues(&topo, authentikSecretName, pgConn)
@@ -198,6 +190,109 @@ func (r *AuthentikTopologyReconciler) reconcileDelete(ctx context.Context, topo 
 	return ctrl.Result{}, r.Update(ctx, topo)
 }
 
+// resolvePostgres implements all three Postgres modes, returning the
+// connection info HelmValues needs (nil for Embedded once its password
+// secret exists - the chart wires itself to its own bundled subchart) and
+// whether the backend is ready for the authentik chart to be installed
+// against. A false ready with a nil error means "still reconciling, check
+// back later" (e.g. CNPG cluster not healthy yet), not a failure.
+func (r *AuthentikTopologyReconciler) resolvePostgres(ctx context.Context, topo *benchv1alpha1.AuthentikTopology) (*render.PostgresConnection, bool, error) {
+	switch topo.Spec.Postgres.Mode {
+	case benchv1alpha1.PostgresCNPG:
+		return r.resolveCNPGPostgres(ctx, topo)
+	case benchv1alpha1.PostgresExternal:
+		return r.resolveExternalPostgres(ctx, topo)
+	default: // PostgresEmbedded
+		return r.resolveEmbeddedPostgres(ctx, topo)
+	}
+}
+
+func (r *AuthentikTopologyReconciler) resolveEmbeddedPostgres(ctx context.Context, topo *benchv1alpha1.AuthentikTopology) (*render.PostgresConnection, bool, error) {
+	// Pin the bundled postgresql subchart's own auth.password to a value we
+	// generate, so it matches what we also hand authentik as
+	// AUTHENTIK_POSTGRESQL__PASSWORD - the two are otherwise generated
+	// independently and would never agree.
+	pw, err := ensureRandomSecret(ctx, r.Client,
+		types.NamespacedName{Name: topo.Name + "-authentik-postgres", Namespace: topo.Spec.Namespace},
+		"password", 24)
+	if err != nil {
+		return nil, false, fmt.Errorf("ensure postgres password: %w", err)
+	}
+	setCondition(&topo.Status.Conditions, topo.Generation, benchv1alpha1.ConditionPostgresReady, metav1.ConditionTrue,
+		benchv1alpha1.ReasonReady, "using the authentik chart's bundled postgresql subchart")
+	return &render.PostgresConnection{Password: pw}, true, nil
+}
+
+func (r *AuthentikTopologyReconciler) resolveCNPGPostgres(ctx context.Context, topo *benchv1alpha1.AuthentikTopology) (*render.PostgresConnection, bool, error) {
+	cluster := render.CNPGCluster(topo)
+	if err := r.applyOwned(ctx, topo, cluster); err != nil {
+		return nil, false, fmt.Errorf("apply CNPG Cluster: %w", err)
+	}
+	topo.Status.CNPGClusterRef = &corev1.LocalObjectReference{Name: cluster.GetName()}
+
+	existing := &unstructured.Unstructured{}
+	existing.SetAPIVersion(cluster.GetAPIVersion())
+	existing.SetKind(cluster.GetKind())
+	if err := r.Get(ctx, types.NamespacedName{Name: cluster.GetName(), Namespace: cluster.GetNamespace()}, existing); err != nil {
+		return nil, false, fmt.Errorf("get CNPG Cluster: %w", err)
+	}
+	if !render.CNPGReady(existing) {
+		setCondition(&topo.Status.Conditions, topo.Generation, benchv1alpha1.ConditionPostgresReady, metav1.ConditionFalse,
+			benchv1alpha1.ReasonReconciling, "waiting for CNPG Cluster to become healthy")
+		return nil, false, nil
+	}
+
+	secretName := render.CNPGAppSecretName(topo)
+	var sec corev1.Secret
+	if err := r.Get(ctx, types.NamespacedName{Name: secretName, Namespace: topo.Spec.Namespace}, &sec); err != nil {
+		if apierrors.IsNotFound(err) {
+			setCondition(&topo.Status.Conditions, topo.Generation, benchv1alpha1.ConditionPostgresReady, metav1.ConditionFalse,
+				benchv1alpha1.ReasonReconciling, "waiting for CNPG's generated app secret")
+			return nil, false, nil
+		}
+		return nil, false, fmt.Errorf("get CNPG app secret: %w", err)
+	}
+	setCondition(&topo.Status.Conditions, topo.Generation, benchv1alpha1.ConditionPostgresReady, metav1.ConditionTrue,
+		benchv1alpha1.ReasonReady, "CNPG Cluster is healthy")
+	return connectionFromSecret(sec, "host", "port", "dbname", "username", "password"), true, nil
+}
+
+func (r *AuthentikTopologyReconciler) resolveExternalPostgres(ctx context.Context, topo *benchv1alpha1.AuthentikTopology) (*render.PostgresConnection, bool, error) {
+	ext := topo.Spec.Postgres.External
+	if ext == nil {
+		return nil, false, fmt.Errorf("postgres mode External requires spec.postgres.external")
+	}
+	var sec corev1.Secret
+	if err := r.Get(ctx, types.NamespacedName{Name: ext.SecretRef.Name, Namespace: topo.Spec.Namespace}, &sec); err != nil {
+		if apierrors.IsNotFound(err) {
+			setCondition(&topo.Status.Conditions, topo.Generation, benchv1alpha1.ConditionPostgresReady, metav1.ConditionFalse,
+				benchv1alpha1.ReasonDependencyNotReady, fmt.Sprintf("external postgres secret %q not found", ext.SecretRef.Name))
+			return nil, false, nil
+		}
+		return nil, false, fmt.Errorf("get external postgres secret: %w", err)
+	}
+	setCondition(&topo.Status.Conditions, topo.Generation, benchv1alpha1.ConditionPostgresReady, metav1.ConditionTrue,
+		benchv1alpha1.ReasonReady, "using the referenced external postgres secret")
+	return connectionFromSecret(sec, "host", "port", "database", "username", "password"), true, nil
+}
+
+// connectionFromSecret reads a PostgresConnection out of a Secret's data
+// fields, keyed by name so callers can match CNPG's ("dbname") vs. the
+// External contract's ("database") differing key for the database name.
+func connectionFromSecret(sec corev1.Secret, hostKey, portKey, dbKey, userKey, passwordKey string) *render.PostgresConnection {
+	port, _ := strconv.Atoi(string(sec.Data[portKey]))
+	if port == 0 {
+		port = 5432
+	}
+	return &render.PostgresConnection{
+		Host:     string(sec.Data[hostKey]),
+		Port:     int32(port),
+		Database: string(sec.Data[dbKey]),
+		User:     string(sec.Data[userKey]),
+		Password: string(sec.Data[passwordKey]),
+	}
+}
+
 func (r *AuthentikTopologyReconciler) ensureNamespace(ctx context.Context, name string) error {
 	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: name}}
 	err := r.Get(ctx, types.NamespacedName{Name: name}, ns)
@@ -245,8 +340,8 @@ func (r *AuthentikTopologyReconciler) applyOwned(ctx context.Context, topo *benc
 }
 
 // specEqual compares the parts of existing/desired that applyOwned actually
-// renders, for the two Flux kinds this controller owns. Unknown types return
-// false (always update) rather than risk silently dropping a real change.
+// renders, for the kinds this controller owns. Unknown types return false
+// (always update) rather than risk silently dropping a real change.
 func specEqual(existing, desired client.Object) bool {
 	switch d := desired.(type) {
 	case *helmv2.HelmRelease:
@@ -255,6 +350,9 @@ func specEqual(existing, desired client.Object) bool {
 	case *sourcev1.HelmRepository:
 		e, ok := existing.(*sourcev1.HelmRepository)
 		return ok && apiequality.Semantic.DeepEqual(e.Spec, d.Spec)
+	case *unstructured.Unstructured:
+		e, ok := existing.(*unstructured.Unstructured)
+		return ok && apiequality.Semantic.DeepEqual(e.Object["spec"], d.Object["spec"])
 	default:
 		return false
 	}

@@ -4,38 +4,27 @@ package render
 
 import (
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
 )
 
-// defaultTopologyKey mirrors PlacementSpec's own kubebuilder default, used
-// when a spec was built up in Go rather than defaulted by the API server
-// (e.g. in unit tests).
-const defaultTopologyKey = "kubernetes.io/hostname"
-
-// Affinity returns the pod affinity for a workload scheduled under the given
-// placement spec. Dedicated mode requires one pod per node - Default mode
-// applies no affinity, letting the scheduler share nodes with other
-// workloads (the noisy-neighbor case the benchmark compares against).
-func Affinity(spec benchv1alpha1.PlacementSpec, matchLabels map[string]string) *corev1.Affinity {
-	if spec.Mode != benchv1alpha1.PlacementDedicated {
-		return nil
+// AffinityPreset returns the authentik chart's own affinity-preset value
+// (server.affinity.podAntiAffinity / worker.affinity.podAntiAffinity: one of
+// "none", "soft", "hard" - see charts.goauthentik.io/authentik's
+// _helpers.tpl) for the given placement mode. Dedicated maps to "hard"
+// (required pod anti-affinity, one pod per node - the topology key the chart
+// uses for "hard" is fixed at kubernetes.io/hostname, matching
+// PlacementSpec's own default; PlacementSpec.TopologyKey has no effect here
+// since the chart doesn't expose it as a value - use ExtraValuesRef for a
+// custom key). Default maps to "none": the chart's own root default is
+// "soft", which would already bias pods apart, so Default must say "none"
+// explicitly to let pods land on the same node (the noisy-neighbor case the
+// benchmark compares against).
+func AffinityPreset(spec benchv1alpha1.PlacementSpec) string {
+	if spec.Mode == benchv1alpha1.PlacementDedicated {
+		return "hard"
 	}
-	topologyKey := spec.TopologyKey
-	if topologyKey == "" {
-		topologyKey = defaultTopologyKey
-	}
-	return &corev1.Affinity{
-		PodAntiAffinity: &corev1.PodAntiAffinity{
-			RequiredDuringSchedulingIgnoredDuringExecution: []corev1.PodAffinityTerm{
-				{
-					TopologyKey:   topologyKey,
-					LabelSelector: &metav1.LabelSelector{MatchLabels: matchLabels},
-				},
-			},
-		},
-	}
+	return "none"
 }
 
 // Tolerations returns the tolerations to apply in Dedicated mode, letting
