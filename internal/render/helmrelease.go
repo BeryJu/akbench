@@ -218,10 +218,10 @@ func HelmRelease(t *benchv1alpha1.AuthentikTopology, kubeConfigSecretName string
 }
 
 // ServiceEndpoint is the authentik chart's own service-name convention:
-// "<release>-server" in the target namespace, serving HTTP on the chart's
-// server.service.servicePortHttp (default 80). Verify against the deployed
-// chart version at install time - this is the one place this plan's design
-// flagged as needing confirmation against the real chart source.
+// "<release>-authentik-server" in the target namespace, serving HTTP on the
+// chart's server.service.servicePortHttp (default 80). Confirmed against a
+// live install of chart version 2026.8.0 - the chart's fullname template
+// always includes "-authentik-", it isn't just the release name.
 func ServiceEndpoint(t *benchv1alpha1.AuthentikTopology) string {
-	return fmt.Sprintf("%s-server.%s.svc.cluster.local:80", HelmReleaseName(t), t.Spec.Namespace)
+	return fmt.Sprintf("%s-authentik-server.%s.svc.cluster.local:80", HelmReleaseName(t), t.Spec.Namespace)
 }

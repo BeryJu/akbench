@@ -126,12 +126,12 @@ func TestHelmReleaseUsesExplicitReleaseName(t *testing.T) {
 
 	// Flux's own default release-name composition is "[TargetNamespace-]Name",
 	// which would double up here since both are "authentik-1" - pinning
-	// ReleaseName explicitly is what keeps ServiceEndpoint's "<release>-server"
-	// naming correct.
+	// ReleaseName explicitly is what keeps ServiceEndpoint's
+	// "<release>-authentik-server" naming correct.
 	if hr.Spec.ReleaseName != "authentik-1" {
 		t.Errorf("releaseName = %q, want %q", hr.Spec.ReleaseName, "authentik-1")
 	}
-	if got, want := ServiceEndpoint(topo), "authentik-1-server.authentik-1.svc.cluster.local:80"; got != want {
+	if got, want := ServiceEndpoint(topo), "authentik-1-authentik-server.authentik-1.svc.cluster.local:80"; got != want {
 		t.Errorf("ServiceEndpoint() = %q, want %q", got, want)
 	}
 }
