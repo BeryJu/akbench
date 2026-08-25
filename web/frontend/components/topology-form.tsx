@@ -161,6 +161,17 @@ export function TopologyForm({ existing }: { existing?: Topology }) {
             />
           </label>
           <label>
+            <span>authentik image</span>
+            <input
+              name="image"
+              value={spec.authentik?.image ?? ""}
+              placeholder="ghcr.io/goauthentik/server"
+              onChange={(e) =>
+                patch({ authentik: { ...spec.authentik, image: e.target.value || undefined } })
+              }
+            />
+          </label>
+          <label>
             <span>authentik image tag (defaults to the chart&apos;s)</span>
             <input
               name="tag"
