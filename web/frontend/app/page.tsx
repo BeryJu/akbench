@@ -2,7 +2,12 @@
 
 import Link from "next/link";
 import { api } from "@/lib/api";
+import { MetricsChart } from "@/components/metrics-chart";
 import { Age, Empty, ErrorBanner, PhaseBadge, ReadyBadge, useResource } from "@/components/ui";
+
+// Metrics charted on the dashboard, a small at-a-glance subset of what
+// Compare and a TestCase's own page can chart in full.
+const DASHBOARD_METRICS = ["http_reqs", "http_req_duration_p95"];
 
 export default function Home() {
   const topologies = useResource(() => api.topologies());
@@ -11,6 +16,7 @@ export default function Home() {
   const clusters = useResource(() => api.clusters(), [], 30000);
 
   const burning = (testCases.data ?? []).filter((tc) => tc.spec.profile === "Burn");
+  const burningNames = burning.map((tc) => tc.metadata.name);
   const recent = [...(runs.data ?? [])]
     .sort((a, b) => (b.metadata.creationTimestamp ?? "").localeCompare(a.metadata.creationTimestamp ?? ""))
     .slice(0, 8);
@@ -40,6 +46,17 @@ export default function Home() {
           <div className="muted">Burn tests running</div>
         </div>
       </div>
+
+      <h2>Live metrics</h2>
+      {burningNames.length ? (
+        <div className="charts">
+          {DASHBOARD_METRICS.map((metric) => (
+            <MetricsChart key={metric} metric={metric} testids={burningNames} rangeSeconds={30 * 60} />
+          ))}
+        </div>
+      ) : (
+        <Empty>No Burn tests running - nothing to chart live.</Empty>
+      )}
 
       <h2>Topologies</h2>
       {topologies.data?.length ? (
