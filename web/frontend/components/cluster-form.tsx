@@ -17,7 +17,7 @@ function emptySpec(): WorkloadClusterSpec {
     controlPlane: { replicas: 1 },
     workers: { replicas: 2 },
     incus: {
-      lxcSecretRef: { name: "" },
+      lxcSecretRef: { name: "lxc-secret" },
       image: "ubuntu:24.04",
       profiles: ["default"],
       controlPlane: { flavor: "c2-m4" },
