@@ -6,13 +6,39 @@ import { api, ApiError } from "@/lib/api";
 import type { WorkloadClusterSpec } from "@/lib/types";
 import { ErrorBanner } from "@/components/ui";
 
+// KUBERNETES_VERSIONS is the latest patch of each of the last 5 minor
+// releases, newest first. Static rather than fetched live: a cluster-
+// creation form that depends on reaching an external version index at
+// request time is a worse failure mode than an occasionally-stale list, and
+// every other version pin in this repo (K6Image, chart versions) is
+// deliberately static for the same reason. Sourced from dl.k8s.io/release/
+// stable[-<minor>].txt - refresh these (and emptySpec's default below) when
+// they drift too far behind.
+const KUBERNETES_VERSIONS = ["v1.36.4", "v1.35.8", "v1.34.11", "v1.33.13", "v1.32.13"];
+
+// INSTANCE_FLAVORS are cluster-api-provider-incus's own "cX-mY" flavor
+// format (X vCPUs, Y GiB RAM - see LXCMachineSpec.Flavor's doc comment
+// upstream), not a made-up scheme of this project's - so the dropdown's
+// labels can be computed directly from the value instead of hand-maintained
+// alongside it.
+const INSTANCE_FLAVORS = ["c1-m2", "c2-m4", "c4-m8", "c8-m16", "c16-m32"];
+
+function flavorLabel(flavor: string): string {
+  const match = /^c(\d+)-m(\d+)$/.exec(flavor);
+  if (!match) {
+    return flavor;
+  }
+  const [, cpu, memGiB] = match;
+  return `${flavor} - ${cpu} vCPU, ${memGiB} GiB RAM`;
+}
+
 /**
  * emptySpec mirrors WorkloadClusterSpec's own CRD defaults, the same way
  * topology-form's emptySpec does - what you see is what gets created.
  */
 function emptySpec(): WorkloadClusterSpec {
   return {
-    kubernetesVersion: "v1.31.0",
+    kubernetesVersion: KUBERNETES_VERSIONS[0],
     provider: "Incus",
     controlPlane: { replicas: 1 },
     workers: { replicas: 2 },
@@ -77,14 +103,18 @@ export function ClusterForm() {
           </label>
           <label>
             <span>Kubernetes version</span>
-            <input
+            <select
               name="kubernetesVersion"
               value={spec.kubernetesVersion}
-              required
-              pattern="v[0-9]+\.[0-9]+\.[0-9]+"
-              placeholder="v1.31.0"
               onChange={(e) => patch({ kubernetesVersion: e.target.value })}
-            />
+            >
+              {KUBERNETES_VERSIONS.map((version, i) => (
+                <option key={version} value={version}>
+                  {version}
+                  {i === 0 ? " (latest)" : ""}
+                </option>
+              ))}
+            </select>
           </label>
           <label>
             <span>Infrastructure provider</span>
@@ -170,23 +200,33 @@ export function ClusterForm() {
           <div className="grid2">
             <label>
               <span>Control plane flavor</span>
-              <input
+              <select
                 name="controlPlaneFlavor"
-                value={spec.incus?.controlPlane?.flavor ?? ""}
-                placeholder="c2-m4"
+                value={spec.incus?.controlPlane?.flavor ?? INSTANCE_FLAVORS[1]}
                 onChange={(e) =>
                   patchIncus({ controlPlane: { flavor: e.target.value } })
                 }
-              />
+              >
+                {INSTANCE_FLAVORS.map((flavor) => (
+                  <option key={flavor} value={flavor}>
+                    {flavorLabel(flavor)}
+                  </option>
+                ))}
+              </select>
             </label>
             <label>
               <span>Worker flavor</span>
-              <input
+              <select
                 name="workerFlavor"
-                value={spec.incus?.workers?.flavor ?? ""}
-                placeholder="c2-m4"
+                value={spec.incus?.workers?.flavor ?? INSTANCE_FLAVORS[1]}
                 onChange={(e) => patchIncus({ workers: { flavor: e.target.value } })}
-              />
+              >
+                {INSTANCE_FLAVORS.map((flavor) => (
+                  <option key={flavor} value={flavor}>
+                    {flavorLabel(flavor)}
+                  </option>
+                ))}
+              </select>
             </label>
           </div>
         </fieldset>
