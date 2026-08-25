@@ -1,0 +1,79 @@
+# Minimal single-cluster Prometheus with the remote-write receiver k6
+# workloads push to by default (see defaultRemoteWriteURL in
+# internal/controller/testcase_controller.go). Only for local/dev use on a
+# single management cluster - the plan's real M4 metrics pipeline is a
+# central mTLS-secured receiver plus per-workload-cluster Grafana Alloy,
+# installed via Flux, which this does not attempt to replace.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: bench-system
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prometheus-server
+  namespace: bench-system
+  labels:
+    app: prometheus-server
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: prometheus-server
+  template:
+    metadata:
+      labels:
+        app: prometheus-server
+    spec:
+      containers:
+        - name: prometheus
+          image: prom/prometheus:v2.55.1
+          args:
+            - --config.file=/etc/prometheus/prometheus.yml
+            - --storage.tsdb.path=/prometheus
+            - --web.enable-remote-write-receiver
+            - --web.enable-lifecycle
+            # k6's K6_PROMETHEUS_RW_TREND_AS_NATIVE_HISTOGRAM=true (set in
+            # render.K6WorkloadParams.EnvVars) pushes native histograms;
+            # without this flag Prometheus 500s every remote-write request.
+            - --enable-feature=native-histograms
+          ports:
+            - name: http
+              containerPort: 9090
+          volumeMounts:
+            - name: config
+              mountPath: /etc/prometheus
+      volumes:
+        - name: config
+          configMap:
+            name: prometheus-server-config
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-server-config
+  namespace: bench-system
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 15s
+    scrape_configs: []
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: prometheus-server
+  namespace: bench-system
+  labels:
+    app: prometheus-server
+spec:
+  selector:
+    app: prometheus-server
+  ports:
+    - name: http
+      port: 80
+      targetPort: 9090
+    - name: prom-native
+      port: 9090
+      targetPort: 9090

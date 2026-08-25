@@ -134,6 +134,14 @@ run-webui: ## Run the frontend dev server against a backend on :8080.
 	cd web/frontend && npm install --no-audit --no-fund && \
 		BENCH_API_URL=http://127.0.0.1:8080 BENCH_API_TOKEN=$${BENCH_API_TOKEN:-dev-token} npm run dev
 
+.PHONY: dev-metrics
+dev-metrics: ## Install a minimal single-cluster Prometheus (remote-write receiver) for local testing.
+	kubectl apply -f hack/dev-prometheus.yaml
+
+.PHONY: fixtures
+fixtures: ## Generate synthetic users and load the k6 credentials Secret every TestCase mounts.
+	./hack/gen-fixtures.sh
+
 # If you wish to build the manager image targeting other platforms you can use the --platform flag.
 # (i.e. docker build --platform linux/arm64). However, you must enable docker buildKit for it.
 # More info: https://docs.docker.com/develop/develop-images/build_enhancements/
