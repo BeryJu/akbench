@@ -23,6 +23,16 @@ function emptySpec(): TopologySpec {
   };
 }
 
+/** slugify turns a topology name into a Kubernetes-namespace-safe default:
+ * lowercase, non-alphanumeric runs collapsed to a single dash, no leading/
+ * trailing dash. */
+function slugify(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
 export function TopologyForm({ existing }: { existing?: Topology }) {
   const router = useRouter();
   const clusters = useResource(() => api.clusters(), [], 0);
@@ -31,6 +41,9 @@ export function TopologyForm({ existing }: { existing?: Topology }) {
   const [extraValuesYAML, setExtraValuesYAML] = useState("");
   const [error, setError] = useState<string>();
   const [saving, setSaving] = useState(false);
+  // Once the user has touched the namespace field directly, typing in the
+  // name field should stop clobbering their choice.
+  const [namespaceEdited, setNamespaceEdited] = useState(Boolean(existing));
 
   const patch = (changes: Partial<TopologySpec>) => setSpec({ ...spec, ...changes });
 
@@ -94,7 +107,13 @@ export function TopologyForm({ existing }: { existing?: Topology }) {
               disabled={Boolean(existing)}
               pattern="[a-z0-9]([-a-z0-9]*[a-z0-9])?"
               title="A Kubernetes object name: lowercase letters, digits and dashes"
-              onChange={(e) => setName(e.target.value)}
+              onChange={(e) => {
+                const value = e.target.value;
+                setName(value);
+                if (!namespaceEdited) {
+                  patch({ namespace: slugify(value) });
+                }
+              }}
             />
           </label>
           <label>
@@ -112,7 +131,10 @@ export function TopologyForm({ existing }: { existing?: Topology }) {
               name="namespace"
               value={spec.namespace}
               required
-              onChange={(e) => patch({ namespace: e.target.value })}
+              onChange={(e) => {
+                setNamespaceEdited(true);
+                patch({ namespace: e.target.value });
+              }}
             />
           </label>
           <label>
