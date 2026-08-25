@@ -27,12 +27,14 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/clientcmd"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
+	capikubeconfig "sigs.k8s.io/cluster-api/util/kubeconfig"
 
 	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
 	"github.com/goauthentik/authentik-bench/internal/render"
@@ -67,6 +69,7 @@ type WorkloadClusterReconciler struct {
 // +kubebuilder:rbac:groups=controlplane.cluster.x-k8s.io,resources=kubeadmcontrolplanes,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=bootstrap.cluster.x-k8s.io,resources=kubeadmconfigtemplates,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=lxcclusters;lxcmachinetemplates,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=core,resources=secrets,verbs=get;list;watch
 
 func (r *WorkloadClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
@@ -162,6 +165,16 @@ func (r *WorkloadClusterReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 
 	if wc.Status.ControlPlaneReady {
 		wc.Status.KubeconfigSecretRef = &corev1.LocalObjectReference{Name: render.KubeconfigSecretName(&wc)}
+		// kubeadm doesn't install a CNI itself - without one, kubelet reports
+		// "cni plugin not initialized" and every Node stays NotReady forever,
+		// so nothing can ever schedule. Best-effort and idempotent (plain
+		// Create, ignore AlreadyExists): logged rather than failing the whole
+		// reconcile, since a transient failure here (e.g. the API server
+		// mid-cert-rotation) shouldn't block updating the rest of this
+		// object's status, and the next reconcile just retries it.
+		if err := r.ensureCNI(ctx, &wc); err != nil {
+			log.Error(err, "failed to ensure CNI on workload cluster")
+		}
 	}
 
 	ready := metav1.ConditionFalse
@@ -180,6 +193,39 @@ func (r *WorkloadClusterReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	}
 	log.Info("reconciled WorkloadCluster", "phase", wc.Status.Phase, "ready", ready)
 	return ctrl.Result{}, nil
+}
+
+// ensureCNI installs Flannel onto the workload cluster if it isn't there
+// already. Uses a one-off client built directly from the "<name>-kubeconfig"
+// Secret CAPI writes, rather than internal/multicluster.Tracker: this
+// controller only ever needs an occasional apply here, not the long-lived
+// cached/watching connection Tracker exists for (that's what
+// AuthentikTopology/TestCase/TestRun use once they actually deploy onto this
+// cluster via clusterRef).
+func (r *WorkloadClusterReconciler) ensureCNI(ctx context.Context, wc *benchv1alpha1.WorkloadCluster) error {
+	kubeconfigBytes, err := capikubeconfig.FromSecret(ctx, r.Client, client.ObjectKey{Name: wc.Name, Namespace: wc.Namespace})
+	if err != nil {
+		return fmt.Errorf("get kubeconfig: %w", err)
+	}
+	restConfig, err := clientcmd.RESTConfigFromKubeConfig(kubeconfigBytes)
+	if err != nil {
+		return fmt.Errorf("build rest config: %w", err)
+	}
+	remoteClient, err := client.New(restConfig, client.Options{})
+	if err != nil {
+		return fmt.Errorf("build remote client: %w", err)
+	}
+
+	objs, err := render.CNIObjects()
+	if err != nil {
+		return fmt.Errorf("render CNI manifests: %w", err)
+	}
+	for _, obj := range objs {
+		if err := remoteClient.Create(ctx, obj); err != nil && !apierrors.IsAlreadyExists(err) {
+			return fmt.Errorf("create %s %s/%s: %w", obj.GetKind(), obj.GetNamespace(), obj.GetName(), err)
+		}
+	}
+	return nil
 }
 
 func (r *WorkloadClusterReconciler) reconcileDelete(ctx context.Context, wc *benchv1alpha1.WorkloadCluster) (ctrl.Result, error) {
