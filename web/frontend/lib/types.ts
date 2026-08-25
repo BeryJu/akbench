@@ -183,6 +183,21 @@ export interface CompareResponse {
   results: { testid: string; values: Record<string, number> }[];
 }
 
+export interface RangePoint {
+  time: number;
+  value: number;
+}
+
+export interface RangeSeries {
+  testid: string;
+  points: RangePoint[];
+}
+
+export interface RangeResponse {
+  metric: CompareMetric;
+  series: RangeSeries[];
+}
+
 /** readyCondition is the one condition every list view renders. */
 export function readyCondition(conditions?: Condition[]): Condition | undefined {
   return conditions?.find((c) => c.type === "Ready");

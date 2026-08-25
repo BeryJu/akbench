@@ -168,6 +168,26 @@ tr:hover td {
   letter-spacing: -0.02em;
 }
 
+.chart {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  background: var(--bg-raised);
+  margin-bottom: 16px;
+}
+
+.chart h3 {
+  margin: 0 0 8px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.charts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+  gap: 16px;
+}
+
 .muted {
   color: var(--text-dim);
 }

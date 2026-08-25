@@ -78,6 +78,10 @@ var safeLabelValue = regexp.MustCompile(`^[a-z0-9]([-a-z0-9._]*[a-z0-9])?$`)
 // safeWindow matches a Prometheus duration literal.
 var safeWindow = regexp.MustCompile(`^[0-9]+(ms|s|m|h|d|w|y)$`)
 
+// safeUnixTime matches a unix timestamp in seconds, the only form
+// metricsRange accepts start/end in.
+var safeUnixTime = regexp.MustCompile(`^[0-9]{1,10}$`)
+
 // proxyQuery forwards a PromQL query to the central Prometheus. Only the
 // parameters below are passed through, and only the two query endpoints are
 // reachable, so this stays a query proxy rather than a general-purpose hole
@@ -210,6 +214,174 @@ func (s *Server) compare(w http.ResponseWriter, r *http.Request) {
 		resp.Results = append(resp.Results, row)
 	}
 	writeJSON(w, r, http.StatusOK, resp)
+}
+
+// RangePoint is one (timestamp, value) sample of a metricsRange result.
+type RangePoint struct {
+	Time  int64   `json:"time"`
+	Value float64 `json:"value"`
+}
+
+// RangeSeries is one test's time series for a single CompareMetric.
+type RangeSeries struct {
+	TestID string       `json:"testid"`
+	Points []RangePoint `json:"points"`
+}
+
+type rangeResponse struct {
+	Metric CompareMetric `json:"metric"`
+	Series []RangeSeries `json:"series"`
+}
+
+// metricsRange answers GET
+// /metrics/range?testids=a,b&metric=<key>&start=&end=[&window=][&step=], the
+// per-test time series behind the compare view's charts and a TestCase's own
+// metrics panel. It is the only place a Burn TestCase's metrics can be
+// viewed at all: Burn has no TestRun history the way Quick does, since it
+// runs as a self-healing Deployment rather than a one-shot Job, so its only
+// record of what happened is whatever Prometheus still retains.
+func (s *Server) metricsRange(w http.ResponseWriter, r *http.Request) {
+	if s.cfg.PrometheusURL == "" {
+		writeError(w, r, http.StatusServiceUnavailable, "no Prometheus configured")
+		return
+	}
+	q := r.URL.Query()
+
+	raw := q.Get("testids")
+	if raw == "" {
+		writeError(w, r, http.StatusBadRequest, "testids is required")
+		return
+	}
+	var testids []string
+	for _, id := range strings.Split(raw, ",") {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		if !safeLabelValue.MatchString(id) {
+			writeError(w, r, http.StatusBadRequest, fmt.Sprintf("invalid testid %q", id))
+			return
+		}
+		testids = append(testids, id)
+	}
+	if len(testids) == 0 {
+		writeError(w, r, http.StatusBadRequest, "testids is required")
+		return
+	}
+
+	var metric *CompareMetric
+	for i := range compareMetrics {
+		if compareMetrics[i].Key == q.Get("metric") {
+			metric = &compareMetrics[i]
+			break
+		}
+	}
+	if metric == nil {
+		writeError(w, r, http.StatusBadRequest, fmt.Sprintf("unknown metric %q", q.Get("metric")))
+		return
+	}
+
+	start, end := q.Get("start"), q.Get("end")
+	if !safeUnixTime.MatchString(start) || !safeUnixTime.MatchString(end) {
+		writeError(w, r, http.StatusBadRequest, "start and end must be unix timestamps")
+		return
+	}
+
+	window := q.Get("window")
+	if window == "" {
+		window = "1m"
+	}
+	if !safeWindow.MatchString(window) {
+		writeError(w, r, http.StatusBadRequest, fmt.Sprintf("invalid window %q", window))
+		return
+	}
+	step := q.Get("step")
+	if step == "" {
+		step = "15s"
+	}
+	if !safeWindow.MatchString(step) {
+		writeError(w, r, http.StatusBadRequest, fmt.Sprintf("invalid step %q", step))
+		return
+	}
+
+	resp := rangeResponse{Metric: *metric}
+	for _, id := range testids {
+		selector := fmt.Sprintf("testid=%q", id)
+		query := metric.Query
+		if strings.Count(query, "%s") == 2 {
+			query = fmt.Sprintf(query, selector, window)
+		} else {
+			query = fmt.Sprintf(query, selector)
+		}
+		points, err := s.promRange(r.Context(), query, start, end, step)
+		if err != nil {
+			writeError(w, r, http.StatusBadGateway, err.Error())
+			return
+		}
+		resp.Series = append(resp.Series, RangeSeries{TestID: id, Points: points})
+	}
+	writeJSON(w, r, http.StatusOK, resp)
+}
+
+// promMatrixResponse is the query_range shape: one entry per distinct label
+// set. Every CompareMetric.Query aggregates down to a single series
+// (sum(...)/avg(...)/max(...) with no "by"), so promRange only ever reads
+// the first result entry.
+type promMatrixResponse struct {
+	Status string `json:"status"`
+	Error  string `json:"error"`
+	Data   struct {
+		ResultType string `json:"resultType"`
+		Result     []struct {
+			Values [][2]json.RawMessage `json:"values"`
+		} `json:"result"`
+	} `json:"data"`
+}
+
+// promRange runs a range query and returns its single series, dropping
+// non-finite samples the same way promInstant drops a NaN quantile.
+func (s *Server) promRange(ctx context.Context, query, start, end, step string) ([]RangePoint, error) {
+	params := url.Values{"query": {query}, "start": {start}, "end": {end}, "step": {step}}
+	resp, err := s.promGet(ctx, "/api/v1/query_range", params)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	var parsed promMatrixResponse
+	if err := json.NewDecoder(io.LimitReader(resp.Body, maxPromResponseBytes)).Decode(&parsed); err != nil {
+		return nil, fmt.Errorf("decode Prometheus response: %w", err)
+	}
+	if parsed.Status != "success" {
+		if parsed.Error != "" {
+			return nil, fmt.Errorf("prometheus: %s", parsed.Error)
+		}
+		return nil, fmt.Errorf("prometheus returned an error status")
+	}
+	// []RangePoint{}, not nil: a nil slice marshals to JSON null, and the
+	// frontend iterates this array unconditionally (a test with no data in
+	// the window is a legitimate, common case - not an error to special-case).
+	if len(parsed.Data.Result) == 0 {
+		return []RangePoint{}, nil
+	}
+	raw := parsed.Data.Result[0].Values
+	points := make([]RangePoint, 0, len(raw))
+	for _, sample := range raw {
+		var ts float64
+		if err := json.Unmarshal(sample[0], &ts); err != nil {
+			return nil, fmt.Errorf("decode sample timestamp: %w", err)
+		}
+		var text string
+		if err := json.Unmarshal(sample[1], &text); err != nil {
+			return nil, fmt.Errorf("decode sample value: %w", err)
+		}
+		value, err := strconv.ParseFloat(text, 64)
+		if err != nil || math.IsNaN(value) || math.IsInf(value, 0) {
+			continue
+		}
+		points = append(points, RangePoint{Time: int64(ts), Value: value})
+	}
+	return points, nil
 }
 
 func (s *Server) promGet(ctx context.Context, path string, params url.Values) (*http.Response, error) {

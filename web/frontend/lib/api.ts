@@ -6,6 +6,7 @@
 import type {
   Cluster,
   CompareResponse,
+  RangeResponse,
   TestCase,
   TestRun,
   Topology,
@@ -96,6 +97,12 @@ export const api = {
   compare: (testids: string[], window: string) =>
     request<CompareResponse>(
       `/metrics/compare?testids=${encodeURIComponent(testids.join(","))}&window=${encodeURIComponent(window)}`,
+    ),
+  metricsRange: (testids: string[], metric: string, startSeconds: number, endSeconds: number, step: string) =>
+    request<RangeResponse>(
+      `/metrics/range?testids=${encodeURIComponent(testids.join(","))}` +
+        `&metric=${encodeURIComponent(metric)}&start=${startSeconds}&end=${endSeconds}` +
+        `&step=${encodeURIComponent(step)}`,
     ),
   embedURL: (dashboard: string, vars: string[], from: string) =>
     request<{ url: string }>(

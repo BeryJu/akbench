@@ -117,6 +117,7 @@ func (s *Server) Router() http.Handler {
 
 		r.Get("/metrics/query", s.proxyQuery)
 		r.Get("/metrics/compare", s.compare)
+		r.Get("/metrics/range", s.metricsRange)
 		r.Get("/grafana/embed-url", s.embedURL)
 	})
 

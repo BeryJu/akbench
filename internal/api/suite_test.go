@@ -170,3 +170,28 @@ func fakePrometheus(t *testing.T, handler func(query string) (string, bool)) *ht
 	t.Cleanup(srv.Close)
 	return srv
 }
+
+// fakePrometheusRange serves the query_range (matrix) shape metricsRange
+// parses, answering every query with the points the test hands it.
+func fakePrometheusRange(t *testing.T, handler func(query string) [][2]any) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		points := handler(r.URL.Query().Get("query"))
+		w.Header().Set("Content-Type", "application/json")
+		values := make([]any, len(points))
+		for i, p := range points {
+			values[i] = []any{p[0], p[1]}
+		}
+		result := []any{}
+		if points != nil {
+			result = []any{map[string]any{"metric": map[string]string{}, "values": values}}
+		}
+		body := map[string]any{
+			"status": "success",
+			"data":   map[string]any{"resultType": "matrix", "result": result},
+		}
+		_ = json.NewEncoder(w).Encode(body)
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}

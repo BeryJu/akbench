@@ -170,3 +170,108 @@ func TestCompareDropsNaN(t *testing.T) {
 		t.Fatalf("real values were dropped too: %v", body.Results[0].Values)
 	}
 }
+
+func TestMetricsRange(t *testing.T) {
+	seen := map[string]bool{}
+	prom := fakePrometheusRange(t, func(query string) [][2]any {
+		seen[query] = true
+		switch {
+		case strings.Contains(query, `testid="login-a"`):
+			return [][2]any{{1700000000, "1"}, {1700000015, "2"}}
+		case strings.Contains(query, `testid="login-b"`):
+			return [][2]any{{1700000000, "3"}}
+		default:
+			return nil
+		}
+	})
+
+	s, _ := newServer(t, Config{PrometheusURL: prom.URL})
+	rec := do(t, s, http.MethodGet,
+		"/api/v1/metrics/range?testids=login-a,login-b&metric=http_reqs&start=1700000000&end=1700000015", nil)
+	requireStatus(t, rec, http.StatusOK)
+
+	body := decodeBody[struct {
+		Metric struct {
+			Key   string `json:"key"`
+			Label string `json:"label"`
+		} `json:"metric"`
+		Series []struct {
+			TestID string `json:"testid"`
+			Points []struct {
+				Time  int64   `json:"time"`
+				Value float64 `json:"value"`
+			} `json:"points"`
+		} `json:"series"`
+	}](t, rec)
+
+	if body.Metric.Key != "http_reqs" {
+		t.Fatalf("metric key = %q, want http_reqs", body.Metric.Key)
+	}
+	if len(body.Series) != 2 {
+		t.Fatalf("got %d series, want 2", len(body.Series))
+	}
+	if got := body.Series[0]; got.TestID != "login-a" || len(got.Points) != 2 || got.Points[1].Value != 2 {
+		t.Fatalf("login-a series = %+v", got)
+	}
+	if got := body.Series[1]; got.TestID != "login-b" || len(got.Points) != 1 || got.Points[0].Value != 3 {
+		t.Fatalf("login-b series = %+v", got)
+	}
+	// Default window (1m) has to reach the query, same as compare's default 5m.
+	wantQuery := `sum(rate(k6_http_reqs_total{testid="login-a"}[1m]))`
+	if !seen[wantQuery] {
+		t.Fatalf("query was not %q; queries seen: %v", wantQuery, seen)
+	}
+}
+
+// A series with no samples in the window has to serialize as "points":[],
+// not "points":null - the frontend iterates every series unconditionally,
+// and null is not iterable in JS.
+func TestMetricsRangeEmptySeriesIsNotNull(t *testing.T) {
+	prom := fakePrometheusRange(t, func(query string) [][2]any { return nil })
+
+	s, _ := newServer(t, Config{PrometheusURL: prom.URL})
+	rec := do(t, s, http.MethodGet,
+		"/api/v1/metrics/range?testids=login-a&metric=http_reqs&start=1700000000&end=1700000015", nil)
+	requireStatus(t, rec, http.StatusOK)
+
+	if strings.Contains(rec.Body.String(), `"points":null`) {
+		t.Fatalf("an empty series serialized as null: %s", rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"points":[]`) {
+		t.Fatalf("an empty series did not serialize as []: %s", rec.Body.String())
+	}
+}
+
+func TestMetricsRangeRejectsUnknownMetric(t *testing.T) {
+	s, _ := newServer(t, Config{PrometheusURL: "http://prometheus.invalid"})
+	rec := do(t, s, http.MethodGet,
+		"/api/v1/metrics/range?testids=login-a&metric=not_a_real_metric&start=1700000000&end=1700000015", nil)
+	requireStatus(t, rec, http.StatusBadRequest)
+}
+
+func TestMetricsRangeRejectsBadTimestamps(t *testing.T) {
+	s, _ := newServer(t, Config{PrometheusURL: "http://prometheus.invalid"})
+	for _, target := range []string{
+		"/api/v1/metrics/range?testids=login-a&metric=http_reqs&start=not-a-time&end=1700000015",
+		"/api/v1/metrics/range?testids=login-a&metric=http_reqs&start=1700000000&end=",
+	} {
+		rec := do(t, s, http.MethodGet, target, nil)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("%s got status %d, want 400", target, rec.Code)
+		}
+	}
+}
+
+func TestMetricsRangeRejectsInjection(t *testing.T) {
+	s, _ := newServer(t, Config{PrometheusURL: "http://prometheus.invalid"})
+	rec := do(t, s, http.MethodGet,
+		"/api/v1/metrics/range?testids="+url.QueryEscape(`a"} or up{`)+"&metric=http_reqs&start=1700000000&end=1700000015", nil)
+	requireStatus(t, rec, http.StatusBadRequest)
+}
+
+func TestMetricsRangeWithoutPrometheus(t *testing.T) {
+	s, _ := newServer(t, Config{})
+	rec := do(t, s, http.MethodGet,
+		"/api/v1/metrics/range?testids=login-a&metric=http_reqs&start=1700000000&end=1700000015", nil)
+	requireStatus(t, rec, http.StatusServiceUnavailable)
+}

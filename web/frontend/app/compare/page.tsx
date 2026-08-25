@@ -1,26 +1,20 @@
 "use client";
 
 import { useSearchParams } from "next/navigation";
-import { Suspense, useEffect, useMemo, useState } from "react";
-import { api, ApiError } from "@/lib/api";
+import { Suspense, useMemo, useState } from "react";
+import { api } from "@/lib/api";
+import { formatMetricValue } from "@/lib/format";
 import type { CompareResponse } from "@/lib/types";
 import { Empty, ErrorBanner, useResource } from "@/components/ui";
+import { MetricsChart } from "@/components/metrics-chart";
 
 const windows = ["1m", "5m", "15m", "1h"];
-const ranges = ["now-15m", "now-1h", "now-6h", "now-24h"];
-
-function formatValue(value: number | undefined, unit: string): string {
-  if (value === undefined) {
-    return "-";
-  }
-  if (unit === "ratio") {
-    return `${(value * 100).toFixed(1)}%`;
-  }
-  if (unit === "s") {
-    return value < 1 ? `${(value * 1000).toFixed(0)} ms` : `${value.toFixed(2)} s`;
-  }
-  return value >= 100 ? value.toFixed(0) : value.toFixed(2);
-}
+const ranges: { label: string; seconds: number }[] = [
+  { label: "Last 15m", seconds: 15 * 60 },
+  { label: "Last 1h", seconds: 60 * 60 },
+  { label: "Last 6h", seconds: 6 * 60 * 60 },
+  { label: "Last 24h", seconds: 24 * 60 * 60 },
+];
 
 /** best picks the winning test per metric, honouring the metric's direction. */
 function best(response: CompareResponse, key: string, better: string): string | undefined {
@@ -41,9 +35,7 @@ function Compare() {
     search.get("testids")?.split(",").filter(Boolean) ?? [],
   );
   const [window, setWindow] = useState("5m");
-  const [range, setRange] = useState("now-1h");
-  const [embed, setEmbed] = useState<string>();
-  const [embedError, setEmbedError] = useState<string>();
+  const [range, setRange] = useState(ranges[1]);
 
   const comparison = useResource(
     () =>
@@ -53,31 +45,6 @@ function Compare() {
     [selected.join(","), window],
     10000,
   );
-
-  useEffect(() => {
-    if (!selected.length) {
-      setEmbed(undefined);
-      return;
-    }
-    let cancelled = false;
-    api
-      .embedURL("compare-tests", selected.map((id) => `testid:${id}`), range)
-      .then((result) => {
-        if (!cancelled) {
-          setEmbed(result.url);
-          setEmbedError(undefined);
-        }
-      })
-      .catch((err) => {
-        if (!cancelled) {
-          setEmbed(undefined);
-          setEmbedError(err instanceof ApiError ? err.message : String(err));
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [selected.join(","), range]);
 
   const rows = useMemo(() => comparison.data?.metrics ?? [], [comparison.data]);
 
@@ -92,7 +59,7 @@ function Compare() {
       <h1>Compare</h1>
       <p className="subtitle">
         Pick the tests to put side by side. The table summarises the last {window} of each;
-        the dashboard below plots them over time.
+        the charts below plot them over time.
       </p>
 
       <ErrorBanner error={comparison.error ?? testCases.error} />
@@ -124,10 +91,14 @@ function Compare() {
             </select>
           </label>
           <label style={{ width: "auto" }}>
-            <span>Dashboard range</span>
-            <select name="range" value={range} onChange={(e) => setRange(e.target.value)}>
+            <span>Chart range</span>
+            <select
+              name="range"
+              value={range.label}
+              onChange={(e) => setRange(ranges.find((r) => r.label === e.target.value) ?? ranges[1])}
+            >
               {ranges.map((option) => (
-                <option key={option}>{option}</option>
+                <option key={option.label}>{option.label}</option>
               ))}
             </select>
           </label>
@@ -159,7 +130,7 @@ function Compare() {
                     </td>
                     {(comparison.data?.results ?? []).map((result) => (
                       <td key={result.testid} className="mono">
-                        {formatValue(result.values[metric.key], metric.unit)}
+                        {formatMetricValue(result.values[metric.key], metric.unit)}
                         {winner === result.testid ? " ✓" : ""}
                       </td>
                     ))}
@@ -169,13 +140,17 @@ function Compare() {
             </tbody>
           </table>
 
-          <h2>Dashboard</h2>
-          <ErrorBanner error={embedError} />
-          {embed ? (
-            <iframe src={embed} title="Compare tests dashboard" />
-          ) : (
-            <Empty>No Grafana configured for this backend.</Empty>
-          )}
+          <h2>Over time</h2>
+          <div className="charts">
+            {rows.map((metric) => (
+              <MetricsChart
+                key={metric.key}
+                metric={metric.key}
+                testids={selected}
+                rangeSeconds={range.seconds}
+              />
+            ))}
+          </div>
         </>
       )}
     </>
