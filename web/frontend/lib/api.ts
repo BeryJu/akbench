@@ -9,6 +9,7 @@ import type {
   TestCase,
   TestRun,
   Topology,
+  WorkloadCluster,
 } from "./types";
 
 export class ApiError extends Error {
@@ -52,6 +53,9 @@ interface List<T> {
 
 export const api = {
   clusters: () => request<List<Cluster>>("/clusters").then((r) => r.items ?? []),
+  registerCluster: (body: Partial<WorkloadCluster>) =>
+    request<WorkloadCluster>("/clusters", { method: "POST", body: JSON.stringify(body) }),
+  deprovisionCluster: (name: string) => request<void>(`/clusters/${name}`, { method: "DELETE" }),
 
   topologies: () => request<List<Topology>>("/topologies").then((r) => r.items ?? []),
   topology: (name: string) => request<Topology>(`/topologies/${name}`),
@@ -60,6 +64,13 @@ export const api = {
   updateTopology: (name: string, body: Partial<Topology>) =>
     request<Topology>(`/topologies/${name}`, { method: "PUT", body: JSON.stringify(body) }),
   deleteTopology: (name: string) => request<void>(`/topologies/${name}`, { method: "DELETE" }),
+  getExtraValues: (name: string) =>
+    request<{ valuesYAML: string }>(`/topologies/${name}/extra-values`),
+  setExtraValues: (name: string, valuesYAML: string) =>
+    request<{ valuesYAML: string }>(`/topologies/${name}/extra-values`, {
+      method: "PUT",
+      body: JSON.stringify({ valuesYAML }),
+    }),
 
   testCases: () => request<List<TestCase>>("/testcases").then((r) => r.items ?? []),
   testCase: (name: string) => request<TestCase>(`/testcases/${name}`),

@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api, ApiError } from "@/lib/api";
 import type { PlacementMode, PostgresMode, Topology, TopologySpec } from "@/lib/types";
 import { ErrorBanner, useResource } from "@/components/ui";
@@ -28,21 +28,48 @@ export function TopologyForm({ existing }: { existing?: Topology }) {
   const clusters = useResource(() => api.clusters(), [], 0);
   const [name, setName] = useState(existing?.metadata.name ?? "");
   const [spec, setSpec] = useState<TopologySpec>(existing?.spec ?? emptySpec());
+  const [extraValuesYAML, setExtraValuesYAML] = useState("");
   const [error, setError] = useState<string>();
   const [saving, setSaving] = useState(false);
 
   const patch = (changes: Partial<TopologySpec>) => setSpec({ ...spec, ...changes });
+
+  // Extra values live in a separate ConfigMap (see /topologies/{name}/extra-
+  // values), so a new topology has nothing to load and an existing one is
+  // fetched once on mount.
+  useEffect(() => {
+    if (!existing) {
+      return;
+    }
+    let cancelled = false;
+    api
+      .getExtraValues(existing.metadata.name)
+      .then((res) => {
+        if (!cancelled) {
+          setExtraValuesYAML(res.valuesYAML);
+        }
+      })
+      .catch(() => {
+        // Not fatal to the form - the field just starts blank, same as a new
+        // topology, and the error surfaces properly if the user tries to save.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [existing]);
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
     setSaving(true);
     setError(undefined);
     try {
+      const savedName = existing?.metadata.name ?? name;
       if (existing) {
         await api.updateTopology(existing.metadata.name, { spec });
       } else {
         await api.createTopology({ metadata: { name }, spec });
       }
+      await api.setExtraValues(savedName, extraValuesYAML);
       router.push("/topologies");
       router.refresh();
     } catch (err) {
@@ -317,6 +344,27 @@ export function TopologyForm({ existing }: { existing?: Topology }) {
             </label>
           </div>
         )}
+      </fieldset>
+
+      <fieldset>
+        <legend>Advanced: extra Helm values</legend>
+        <p className="muted">
+          Raw <code>values.yaml</code> for the authentik chart, merged over everything above
+          last - the escape hatch for settings this form doesn&apos;t expose a field for.
+          Deep-merged: a key you don&apos;t set here is left alone.
+        </p>
+        <label>
+          <span className="sr-only">Extra Helm values (YAML)</span>
+          <textarea
+            name="extraValuesYAML"
+            className="mono"
+            rows={10}
+            spellCheck={false}
+            placeholder={"authentik:\n  geoip:\n    enabled: true\n"}
+            value={extraValuesYAML}
+            onChange={(e) => setExtraValuesYAML(e.target.value)}
+          />
+        </label>
       </fieldset>
 
       <div className="row">

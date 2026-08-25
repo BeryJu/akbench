@@ -55,6 +55,11 @@ export interface TopologySpec {
     image?: string;
     tag?: string;
     logLevel?: string;
+    // extraValuesRef names the ConfigMap the extra-values YAML editor
+    // (topology-form's "Advanced" section) reads and writes via
+    // /topologies/{name}/extra-values - set by that endpoint, not directly
+    // by the form.
+    extraValuesRef?: { name: string };
   };
 }
 
@@ -118,6 +123,51 @@ export interface Cluster {
   phase?: string;
   controlPlaneReady: boolean;
   infrastructureReady: boolean;
+}
+
+// InfrastructureProvider mirrors bench.goauthentik.io's own enum: Incus is
+// the only one WorkloadClusterReconciler actually provisions today, but the
+// field is a picker (not hardcoded) so the UI doesn't need to change shape
+// when a second provider lands - it'll just get another option and another
+// provider-specific sub-form, the same way postgres.mode already works.
+export type InfrastructureProvider = "Incus";
+
+export interface MachineSpec {
+  replicas: number;
+}
+
+export interface IncusMachineSpec {
+  flavor?: string;
+}
+
+export interface IncusProviderSpec {
+  lxcSecretRef: { name: string };
+  image?: string;
+  profiles?: string[];
+  controlPlane?: IncusMachineSpec;
+  workers?: IncusMachineSpec;
+}
+
+export interface WorkloadClusterSpec {
+  kubernetesVersion: string;
+  provider: InfrastructureProvider;
+  controlPlane: MachineSpec;
+  workers: MachineSpec;
+  incus?: IncusProviderSpec;
+}
+
+export interface WorkloadClusterStatus {
+  conditions?: Condition[];
+  phase?: string;
+  controlPlaneReady?: boolean;
+  infrastructureReady?: boolean;
+  kubeconfigSecretRef?: { name: string };
+}
+
+export interface WorkloadCluster {
+  metadata: ObjectMeta;
+  spec: WorkloadClusterSpec;
+  status?: WorkloadClusterStatus;
 }
 
 export interface CompareMetric {

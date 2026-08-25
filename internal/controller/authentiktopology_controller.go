@@ -96,6 +96,7 @@ func (r *AuthentikTopologyReconciler) resolveClient(ctx context.Context, topo *b
 // +kubebuilder:rbac:groups=postgresql.cnpg.io,resources=clusters,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=core,resources=namespaces,verbs=get;list;watch;create;delete
 // +kubebuilder:rbac:groups=core,resources=secrets,verbs=get;list;watch;create;update
+// +kubebuilder:rbac:groups=core,resources=configmaps,verbs=get;list;watch
 
 func (r *AuthentikTopologyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
@@ -165,6 +166,36 @@ func (r *AuthentikTopologyReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	values, err := render.HelmValues(&topo, secretKey, pgConn)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("build helm values: %w", err)
+	}
+	if ref := topo.Spec.Authentik.ExtraValuesRef; ref != nil && ref.Name != "" {
+		// The extra-values ConfigMap always lives alongside the
+		// AuthentikTopology object itself (the management cluster, in
+		// topo.Namespace), not on rc: it's config for the deployment, not
+		// part of the deployment, and reading it locally means this works
+		// the same way regardless of clusterRef.
+		var cm corev1.ConfigMap
+		if err := r.Get(ctx, types.NamespacedName{Name: ref.Name, Namespace: topo.Namespace}, &cm); err != nil {
+			if apierrors.IsNotFound(err) {
+				setCondition(&topo.Status.Conditions, topo.Generation, benchv1alpha1.ConditionReady, metav1.ConditionFalse,
+					benchv1alpha1.ReasonDependencyNotReady, fmt.Sprintf("extraValuesRef ConfigMap %q not found", ref.Name))
+				if err := r.Status().Update(ctx, &topo); err != nil {
+					return ctrl.Result{}, err
+				}
+				return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+			}
+			return ctrl.Result{}, fmt.Errorf("get extra values configmap: %w", err)
+		}
+		merged, err := render.MergeExtraValues(values, cm.Data["values.yaml"])
+		if err != nil {
+			// A bad YAML edit is a user-fixable input error, not something
+			// to retry on a timer - the extra-values API always touches the
+			// topology object on save, which re-triggers this reconcile as
+			// soon as the user corrects it.
+			setCondition(&topo.Status.Conditions, topo.Generation, benchv1alpha1.ConditionReady, metav1.ConditionFalse,
+				benchv1alpha1.ReasonReconcileError, fmt.Sprintf("invalid extraValuesRef YAML: %v", err))
+			return ctrl.Result{}, r.Status().Update(ctx, &topo)
+		}
+		values = merged
 	}
 	kubeConfigSecretName := ""
 	if topo.Spec.ClusterRef.Name != "" {
