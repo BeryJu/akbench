@@ -22,27 +22,46 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 )
 
-// WorkloadClusterMachineSpec sizes one set of machines (the control plane or
-// the worker MachineDeployment) on the Incus/LXC infrastructure provider.
-type WorkloadClusterMachineSpec struct {
+// InfrastructureProvider selects which Cluster API infrastructure provider
+// WorkloadClusterReconciler provisions a cluster through. Incus is the only
+// one implemented today (github.com/lxc/cluster-api-provider-incus, already
+// installed on the management cluster) - this is an enum rather than a bare
+// string, and each provider gets its own optional sub-spec below (mirroring
+// PostgresSpec's Mode/Embedded/CNPG/External split), so adding e.g. AWS or
+// vSphere later is a matter of another case and another sub-spec, not a
+// breaking change to existing WorkloadClusters.
+// +kubebuilder:validation:Enum=Incus
+type InfrastructureProvider string
+
+const (
+	// InfrastructureIncus provisions via the Incus/LXC infrastructure
+	// provider.
+	InfrastructureIncus InfrastructureProvider = "Incus"
+)
+
+// MachineSpec sizes one set of machines (the control plane or the worker
+// MachineDeployment) in a way every infrastructure provider understands -
+// only the replica count. Provider-specific sizing (instance
+// type/flavor/image/...) lives in that provider's own sub-spec instead (e.g.
+// IncusMachineSpec), since it doesn't mean the same thing across providers.
+type MachineSpec struct {
 	// +kubebuilder:validation:Minimum=1
 	// +kubebuilder:default=1
 	Replicas int32 `json:"replicas,omitempty"`
+}
+
+// IncusMachineSpec sizes one set of machines on the Incus/LXC infrastructure
+// provider beyond the provider-agnostic replica count in MachineSpec.
+type IncusMachineSpec struct {
 	// flavor is an Incus/LXC instance flavor (e.g. "c2-m4" - 2 vCPU, 4GiB).
 	// +kubebuilder:default="c2-m4"
 	// +optional
 	Flavor string `json:"flavor,omitempty"`
 }
 
-// WorkloadClusterSpec describes a Kubernetes cluster this operator asks
-// Cluster API's Incus infrastructure provider to provision, so
-// AuthentikTopology/TestCase can target it via clusterRef instead of the
-// management cluster.
-type WorkloadClusterSpec struct {
-	// kubernetesVersion is the version kubeadm installs, e.g. "v1.36.1".
-	// +kubebuilder:validation:Pattern=`^v[0-9]+\.[0-9]+\.[0-9]+$`
-	KubernetesVersion string `json:"kubernetesVersion"`
-
+// IncusProviderSpec configures provisioning via the Incus/LXC infrastructure
+// provider. Required when spec.provider is Incus (the default).
+type IncusProviderSpec struct {
 	// lxcSecretRef names a Secret (in this object's namespace) holding the
 	// Incus/LXC daemon connection: server, project, client-crt, client-key
 	// (matching the keys cluster-api-provider-incus itself expects).
@@ -60,9 +79,33 @@ type WorkloadClusterSpec struct {
 	Profiles []string `json:"profiles,omitempty"`
 
 	// +optional
-	ControlPlane WorkloadClusterMachineSpec `json:"controlPlane,omitempty"`
+	ControlPlane IncusMachineSpec `json:"controlPlane,omitempty"`
 	// +optional
-	Workers WorkloadClusterMachineSpec `json:"workers,omitempty"`
+	Workers IncusMachineSpec `json:"workers,omitempty"`
+}
+
+// WorkloadClusterSpec describes a Kubernetes cluster this operator asks
+// Cluster API to provision through the selected infrastructure provider, so
+// AuthentikTopology/TestCase can target it via clusterRef instead of the
+// management cluster.
+type WorkloadClusterSpec struct {
+	// kubernetesVersion is the version kubeadm installs, e.g. "v1.36.1".
+	// +kubebuilder:validation:Pattern=`^v[0-9]+\.[0-9]+\.[0-9]+$`
+	KubernetesVersion string `json:"kubernetesVersion"`
+
+	// provider selects the Cluster API infrastructure provider to use.
+	// +kubebuilder:default=Incus
+	// +optional
+	Provider InfrastructureProvider `json:"provider,omitempty"`
+
+	// +optional
+	ControlPlane MachineSpec `json:"controlPlane,omitempty"`
+	// +optional
+	Workers MachineSpec `json:"workers,omitempty"`
+
+	// incus configures provisioning when provider is Incus.
+	// +optional
+	Incus *IncusProviderSpec `json:"incus,omitempty"`
 }
 
 // WorkloadClusterStatus mirrors the underlying CAPI Cluster's readiness, plus

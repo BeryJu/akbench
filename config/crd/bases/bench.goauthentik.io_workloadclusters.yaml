@@ -49,71 +49,102 @@ spec:
           spec:
             description: |-
               WorkloadClusterSpec describes a Kubernetes cluster this operator asks
-              Cluster API's Incus infrastructure provider to provision, so
+              Cluster API to provision through the selected infrastructure provider, so
               AuthentikTopology/TestCase can target it via clusterRef instead of the
               management cluster.
             properties:
               controlPlane:
                 description: |-
-                  WorkloadClusterMachineSpec sizes one set of machines (the control plane or
-                  the worker MachineDeployment) on the Incus/LXC infrastructure provider.
+                  MachineSpec sizes one set of machines (the control plane or the worker
+                  MachineDeployment) in a way every infrastructure provider understands -
+                  only the replica count. Provider-specific sizing (instance
+                  type/flavor/image/...) lives in that provider's own sub-spec instead (e.g.
+                  IncusMachineSpec), since it doesn't mean the same thing across providers.
                 properties:
-                  flavor:
-                    default: c2-m4
-                    description: flavor is an Incus/LXC instance flavor (e.g. "c2-m4"
-                      - 2 vCPU, 4GiB).
-                    type: string
                   replicas:
                     default: 1
                     format: int32
                     minimum: 1
                     type: integer
                 type: object
-              image:
-                default: ubuntu:24.04
-                description: image is the Incus/LXC image new machines boot from.
-                type: string
+              incus:
+                description: incus configures provisioning when provider is Incus.
+                properties:
+                  controlPlane:
+                    description: |-
+                      IncusMachineSpec sizes one set of machines on the Incus/LXC infrastructure
+                      provider beyond the provider-agnostic replica count in MachineSpec.
+                    properties:
+                      flavor:
+                        default: c2-m4
+                        description: flavor is an Incus/LXC instance flavor (e.g.
+                          "c2-m4" - 2 vCPU, 4GiB).
+                        type: string
+                    type: object
+                  image:
+                    default: ubuntu:24.04
+                    description: image is the Incus/LXC image new machines boot from.
+                    type: string
+                  lxcSecretRef:
+                    description: |-
+                      lxcSecretRef names a Secret (in this object's namespace) holding the
+                      Incus/LXC daemon connection: server, project, client-crt, client-key
+                      (matching the keys cluster-api-provider-incus itself expects).
+                    properties:
+                      name:
+                        default: ""
+                        description: |-
+                          Name of the referent.
+                          This field is effectively required, but due to backwards compatibility is
+                          allowed to be empty. Instances of this type with an empty value here are
+                          almost certainly wrong.
+                          More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                        type: string
+                    type: object
+                    x-kubernetes-map-type: atomic
+                  profiles:
+                    default:
+                    - default
+                    description: |-
+                      profiles are the Incus/LXC profiles applied to every machine and to
+                      the control plane's load balancer.
+                    items:
+                      type: string
+                    type: array
+                  workers:
+                    description: |-
+                      IncusMachineSpec sizes one set of machines on the Incus/LXC infrastructure
+                      provider beyond the provider-agnostic replica count in MachineSpec.
+                    properties:
+                      flavor:
+                        default: c2-m4
+                        description: flavor is an Incus/LXC instance flavor (e.g.
+                          "c2-m4" - 2 vCPU, 4GiB).
+                        type: string
+                    type: object
+                required:
+                - lxcSecretRef
+                type: object
               kubernetesVersion:
                 description: kubernetesVersion is the version kubeadm installs, e.g.
                   "v1.36.1".
                 pattern: ^v[0-9]+\.[0-9]+\.[0-9]+$
                 type: string
-              lxcSecretRef:
-                description: |-
-                  lxcSecretRef names a Secret (in this object's namespace) holding the
-                  Incus/LXC daemon connection: server, project, client-crt, client-key
-                  (matching the keys cluster-api-provider-incus itself expects).
-                properties:
-                  name:
-                    default: ""
-                    description: |-
-                      Name of the referent.
-                      This field is effectively required, but due to backwards compatibility is
-                      allowed to be empty. Instances of this type with an empty value here are
-                      almost certainly wrong.
-                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
-                    type: string
-                type: object
-                x-kubernetes-map-type: atomic
-              profiles:
-                default:
-                - default
-                description: |-
-                  profiles are the Incus/LXC profiles applied to every machine and to
-                  the control plane's load balancer.
-                items:
-                  type: string
-                type: array
+              provider:
+                default: Incus
+                description: provider selects the Cluster API infrastructure provider
+                  to use.
+                enum:
+                - Incus
+                type: string
               workers:
                 description: |-
-                  WorkloadClusterMachineSpec sizes one set of machines (the control plane or
-                  the worker MachineDeployment) on the Incus/LXC infrastructure provider.
+                  MachineSpec sizes one set of machines (the control plane or the worker
+                  MachineDeployment) in a way every infrastructure provider understands -
+                  only the replica count. Provider-specific sizing (instance
+                  type/flavor/image/...) lives in that provider's own sub-spec instead (e.g.
+                  IncusMachineSpec), since it doesn't mean the same thing across providers.
                 properties:
-                  flavor:
-                    default: c2-m4
-                    description: flavor is an Incus/LXC instance flavor (e.g. "c2-m4"
-                      - 2 vCPU, 4GiB).
-                    type: string
                   replicas:
                     default: 1
                     format: int32
@@ -122,7 +153,6 @@ spec:
                 type: object
             required:
             - kubernetesVersion
-            - lxcSecretRef
             type: object
           status:
             description: |-

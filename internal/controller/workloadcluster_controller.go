@@ -86,6 +86,18 @@ func (r *WorkloadClusterReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		}
 	}
 
+	// Incus is the only infrastructure provider actually implemented today -
+	// spec.provider/spec.incus exist as a discriminated union (like
+	// PostgresSpec's mode) so a second provider is a new case here plus new
+	// render functions, not a breaking schema change, but there's nothing to
+	// render for it yet.
+	if (wc.Spec.Provider != benchv1alpha1.InfrastructureIncus && wc.Spec.Provider != "") || wc.Spec.Incus == nil {
+		setCondition(&wc.Status.Conditions, wc.Generation, benchv1alpha1.ConditionReady, metav1.ConditionFalse,
+			benchv1alpha1.ReasonReconcileError,
+			fmt.Sprintf("provider %q is not implemented; only %q (with spec.incus set) is", wc.Spec.Provider, benchv1alpha1.InfrastructureIncus))
+		return ctrl.Result{}, r.Status().Update(ctx, &wc)
+	}
+
 	// applyCreateOnly, not applyOwned: CAPI's own webhooks/defaulting mutate
 	// these objects' specs after creation (rollout strategy defaults, etc.)
 	// in ways this operator's freshly-rendered object never has, so a

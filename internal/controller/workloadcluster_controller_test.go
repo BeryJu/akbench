@@ -61,9 +61,14 @@ var _ = Describe("WorkloadCluster Controller", func() {
 					},
 					Spec: benchv1alpha1.WorkloadClusterSpec{
 						KubernetesVersion: "v1.31.0",
-						LXCSecretRef:      corev1.LocalObjectReference{Name: "lxc-secret"},
-						ControlPlane:      benchv1alpha1.WorkloadClusterMachineSpec{Replicas: 1, Flavor: "c2-m4"},
-						Workers:           benchv1alpha1.WorkloadClusterMachineSpec{Replicas: 2, Flavor: "c2-m4"},
+						Provider:          benchv1alpha1.InfrastructureIncus,
+						ControlPlane:      benchv1alpha1.MachineSpec{Replicas: 1},
+						Workers:           benchv1alpha1.MachineSpec{Replicas: 2},
+						Incus: &benchv1alpha1.IncusProviderSpec{
+							LXCSecretRef: corev1.LocalObjectReference{Name: "lxc-secret"},
+							ControlPlane: benchv1alpha1.IncusMachineSpec{Flavor: "c2-m4"},
+							Workers:      benchv1alpha1.IncusMachineSpec{Flavor: "c2-m4"},
+						},
 					},
 				}
 				Expect(k8sClient.Create(ctx, resource)).To(Succeed())

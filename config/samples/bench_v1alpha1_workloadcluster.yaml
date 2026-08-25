@@ -7,11 +7,15 @@ metadata:
   name: workloadcluster-sample
 spec:
   kubernetesVersion: v1.31.0
-  lxcSecretRef:
-    name: lxc-secret
+  provider: Incus
   controlPlane:
     replicas: 1
-    flavor: c2-m4
   workers:
     replicas: 2
-    flavor: c2-m4
+  incus:
+    lxcSecretRef:
+      name: lxc-secret
+    controlPlane:
+      flavor: c2-m4
+    workers:
+      flavor: c2-m4

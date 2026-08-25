@@ -26,6 +26,31 @@ const (
 	lxcMachineTemplate = "LXCMachineTemplate"
 )
 
+// infrastructureClusterKind and infrastructureMachineTemplateKind are the
+// only two things that differ, at the Cluster/KubeadmControlPlane/
+// MachineDeployment level, between infrastructure providers: which Kind
+// their InfrastructureRef points at. Adding a second provider (AWS, vSphere,
+// ...) means adding a case here and a set of provider-specific object
+// builders alongside LXCCluster/lxcMachineTemplateObject below - Cluster,
+// KubeadmControlPlane, and MachineDeployment themselves don't change.
+func infrastructureClusterKind(wc *benchv1alpha1.WorkloadCluster) string {
+	switch wc.Spec.Provider {
+	case benchv1alpha1.InfrastructureIncus, "":
+		return lxcClusterKind
+	default:
+		return lxcClusterKind
+	}
+}
+
+func infrastructureMachineTemplateKind(wc *benchv1alpha1.WorkloadCluster) string {
+	switch wc.Spec.Provider {
+	case benchv1alpha1.InfrastructureIncus, "":
+		return lxcMachineTemplate
+	default:
+		return lxcMachineTemplate
+	}
+}
+
 // Name helpers, matching the reference cluster-api-provider-incus example
 // (a Cluster named "x" pairs with a KubeadmControlPlane "x-control-plane" and
 // a single worker MachineDeployment "x-md-0").
@@ -79,16 +104,20 @@ func installKubeadmCommand(version string) string {
 }
 
 // LXCCluster is the Incus/LXC infrastructure for the Cluster: it stands up a
-// load balancer in front of the control plane's machines.
+// load balancer in front of the control plane's machines. Callers must only
+// call this (and the other Incus-specific builders below) once the
+// controller has confirmed wc.Spec.Provider is Incus and wc.Spec.Incus is
+// non-nil.
 func LXCCluster(wc *benchv1alpha1.WorkloadCluster) *unstructured.Unstructured {
+	incus := wc.Spec.Incus
 	u := &unstructured.Unstructured{}
 	u.SetAPIVersion(lxcInfraAPIVersion)
 	u.SetKind(lxcClusterKind)
 	u.SetName(wc.Name)
 	u.SetNamespace(wc.Namespace)
-	_ = unstructured.SetNestedField(u.Object, wc.Spec.ControlPlane.Flavor, "spec", "loadBalancer", "lxc", "instanceSpec", "flavor")
-	_ = unstructured.SetNestedStringSlice(u.Object, wc.Spec.Profiles, "spec", "loadBalancer", "lxc", "instanceSpec", "profiles")
-	_ = unstructured.SetNestedField(u.Object, wc.Spec.LXCSecretRef.Name, "spec", "secretRef", "name")
+	_ = unstructured.SetNestedField(u.Object, incus.ControlPlane.Flavor, "spec", "loadBalancer", "lxc", "instanceSpec", "flavor")
+	_ = unstructured.SetNestedStringSlice(u.Object, incus.Profiles, "spec", "loadBalancer", "lxc", "instanceSpec", "profiles")
+	_ = unstructured.SetNestedField(u.Object, incus.LXCSecretRef.Name, "spec", "secretRef", "name")
 	return u
 }
 
@@ -96,6 +125,7 @@ func LXCCluster(wc *benchv1alpha1.WorkloadCluster) *unstructured.Unstructured {
 // both the control plane and the worker MachineDeployment, only the
 // name/flavor differ.
 func lxcMachineTemplateObject(wc *benchv1alpha1.WorkloadCluster, name string, flavor string) *unstructured.Unstructured {
+	incus := wc.Spec.Incus
 	u := &unstructured.Unstructured{}
 	u.SetAPIVersion(lxcInfraAPIVersion)
 	u.SetKind(lxcMachineTemplate)
@@ -103,20 +133,20 @@ func lxcMachineTemplateObject(wc *benchv1alpha1.WorkloadCluster, name string, fl
 	u.SetNamespace(wc.Namespace)
 	_ = unstructured.SetNestedSlice(u.Object, []any{}, "spec", "template", "spec", "devices")
 	_ = unstructured.SetNestedField(u.Object, flavor, "spec", "template", "spec", "flavor")
-	_ = unstructured.SetNestedField(u.Object, wc.Spec.Image, "spec", "template", "spec", "image", "name")
+	_ = unstructured.SetNestedField(u.Object, incus.Image, "spec", "template", "spec", "image", "name")
 	_ = unstructured.SetNestedField(u.Object, "virtual-machine", "spec", "template", "spec", "instanceType")
-	_ = unstructured.SetNestedStringSlice(u.Object, wc.Spec.Profiles, "spec", "template", "spec", "profiles")
+	_ = unstructured.SetNestedStringSlice(u.Object, incus.Profiles, "spec", "template", "spec", "profiles")
 	return u
 }
 
 // ControlPlaneLXCMachineTemplate and WorkerLXCMachineTemplate are the two
 // LXCMachineTemplates a WorkloadCluster owns.
 func ControlPlaneLXCMachineTemplate(wc *benchv1alpha1.WorkloadCluster) *unstructured.Unstructured {
-	return lxcMachineTemplateObject(wc, controlPlaneMachineTemplateName(wc), wc.Spec.ControlPlane.Flavor)
+	return lxcMachineTemplateObject(wc, controlPlaneMachineTemplateName(wc), wc.Spec.Incus.ControlPlane.Flavor)
 }
 
 func WorkerLXCMachineTemplate(wc *benchv1alpha1.WorkloadCluster) *unstructured.Unstructured {
-	return lxcMachineTemplateObject(wc, workerMachineTemplateName(wc), wc.Spec.Workers.Flavor)
+	return lxcMachineTemplateObject(wc, workerMachineTemplateName(wc), wc.Spec.Incus.Workers.Flavor)
 }
 
 // KubeadmControlPlane renders the control plane: kubeadmConfigSpec is shared
@@ -138,7 +168,7 @@ func KubeadmControlPlane(wc *benchv1alpha1.WorkloadCluster) *controlplanev1.Kube
 				Spec: controlplanev1.KubeadmControlPlaneMachineTemplateSpec{
 					InfrastructureRef: clusterv1.ContractVersionedObjectReference{
 						APIGroup: "infrastructure.cluster.x-k8s.io",
-						Kind:     lxcMachineTemplate,
+						Kind:     infrastructureMachineTemplateKind(wc),
 						Name:     controlPlaneMachineTemplateName(wc),
 					},
 				},
@@ -196,7 +226,7 @@ func MachineDeployment(wc *benchv1alpha1.WorkloadCluster) *clusterv1.MachineDepl
 					},
 					InfrastructureRef: clusterv1.ContractVersionedObjectReference{
 						APIGroup: "infrastructure.cluster.x-k8s.io",
-						Kind:     lxcMachineTemplate,
+						Kind:     infrastructureMachineTemplateKind(wc),
 						Name:     workerMachineTemplateName(wc),
 					},
 				},
@@ -250,7 +280,7 @@ func Cluster(wc *benchv1alpha1.WorkloadCluster) *clusterv1.Cluster {
 			},
 			InfrastructureRef: clusterv1.ContractVersionedObjectReference{
 				APIGroup: "infrastructure.cluster.x-k8s.io",
-				Kind:     lxcClusterKind,
+				Kind:     infrastructureClusterKind(wc),
 				Name:     wc.Name,
 			},
 		},
