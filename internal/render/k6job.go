@@ -13,8 +13,12 @@ import (
 )
 
 // K6Image is the k6 image every rendered workload runs. Pinned rather than
-// left to "latest" so a benchmark run is reproducible.
-const K6Image = "grafana/k6:0.55.0"
+// left to "latest" so a benchmark run is reproducible. Must be >=0.57.0:
+// login.ts uses TypeScript syntax (type-only imports, interfaces, typed
+// consts), and k6 only transpiles .ts files natively without extra flags
+// from that version on - earlier images fail every run with a script parse
+// error before a single request is ever sent.
+const K6Image = "grafana/k6:0.57.0"
 
 // ScriptVolumeMountPath, FixturesMountPath and UsersFilePath match the paths
 // the ported login.ts (and any future script) expects, mirroring
