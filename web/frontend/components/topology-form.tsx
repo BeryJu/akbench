@@ -197,6 +197,7 @@ export function TopologyForm({ existing }: { existing?: Topology }) {
           >
             <option value="Default">Default - pods may share nodes</option>
             <option value="Dedicated">Dedicated - one pod per node</option>
+            <option value="Packed">Packed - all pods on the same node</option>
           </select>
         </label>
         {spec.placement?.mode === "Dedicated" && (

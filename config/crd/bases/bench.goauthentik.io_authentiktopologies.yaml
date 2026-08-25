@@ -146,6 +146,7 @@ spec:
                     enum:
                     - Default
                     - Dedicated
+                    - Packed
                     type: string
                   nodeSelector:
                     additionalProperties:

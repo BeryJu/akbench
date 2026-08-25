@@ -124,6 +124,9 @@ func HelmValues(t *benchv1alpha1.AuthentikTopology, secretKey string, pgConn *Po
 		if tol := Tolerations(t.Spec.Placement); len(tol) > 0 {
 			w["tolerations"] = tol
 		}
+		if aff := PackedAffinity(t.Spec.Placement, HelmReleaseName(t)); aff != nil {
+			w["affinity"] = aff
+		}
 	}
 	applyPlacement(values.Server)
 	applyPlacement(values.Worker)

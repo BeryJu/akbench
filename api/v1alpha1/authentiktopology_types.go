@@ -23,8 +23,9 @@ import (
 )
 
 // PlacementMode decides how an AuthentikTopology's pods are scheduled, which
-// is the "alone on nodes vs shared nodes" knob the benchmark compares.
-// +kubebuilder:validation:Enum=Default;Dedicated
+// is the "alone on nodes vs shared nodes vs packed together" knob the
+// benchmark compares.
+// +kubebuilder:validation:Enum=Default;Dedicated;Packed
 type PlacementMode string
 
 const (
@@ -36,6 +37,12 @@ const (
 	// pre-tainted/pre-labeled nodes. The operator does not create node pools
 	// itself - the target cluster must already have suitable nodes.
 	PlacementDedicated PlacementMode = "Dedicated"
+	// PlacementPacked requires server and worker pods to land on the same
+	// node as every other pod of this release (via pod affinity keyed on
+	// the release's own app.kubernetes.io/instance label, which the bundled
+	// postgres subchart's pod carries too) - the opposite of Dedicated, for
+	// benchmarking every component sharing one node's resources.
+	PlacementPacked PlacementMode = "Packed"
 )
 
 // PlacementSpec controls pod scheduling for an AuthentikTopology's server and

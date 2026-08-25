@@ -20,7 +20,7 @@ export interface ObjectMeta {
 }
 
 export type PostgresMode = "Embedded" | "CNPG" | "External";
-export type PlacementMode = "Default" | "Dedicated";
+export type PlacementMode = "Default" | "Dedicated" | "Packed";
 export type TestProfile = "Quick" | "Burn";
 
 export interface ResourceRequirements {

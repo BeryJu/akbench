@@ -90,6 +90,43 @@ func TestHelmValuesPlacementUsesGlobalAffinityPreset(t *testing.T) {
 	}
 }
 
+// TestHelmValuesPacked guards the opposite case from
+// TestHelmValuesPlacementUsesGlobalAffinityPreset: Packed mode has no preset
+// to reuse, so it's the one mode that *must* set server.affinity/
+// worker.affinity, keyed on the pinned release name so it also reaches the
+// bundled postgres pod (see PackedAffinity's doc comment).
+func TestHelmValuesPacked(t *testing.T) {
+	topo := exampleTopology()
+	topo.Spec.Placement = benchv1alpha1.PlacementSpec{Mode: benchv1alpha1.PlacementPacked}
+	raw, err := HelmValues(topo, "secret", &PostgresConnection{Password: "pw"})
+	if err != nil {
+		t.Fatalf("HelmValues: %v", err)
+	}
+	values := decodeValues(t, raw.Raw)
+
+	affinity, _ := values.Global["affinity"].(map[string]any)
+	if affinity["podAntiAffinity"] != "none" {
+		t.Errorf("global.affinity.podAntiAffinity = %v, want none", affinity["podAntiAffinity"])
+	}
+	for name, w := range map[string]map[string]any{"server": values.Server, "worker": values.Worker} {
+		raw, err := json.Marshal(w["affinity"])
+		if err != nil {
+			t.Fatalf("%s.affinity: marshal: %v", name, err)
+		}
+		if !json.Valid(raw) || string(raw) == "null" {
+			t.Fatalf("%s.affinity was not set", name)
+		}
+		var decoded map[string]any
+		if err := json.Unmarshal(raw, &decoded); err != nil {
+			t.Fatalf("%s.affinity: unmarshal: %v", name, err)
+		}
+		podAffinity, _ := decoded["podAffinity"].(map[string]any)
+		if podAffinity == nil {
+			t.Fatalf("%s.affinity.podAffinity missing: %v", name, decoded)
+		}
+	}
+}
+
 func TestHelmValuesExternalDisablesBundledPostgres(t *testing.T) {
 	topo := exampleTopology()
 	topo.Spec.Postgres = benchv1alpha1.PostgresSpec{

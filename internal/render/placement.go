@@ -4,6 +4,7 @@ package render
 
 import (
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
 )
@@ -34,6 +35,36 @@ func AffinityPreset(spec benchv1alpha1.PlacementSpec) string {
 		return "hard"
 	}
 	return "none"
+}
+
+// PackedAffinity returns the raw pod affinity Packed mode needs - the
+// chart's own preset mechanism (AffinityPreset/authentik.affinity) only ever
+// generates *anti*-affinity, there is no "pack together" preset to reuse, so
+// this goes through server.affinity/worker.affinity's verbatim-Affinity
+// escape hatch instead (see the doc comment on AffinityPreset).
+//
+// It requires scheduling onto a node that already has a pod carrying this
+// release's app.kubernetes.io/instance label - a label every pod the
+// authentik chart or its bundled postgresql subchart produces carries
+// (confirmed against both charts' own label helpers), so this reaches the
+// bundled postgres pod too, not just server/worker. Nil for every other
+// mode.
+func PackedAffinity(spec benchv1alpha1.PlacementSpec, releaseName string) *corev1.Affinity {
+	if spec.Mode != benchv1alpha1.PlacementPacked {
+		return nil
+	}
+	return &corev1.Affinity{
+		PodAffinity: &corev1.PodAffinity{
+			RequiredDuringSchedulingIgnoredDuringExecution: []corev1.PodAffinityTerm{
+				{
+					LabelSelector: &metav1.LabelSelector{
+						MatchLabels: map[string]string{"app.kubernetes.io/instance": releaseName},
+					},
+					TopologyKey: "kubernetes.io/hostname",
+				},
+			},
+		},
+	}
 }
 
 // Tolerations returns the tolerations to apply in Dedicated mode, letting
