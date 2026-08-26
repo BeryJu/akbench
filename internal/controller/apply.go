@@ -27,6 +27,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
@@ -77,12 +78,32 @@ func applyOwned(ctx context.Context, c client.Client, scheme *runtime.Scheme, ow
 		// re-asserting it here would error out when existing is a shared
 		// object (e.g. one HelmRepository per namespace, reused by every
 		// AuthentikTopology in it) already owned by a different owner.
+		return updateSpecWithConflictRetry(ctx, c, types.NamespacedName{Name: obj.GetName(), Namespace: obj.GetNamespace()}, existing, obj)
+	}
+	return nil
+}
+
+// updateSpecWithConflictRetry copies obj's spec onto existing and updates it,
+// retrying with a fresh Get on 409 Conflict. existing's own status subresource
+// is written separately from a plain Update, but its resourceVersion still
+// advances on every status write - and a remote controller actively working
+// this object (e.g. helm-controller mid-install) can write status often
+// enough that the resourceVersion this function's caller fetched existing at
+// is already stale by the time Update runs, well before any real conflict in
+// what either side is trying to change.
+func updateSpecWithConflictRetry(ctx context.Context, c client.Client, key types.NamespacedName, existing, obj client.Object) error {
+	return retry.RetryOnConflict(retry.DefaultBackoff, func() error {
 		if err := copySpec(existing, obj); err != nil {
 			return err
 		}
-		return c.Update(ctx, existing)
-	}
-	return nil
+		err := c.Update(ctx, existing)
+		if apierrors.IsConflict(err) {
+			if getErr := c.Get(ctx, key, existing); getErr != nil {
+				return getErr
+			}
+		}
+		return err
+	})
 }
 
 // applyCreateOnly creates obj (setting owner as its controller owner) and
@@ -164,10 +185,7 @@ func applyUnowned(ctx context.Context, c client.Client, obj client.Object) error
 		if specEqual(existing, obj) {
 			return nil
 		}
-		if err := copySpec(existing, obj); err != nil {
-			return err
-		}
-		return c.Update(ctx, existing)
+		return updateSpecWithConflictRetry(ctx, c, types.NamespacedName{Name: obj.GetName(), Namespace: obj.GetNamespace()}, existing, obj)
 	}
 	return nil
 }
