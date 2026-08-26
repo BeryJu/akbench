@@ -20,9 +20,10 @@
 // the guided form (TopologyForm) the standalone UI had.
 import { Router } from '@kinvolk/headlamp-plugin/lib';
 import { EmptyContent, Link, SectionBox, SimpleTable } from '@kinvolk/headlamp-plugin/lib/CommonComponents';
-import { Alert, Button, Chip } from '@mui/material';
+import { Alert, Button, Chip, Stack } from '@mui/material';
 import { useHistory, useParams } from 'react-router-dom';
-import { api, ApiError } from './api';
+import { api, ApiError, MANAGEMENT_CLUSTER } from './api';
+import { ClusterResourceButton } from './ClusterResourceButton';
 import { TopologyForm } from './TopologyForm';
 import { readyCondition } from './types';
 import { useResource } from './useResource';
@@ -90,6 +91,39 @@ export function TopologiesPage() {
           { label: 'Cluster', getter: topology => topology.spec.clusterRef?.name ?? 'management' },
           { label: 'Postgres', getter: topology => topology.spec.postgres.mode },
           { label: 'Ready', getter: topology => <ReadyChip status={readyCondition(topology.status?.conditions)?.status} /> },
+          {
+            label: 'Resources',
+            getter: topology => {
+              const cluster = topology.spec.clusterRef?.name ?? MANAGEMENT_CLUSTER;
+              return (
+                <Stack direction="row" spacing={1} flexWrap="wrap">
+                  <ClusterResourceButton
+                    kind="Deployment"
+                    cluster={cluster}
+                    namespace={topology.spec.namespace}
+                    name={`${topology.metadata.name}-authentik-server`}
+                    label="Server"
+                  />
+                  <ClusterResourceButton
+                    kind="Deployment"
+                    cluster={cluster}
+                    namespace={topology.spec.namespace}
+                    name={`${topology.metadata.name}-authentik-worker`}
+                    label="Worker"
+                  />
+                  {topology.spec.postgres.mode === 'Embedded' && (
+                    <ClusterResourceButton
+                      kind="StatefulSet"
+                      cluster={cluster}
+                      namespace={topology.spec.namespace}
+                      name={`${topology.metadata.name}-postgresql`}
+                      label="Postgres"
+                    />
+                  )}
+                </Stack>
+              );
+            },
+          },
           {
             label: '',
             getter: topology => (

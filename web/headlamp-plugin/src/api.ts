@@ -51,7 +51,7 @@ import {
 
 // Must match HeadlampKubeconfigReconciler's managementContextName
 // (internal/render/headlampkubeconfig.go).
-const MANAGEMENT_CLUSTER = 'management';
+export const MANAGEMENT_CLUSTER = 'management';
 
 // Must match hack/dev-apiserver.yaml's namespace/Service name/port.
 const APISERVER_PROXY_PATH =

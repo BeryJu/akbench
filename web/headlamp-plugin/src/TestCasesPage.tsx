@@ -18,15 +18,23 @@
 // web/frontend's /testcases pages.
 import { Router } from '@kinvolk/headlamp-plugin/lib';
 import { EmptyContent, Link, SectionBox, SimpleTable } from '@kinvolk/headlamp-plugin/lib/CommonComponents';
-import { Alert, Button, Chip } from '@mui/material';
+import { Alert, Button, Chip, Stack } from '@mui/material';
 import { useHistory, useParams } from 'react-router-dom';
-import { api, ApiError } from './api';
+import { api, ApiError, MANAGEMENT_CLUSTER } from './api';
+import { ClusterResourceButton } from './ClusterResourceButton';
 import { TestCaseForm } from './TestCaseForm';
 import { useResource } from './useResource';
 
 export function TestCasesPage() {
   const history = useHistory();
   const testCases = useResource(() => api.testCases());
+  // Only needed to resolve which cluster a Burn test case's k6 Deployment
+  // runs on - TestCaseSpec has no clusterRef of its own, it inherits the
+  // topology's (or an explicit runnerClusterRef override).
+  const topologies = useResource(() => api.topologies(), [], 0);
+  const clusterByTopology = new Map(
+    (topologies.data ?? []).map(topology => [topology.metadata.name, topology.spec.clusterRef?.name])
+  );
 
   async function remove(name: string) {
     if (!window.confirm(`Delete test case "${name}"?`)) {
@@ -88,9 +96,31 @@ export function TestCasesPage() {
           },
           { label: 'VUs', getter: testCase => testCase.spec.vus },
           {
+            label: 'Resources',
+            getter: testCase => {
+              const burnDeployment = testCase.status?.burnWorkloadRef?.name;
+              if (!burnDeployment || !testCase.metadata.namespace) {
+                return null;
+              }
+              const cluster =
+                testCase.spec.runnerClusterRef?.name ??
+                clusterByTopology.get(testCase.spec.topologyRef.name) ??
+                MANAGEMENT_CLUSTER;
+              return (
+                <ClusterResourceButton
+                  kind="Deployment"
+                  cluster={cluster}
+                  namespace={testCase.metadata.namespace}
+                  name={burnDeployment}
+                  label="k6 Deployment"
+                />
+              );
+            },
+          },
+          {
             label: '',
             getter: testCase => (
-              <>
+              <Stack direction="row" spacing={1}>
                 {testCase.spec.profile === 'Quick' && (
                   <Button size="small" onClick={() => void runNow(testCase.metadata.name)}>
                     Run now
@@ -99,7 +129,7 @@ export function TestCasesPage() {
                 <Button size="small" color="error" onClick={() => void remove(testCase.metadata.name)}>
                   Delete
                 </Button>
-              </>
+              </Stack>
             ),
           },
         ]}
