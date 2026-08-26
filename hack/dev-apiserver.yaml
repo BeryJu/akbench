@@ -73,6 +73,14 @@ spec:
             # session already hit once with the Next.js UI's own apiserver.
             - name: BENCH_NAMESPACE
               value: default
+            # apiserver now runs in-cluster on the management cluster
+            # itself (unlike the old web/frontend-era apiserver, which ran
+            # on the host and needed a port-forward for this) - reachable
+            # directly at the same in-cluster DNS name hack/dev.sh's own
+            # Prometheus port-forward step exists to work around for
+            # host-run processes.
+            - name: BENCH_PROMETHEUS_URL
+              value: http://prometheus-server.bench-system.svc.cluster.local
             - name: BENCH_API_TOKEN
               valueFrom:
                 secretKeyRef:
