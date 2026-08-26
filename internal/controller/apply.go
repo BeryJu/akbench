@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"fmt"
 
 	helmv2 "github.com/fluxcd/helm-controller/api/v2"
 	sourcev1 "github.com/fluxcd/source-controller/api/v1"
@@ -45,6 +46,17 @@ import (
 // *and* restarts the owning system's (Flux's, CAPI's) in-flight reconcile of
 // the object before it can finish - verified against a live HelmRelease that
 // never completed an install until this became conditional.
+//
+// When an Update is needed, it's applied to the fetched existing object
+// (only its spec overwritten) rather than replacing existing wholesale with
+// our freshly rendered obj: a full-object Update using obj would wipe
+// metadata.finalizers, since our rendered copy never has one set. Doing so
+// raced helm-controller's own finalizer-add-then-requeue step on a live
+// HelmRelease - whichever of the two writes landed last won, so the
+// finalizer sometimes got stripped right back off moments after
+// helm-controller added it, and every subsequent helm-controller reconcile
+// just re-added it and requeued forever, never reaching the point where it
+// sets any status condition at all.
 func applyOwned(ctx context.Context, c client.Client, scheme *runtime.Scheme, owner client.Object, obj client.Object) error {
 	if err := controllerutil.SetControllerReference(owner, obj, scheme); err != nil {
 		return err
@@ -60,8 +72,15 @@ func applyOwned(ctx context.Context, c client.Client, scheme *runtime.Scheme, ow
 		if specEqual(existing, obj) {
 			return nil
 		}
-		obj.SetResourceVersion(existing.GetResourceVersion())
-		return c.Update(ctx, obj)
+		// existing already carries a valid owner ref from whoever created it
+		// (this function always sets one on obj before the initial Create) -
+		// re-asserting it here would error out when existing is a shared
+		// object (e.g. one HelmRepository per namespace, reused by every
+		// AuthentikTopology in it) already owned by a different owner.
+		if err := copySpec(existing, obj); err != nil {
+			return err
+		}
+		return c.Update(ctx, existing)
 	}
 	return nil
 }
@@ -128,6 +147,11 @@ func applyMachineDeploymentPool(ctx context.Context, c client.Client, scheme *ru
 // where an ownerReference would carry a UID the remote cluster's garbage
 // collector can never recognize. Callers are responsible for their own
 // cleanup (typically: delete the namespace this object lives in).
+//
+// Like applyOwned, an Update is applied to the fetched existing object
+// rather than replacing it wholesale with obj, so metadata a remote
+// controller added (e.g. CNPG's own finalizer on the Cluster it manages)
+// survives instead of being raced off on every spec-changing reconcile.
 func applyUnowned(ctx context.Context, c client.Client, obj client.Object) error {
 	if err := c.Create(ctx, obj); err != nil {
 		if !apierrors.IsAlreadyExists(err) {
@@ -140,8 +164,10 @@ func applyUnowned(ctx context.Context, c client.Client, obj client.Object) error
 		if specEqual(existing, obj) {
 			return nil
 		}
-		obj.SetResourceVersion(existing.GetResourceVersion())
-		return c.Update(ctx, obj)
+		if err := copySpec(existing, obj); err != nil {
+			return err
+		}
+		return c.Update(ctx, existing)
 	}
 	return nil
 }
@@ -176,4 +202,57 @@ func specEqual(existing, desired client.Object) bool {
 	default:
 		return false
 	}
+}
+
+// copySpec overwrites existing's spec with desired's, leaving the rest of
+// existing (most importantly metadata.finalizers, which desired never has
+// set) untouched.
+func copySpec(existing, desired client.Object) error {
+	switch d := desired.(type) {
+	case *helmv2.HelmRelease:
+		e, ok := existing.(*helmv2.HelmRelease)
+		if !ok {
+			return fmt.Errorf("copySpec: existing is %T, want *helmv2.HelmRelease", existing)
+		}
+		e.Spec = d.Spec
+	case *sourcev1.HelmRepository:
+		e, ok := existing.(*sourcev1.HelmRepository)
+		if !ok {
+			return fmt.Errorf("copySpec: existing is %T, want *sourcev1.HelmRepository", existing)
+		}
+		e.Spec = d.Spec
+	case *clusterv1.Cluster:
+		e, ok := existing.(*clusterv1.Cluster)
+		if !ok {
+			return fmt.Errorf("copySpec: existing is %T, want *clusterv1.Cluster", existing)
+		}
+		e.Spec = d.Spec
+	case *clusterv1.MachineDeployment:
+		e, ok := existing.(*clusterv1.MachineDeployment)
+		if !ok {
+			return fmt.Errorf("copySpec: existing is %T, want *clusterv1.MachineDeployment", existing)
+		}
+		e.Spec = d.Spec
+	case *controlplanev1.KubeadmControlPlane:
+		e, ok := existing.(*controlplanev1.KubeadmControlPlane)
+		if !ok {
+			return fmt.Errorf("copySpec: existing is %T, want *controlplanev1.KubeadmControlPlane", existing)
+		}
+		e.Spec = d.Spec
+	case *bootstrapv1.KubeadmConfigTemplate:
+		e, ok := existing.(*bootstrapv1.KubeadmConfigTemplate)
+		if !ok {
+			return fmt.Errorf("copySpec: existing is %T, want *bootstrapv1.KubeadmConfigTemplate", existing)
+		}
+		e.Spec = d.Spec
+	case *unstructured.Unstructured:
+		e, ok := existing.(*unstructured.Unstructured)
+		if !ok {
+			return fmt.Errorf("copySpec: existing is %T, want *unstructured.Unstructured", existing)
+		}
+		e.Object["spec"] = d.Object["spec"]
+	default:
+		return fmt.Errorf("copySpec: unsupported type %T", desired)
+	}
+	return nil
 }
