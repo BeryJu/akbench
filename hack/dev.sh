@@ -1,20 +1,20 @@
 #!/usr/bin/env bash
-# Starts the whole local dev stack against the current kubeconfig context:
-# the operator manager, the web API backend, and the Next.js frontend dev
-# server, all in one foreground command. Ctrl+C stops all three.
+# Starts the operator manager and the web API backend against the current
+# kubeconfig context, in one foreground command. Ctrl+C stops both. The web
+# UI itself is Headlamp (see `make headlamp`/`make headlamp-plugin`), not
+# started here - it's a separate, longer-lived deployment, not a per-session
+# dev process.
 #
 # Usage: make dev
 set -euo pipefail
 # Job control: puts each `&` job in its own process group, so cleanup can
-# signal "-$pid" (the group) rather than just $pid. Needed because both
-# `go run` and `npm run dev` fork further (a temp binary; next dev's
-# next-server child) - killing only the tracked PID would leave those actual
-# processes running as orphans still bound to their ports. See
+# signal "-$pid" (the group) rather than just $pid. Needed because `go run`
+# forks further (a temp binary) - killing only the tracked PID would leave
+# that actual process running as an orphan still bound to its port. See
 # hack/webui-e2e.sh, which hit exactly this.
 set -m
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-frontend="${root}/web/frontend"
 
 BENCH_API_TOKEN="${BENCH_API_TOKEN:-dev-token}"
 export BENCH_API_TOKEN
@@ -62,22 +62,19 @@ pids+=($!)
 wait_for "http://127.0.0.1:8081/healthz" "operator manager"
 
 echo "==> Starting the web API backend"
-(cd "${root}" && go run ./cmd/apiserver --cors-origin=http://localhost:3000) &
+(cd "${root}" && go run ./cmd/apiserver) &
 pids+=($!)
 wait_for "http://127.0.0.1:8080/healthz" "web API"
-
-echo "==> Starting the frontend dev server"
-(cd "${frontend}" && npm install --no-audit --no-fund >/dev/null && \
-	BENCH_API_URL="http://127.0.0.1:8080" BENCH_API_TOKEN="${BENCH_API_TOKEN}" npm run dev) &
-pids+=($!)
-wait_for "http://127.0.0.1:3000" "frontend"
 
 cat <<EOF
 
 authentik-bench dev environment is up:
-  web UI            http://localhost:3000
-  API backend       http://localhost:8080  (token: ${BENCH_API_TOKEN})
+  API backend       http://localhost:8080  (token: ${BENCH_API_TOKEN:-dev-token})
   operator manager  health probe on :8081
+
+Web UI: run \`make headlamp\` once (deploys Headlamp in-cluster) and
+\`make headlamp-plugin\` after any plugin change, then port-forward it:
+  kubectl port-forward -n headlamp svc/headlamp 8087:80
 
 Press Ctrl+C to stop everything.
 EOF

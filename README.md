@@ -63,19 +63,20 @@ Implemented so far:
   (`TEST_ID`/`TARGET`/`BENCH_HOST`/... ), guarded by `test/contract`.
 - **Fixtures**: `fixtures/gen-blueprint.py` ported unchanged.
 - **Web UI**: `internal/api` is a REST/JSON backend (chi router, bearer-token
-  auth, ~79% test coverage) that CRUDs all four CRDs as unstructured objects
-  (the CRD schema stays the single source of truth), proxies PromQL for the
-  compare view, and builds allowlisted Grafana embed URLs. `/api/v1/clusters`
-  registers/deprovisions a `WorkloadCluster` directly (previously 501).
-  `web/frontend` is a Next.js app (topologies/test cases/test runs/compare/
-  clusters pages) that never sees the bearer token directly - a server-side
-  route handler (`app/api/bench/[...path]`) holds it and proxies to the
-  backend. Verified
-  with a real browser: `make test-webui` spins up an envtest control plane +
-  stub Prometheus + the real API + a built-and-started Next.js server, then
-  drives it with Playwright (`web/frontend/e2e/flow.spec.ts`) through the
-  whole flow - define a topology, define a test case, run it, see it in
-  history, compare metrics.
+  auth) that CRUDs all four CRDs as unstructured objects (the CRD schema
+  stays the single source of truth), proxies PromQL for the compare view,
+  and builds allowlisted Grafana embed URLs - deployed in-cluster
+  (`make deploy-apiserver`, `hack/dev-apiserver.yaml`). The UI itself is
+  [Headlamp](https://headlamp.dev) (`make headlamp`,
+  `hack/dev-headlamp-values.yaml`) plus `web/headlamp-plugin`, a custom
+  plugin for exactly what Headlamp has no native concept of - running a
+  TestCase and charting `/metrics/range`/`/metrics/compare` - reached
+  through Headlamp's own `ApiProxy` (a Kubernetes API Service-proxy call,
+  not a browser-direct one). Everything else (listing/creating/editing every
+  CRD, pod logs, events, multi-cluster switching across every
+  CAPI-provisioned `WorkloadCluster`) is Headlamp's own generic Kubernetes
+  UI - see `HeadlampKubeconfigReconciler` for how every `WorkloadCluster`
+  becomes a switchable cluster automatically.
 
 Not yet implemented (see the plan's milestones): the mTLS central metrics
 receiver, and Flux-managed GitOps for the metrics stack itself (dashboard
@@ -86,7 +87,6 @@ Kustomization).
 
 ```sh
 make test          # envtest (real apiserver, no real controllers e.g. Flux/CNPG) + contract tests
-make test-webui     # backend + Next.js + Playwright, no Kubernetes cluster needed
 go test ./test/contract/...   # just the k6 tag/env parity guard
 ```
 

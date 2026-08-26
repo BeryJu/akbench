@@ -87,11 +87,6 @@ setup-test-e2e: ## Set up a Kind cluster for e2e tests if it does not exist
 			$(KIND) create cluster --name $(KIND_CLUSTER) ;; \
 	esac
 
-.PHONY: test-webui
-test-webui: setup-envtest ## Run the web UI end-to-end suite (envtest + Next.js + Playwright, no cluster needed).
-	KUBEBUILDER_ASSETS="$(shell "$(ENVTEST)" use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path)" \
-		hack/webui-e2e.sh
-
 .PHONY: test-e2e
 test-e2e: setup-test-e2e manifests generate fmt vet ## Run the e2e tests. Expected an isolated environment using Kind.
 	KIND=$(KIND) KIND_CLUSTER=$(KIND_CLUSTER) go test -tags=e2e ./test/e2e/ -v -ginkgo.v
@@ -131,13 +126,8 @@ run: manifests generate fmt vet ## Run a controller from your host.
 run-apiserver: fmt vet ## Run the web UI backend against the current kubeconfig context.
 	BENCH_API_TOKEN=$${BENCH_API_TOKEN:-dev-token} go run ./cmd/apiserver
 
-.PHONY: run-webui
-run-webui: ## Run the frontend dev server against a backend on :8080.
-	cd web/frontend && npm install --no-audit --no-fund && \
-		BENCH_API_URL=http://127.0.0.1:8080 BENCH_API_TOKEN=$${BENCH_API_TOKEN:-dev-token} npm run dev
-
 .PHONY: dev
-dev: ## Start the operator, web API, and frontend dev server together against the current kubeconfig context.
+dev: ## Start the operator and web API against the current kubeconfig context (see also make headlamp).
 	./hack/dev.sh
 
 .PHONY: dev-metrics
