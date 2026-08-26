@@ -16,6 +16,7 @@
 
 // Ported from the deleted web/frontend/components/cluster-form.tsx, on MUI +
 // Headlamp's own SectionBox instead of PatternFly/Next.js's router.
+import { Router } from '@kinvolk/headlamp-plugin/lib';
 import { SectionBox } from '@kinvolk/headlamp-plugin/lib/CommonComponents';
 import { Alert, Box, Button, Grid, MenuItem, TextField, Typography } from '@mui/material';
 import { useState } from 'react';
@@ -113,7 +114,7 @@ export function ClusterForm({ existing }: { existing?: WorkloadCluster }) {
       } else {
         await api.registerCluster({ metadata: { name }, spec });
       }
-      history.push('/authentik-bench/clusters');
+      history.push(Router.createRouteURL('authentik-bench-clusters'));
     } catch (err) {
       setError(err instanceof ApiError ? err.message : String(err));
       setSaving(false);
@@ -317,7 +318,7 @@ export function ClusterForm({ existing }: { existing?: WorkloadCluster }) {
           <Button type="submit" variant="contained" disabled={saving}>
             {saving ? 'Saving…' : existing ? 'Save changes' : 'Register cluster'}
           </Button>
-          <Button onClick={() => history.push('/authentik-bench/clusters')}>Cancel</Button>
+          <Button onClick={() => history.push(Router.createRouteURL('authentik-bench-clusters'))}>Cancel</Button>
         </Box>
       </Box>
     </SectionBox>

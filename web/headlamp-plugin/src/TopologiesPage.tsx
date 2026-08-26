@@ -18,9 +18,10 @@
 // web/frontend's /topologies pages. Headlamp's own generic CRD browser can
 // list/edit these too (as raw YAML), but this page is what actually exposes
 // the guided form (TopologyForm) the standalone UI had.
-import { EmptyContent, SectionBox, SimpleTable } from '@kinvolk/headlamp-plugin/lib/CommonComponents';
+import { Router } from '@kinvolk/headlamp-plugin/lib';
+import { EmptyContent, Link, SectionBox, SimpleTable } from '@kinvolk/headlamp-plugin/lib/CommonComponents';
 import { Alert, Button, Chip } from '@mui/material';
-import { Link, useHistory, useParams } from 'react-router-dom';
+import { useHistory, useParams } from 'react-router-dom';
 import { api, ApiError } from './api';
 import { TopologyForm } from './TopologyForm';
 import { readyCondition } from './types';
@@ -60,7 +61,11 @@ export function TopologiesPage() {
       title="Topologies"
       headerProps={{
         actions: [
-          <Button key="new" variant="contained" onClick={() => history.push('/authentik-bench/topologies/new')}>
+          <Button
+            key="new"
+            variant="contained"
+            onClick={() => history.push(Router.createRouteURL('authentik-bench-topologies-new'))}
+          >
             New topology
           </Button>,
         ],
@@ -76,7 +81,9 @@ export function TopologiesPage() {
           {
             label: 'Name',
             getter: topology => (
-              <Link to={`/authentik-bench/topologies/${topology.metadata.name}/edit`}>{topology.metadata.name}</Link>
+              <Link routeName="authentik-bench-topologies-edit" params={{ name: topology.metadata.name }}>
+                {topology.metadata.name}
+              </Link>
             ),
           },
           { label: 'Target', getter: topology => topology.spec.targetName || topology.metadata.name },

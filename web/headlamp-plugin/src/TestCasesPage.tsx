@@ -16,9 +16,10 @@
 
 // List + create/edit views for TestCase, mirroring the deleted
 // web/frontend's /testcases pages.
-import { EmptyContent, SectionBox, SimpleTable } from '@kinvolk/headlamp-plugin/lib/CommonComponents';
+import { Router } from '@kinvolk/headlamp-plugin/lib';
+import { EmptyContent, Link, SectionBox, SimpleTable } from '@kinvolk/headlamp-plugin/lib/CommonComponents';
 import { Alert, Button, Chip } from '@mui/material';
-import { Link, useHistory, useParams } from 'react-router-dom';
+import { useHistory, useParams } from 'react-router-dom';
 import { api, ApiError } from './api';
 import { TestCaseForm } from './TestCaseForm';
 import { useResource } from './useResource';
@@ -53,7 +54,11 @@ export function TestCasesPage() {
       title="Test cases"
       headerProps={{
         actions: [
-          <Button key="new" variant="contained" onClick={() => history.push('/authentik-bench/testcases/new')}>
+          <Button
+            key="new"
+            variant="contained"
+            onClick={() => history.push(Router.createRouteURL('authentik-bench-testcases-new'))}
+          >
             New test case
           </Button>,
         ],
@@ -69,7 +74,9 @@ export function TestCasesPage() {
           {
             label: 'Name',
             getter: testCase => (
-              <Link to={`/authentik-bench/testcases/${testCase.metadata.name}/edit`}>{testCase.metadata.name}</Link>
+              <Link routeName="authentik-bench-testcases-edit" params={{ name: testCase.metadata.name }}>
+                {testCase.metadata.name}
+              </Link>
             ),
           },
           { label: 'Topology', getter: testCase => testCase.spec.topologyRef.name },

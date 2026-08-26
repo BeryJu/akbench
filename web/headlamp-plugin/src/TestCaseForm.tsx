@@ -16,6 +16,7 @@
 
 // Ported from the deleted web/frontend/components/testcase-form.tsx, on MUI +
 // Headlamp's own SectionBox instead of PatternFly/Next.js's router.
+import { Router } from '@kinvolk/headlamp-plugin/lib';
 import { SectionBox } from '@kinvolk/headlamp-plugin/lib/CommonComponents';
 import { Alert, Box, Button, Grid, MenuItem, TextField, Typography } from '@mui/material';
 import { useState } from 'react';
@@ -58,7 +59,7 @@ export function TestCaseForm({ existing }: { existing?: TestCase }) {
       } else {
         await api.createTestCase({ metadata: { name }, spec });
       }
-      history.push('/authentik-bench/testcases');
+      history.push(Router.createRouteURL('authentik-bench-testcases'));
     } catch (err) {
       setError(err instanceof ApiError ? err.message : String(err));
       setSaving(false);
@@ -193,7 +194,7 @@ export function TestCaseForm({ existing }: { existing?: TestCase }) {
           <Button type="submit" variant="contained" disabled={saving}>
             {saving ? 'Saving…' : existing ? 'Save changes' : 'Create test case'}
           </Button>
-          <Button onClick={() => history.push('/authentik-bench/testcases')}>Cancel</Button>
+          <Button onClick={() => history.push(Router.createRouteURL('authentik-bench-testcases'))}>Cancel</Button>
         </Box>
       </Box>
     </SectionBox>

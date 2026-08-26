@@ -16,6 +16,7 @@
 
 // Ported from the deleted web/frontend/components/topology-form.tsx, on MUI +
 // Headlamp's own SectionBox instead of PatternFly/Next.js's router.
+import { Router } from '@kinvolk/headlamp-plugin/lib';
 import { SectionBox } from '@kinvolk/headlamp-plugin/lib/CommonComponents';
 import { Alert, Box, Button, Grid, MenuItem, TextField, Typography } from '@mui/material';
 import { useEffect, useState } from 'react';
@@ -100,7 +101,7 @@ export function TopologyForm({ existing }: { existing?: Topology }) {
         await api.createTopology({ metadata: { name }, spec });
       }
       await api.setExtraValues(savedName, extraValuesYAML);
-      history.push('/authentik-bench/topologies');
+      history.push(Router.createRouteURL('authentik-bench-topologies'));
     } catch (err) {
       setError(err instanceof ApiError ? err.message : String(err));
       setSaving(false);
@@ -408,7 +409,7 @@ export function TopologyForm({ existing }: { existing?: Topology }) {
           <Button type="submit" variant="contained" disabled={saving}>
             {saving ? 'Saving…' : existing ? 'Save changes' : 'Create topology'}
           </Button>
-          <Button onClick={() => history.push('/authentik-bench/topologies')}>Cancel</Button>
+          <Button onClick={() => history.push(Router.createRouteURL('authentik-bench-topologies'))}>Cancel</Button>
         </Box>
       </Box>
     </SectionBox>

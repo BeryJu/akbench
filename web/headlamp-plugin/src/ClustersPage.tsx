@@ -18,9 +18,10 @@
 // web/frontend's /clusters pages. The management cluster itself is always
 // listed but can't be edited or deprovisioned (registerCluster/deleteCluster
 // on internal/api/clusters.go both reject its reserved name the same way).
-import { EmptyContent, SectionBox, SimpleTable } from '@kinvolk/headlamp-plugin/lib/CommonComponents';
+import { Router } from '@kinvolk/headlamp-plugin/lib';
+import { EmptyContent, Link, SectionBox, SimpleTable } from '@kinvolk/headlamp-plugin/lib/CommonComponents';
 import { Alert, Button, Chip } from '@mui/material';
-import { Link, useHistory, useParams } from 'react-router-dom';
+import { useHistory, useParams } from 'react-router-dom';
 import { api, ApiError } from './api';
 import { ClusterForm } from './ClusterForm';
 import { useResource } from './useResource';
@@ -46,7 +47,11 @@ export function ClustersPage() {
       title="Clusters"
       headerProps={{
         actions: [
-          <Button key="new" variant="contained" onClick={() => history.push('/authentik-bench/clusters/new')}>
+          <Button
+            key="new"
+            variant="contained"
+            onClick={() => history.push(Router.createRouteURL('authentik-bench-clusters-new'))}
+          >
             Register cluster
           </Button>,
         ],
@@ -65,7 +70,9 @@ export function ClustersPage() {
               cluster.management ? (
                 cluster.name
               ) : (
-                <Link to={`/authentik-bench/clusters/${cluster.name}/edit`}>{cluster.name}</Link>
+                <Link routeName="authentik-bench-clusters-edit" params={{ name: cluster.name }}>
+                  {cluster.name}
+                </Link>
               ),
           },
           {
