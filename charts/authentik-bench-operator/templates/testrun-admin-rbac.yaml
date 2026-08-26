@@ -1,0 +1,19 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "authentik-bench-operator.fullname" . }}-testrun-admin-role
+  labels:
+  {{- include "authentik-bench-operator.labels" . | nindent 4 }}
+rules:
+- apiGroups:
+  - bench.goauthentik.io
+  resources:
+  - testruns
+  verbs:
+  - '*'
+- apiGroups:
+  - bench.goauthentik.io
+  resources:
+  - testruns/status
+  verbs:
+  - get

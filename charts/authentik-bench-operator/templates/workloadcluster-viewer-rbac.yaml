@@ -1,0 +1,21 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "authentik-bench-operator.fullname" . }}-workloadcluster-viewer-role
+  labels:
+  {{- include "authentik-bench-operator.labels" . | nindent 4 }}
+rules:
+- apiGroups:
+  - bench.goauthentik.io
+  resources:
+  - workloadclusters
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - bench.goauthentik.io
+  resources:
+  - workloadclusters/status
+  verbs:
+  - get

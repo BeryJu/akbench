@@ -1,0 +1,290 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: workloadclusters.bench.goauthentik.io
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.21.0
+  labels:
+  {{- include "authentik-bench-operator.labels" . | nindent 4 }}
+spec:
+  group: bench.goauthentik.io
+  names:
+    kind: WorkloadCluster
+    listKind: WorkloadClusterList
+    plural: workloadclusters
+    singular: workloadcluster
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .status.controlPlaneReady
+      name: ControlPlane
+      type: boolean
+    - jsonPath: .status.infrastructureReady
+      name: Infrastructure
+      type: boolean
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: WorkloadCluster is the Schema for the workloadclusters API
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: |-
+              WorkloadClusterSpec describes a Kubernetes cluster this operator asks
+              Cluster API to provision through the selected infrastructure provider, so
+              AuthentikTopology/TestCase can target it via clusterRef instead of the
+              management cluster.
+            properties:
+              controlPlane:
+                description: |-
+                  MachineSpec sizes one set of machines (the control plane or the worker
+                  MachineDeployment) in a way every infrastructure provider understands -
+                  only the replica count. Provider-specific sizing (instance
+                  type/flavor/image/...) lives in that provider's own sub-spec instead (e.g.
+                  IncusMachineSpec), since it doesn't mean the same thing across providers.
+                properties:
+                  replicas:
+                    default: 1
+                    format: int32
+                    minimum: 1
+                    type: integer
+                type: object
+              incus:
+                description: incus configures provisioning when provider is Incus.
+                properties:
+                  controlPlane:
+                    description: |-
+                      IncusMachineSpec sizes one set of machines on the Incus/LXC infrastructure
+                      provider beyond the provider-agnostic replica count in MachineSpec.
+                    properties:
+                      flavor:
+                        default: c2-m4
+                        description: flavor is an Incus/LXC instance flavor (e.g. "c2-m4"
+                          - 2 vCPU, 4GiB).
+                        type: string
+                    type: object
+                  image:
+                    default: ubuntu:24.04
+                    description: image is the Incus/LXC image new machines boot from.
+                    type: string
+                  lxcSecretRef:
+                    description: |-
+                      lxcSecretRef names a Secret (in this object's namespace) holding the
+                      Incus/LXC daemon connection: server, project, client-crt, client-key
+                      (matching the keys cluster-api-provider-incus itself expects).
+                    properties:
+                      name:
+                        default: ""
+                        description: |-
+                          Name of the referent.
+                          This field is effectively required, but due to backwards compatibility is
+                          allowed to be empty. Instances of this type with an empty value here are
+                          almost certainly wrong.
+                          More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                        type: string
+                    type: object
+                    x-kubernetes-map-type: atomic
+                  profiles:
+                    default:
+                    - default
+                    description: |-
+                      profiles are the Incus/LXC profiles applied to every machine and to
+                      the control plane's load balancer.
+                    items:
+                      type: string
+                    type: array
+                required:
+                - lxcSecretRef
+                type: object
+              kubernetesVersion:
+                description: kubernetesVersion is the version kubeadm installs, e.g.
+                  "v1.36.1".
+                pattern: ^v[0-9]+\.[0-9]+\.[0-9]+$
+                type: string
+              provider:
+                default: Incus
+                description: provider selects the Cluster API infrastructure provider
+                  to use.
+                enum:
+                - Incus
+                type: string
+              workerPools:
+                description: |-
+                  workerPools are the WorkloadCluster's worker machine groups - at least
+                  one is required. See WorkerPoolSpec for how editing this list after
+                  creation behaves.
+                items:
+                  description: |-
+                    WorkerPoolSpec is one named, independently-sized group of worker machines,
+                    letting a WorkloadCluster run more than one worker shape at once - e.g. a
+                    small pool for the k6 runner alongside a larger one sized for load
+                    generation. Pool names must be unique within a WorkloadCluster.
+  
+                    Editing an existing pool's replicas or flavor is applied in place by
+                    WorkloadClusterReconciler: replicas patches the MachineDeployment
+                    directly, and a flavor change rolls that pool's machines through Cluster
+                    API's normal MachineDeployment rollout (a new, immutably-named
+                    LXCMachineTemplate is created and the MachineDeployment is repointed at
+                    it - the old template is left behind rather than garbage collected, the
+                    same way an unused ReplicaSet lingers after a Deployment rollout).
+                    Removing a pool from the list deletes its MachineDeployment; adding a new
+                    name creates one. The control plane itself is not resizable/reconfigurable
+                    this way yet.
+                  properties:
+                    incus:
+                      description: |-
+                        incus is this pool's Incus-specific sizing. Required when
+                        spec.provider is Incus.
+                      properties:
+                        flavor:
+                          default: c2-m4
+                          description: flavor is an Incus/LXC instance flavor (e.g.
+                            "c2-m4" - 2 vCPU, 4GiB).
+                          type: string
+                      type: object
+                    name:
+                      description: |-
+                        name identifies this pool; it becomes part of the MachineDeployment's
+                        own name, so it follows the same naming rules as a Kubernetes object.
+                      pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                      type: string
+                    replicas:
+                      default: 1
+                      format: int32
+                      minimum: 1
+                      type: integer
+                  required:
+                  - name
+                  type: object
+                minItems: 1
+                type: array
+            required:
+            - kubernetesVersion
+            - workerPools
+            type: object
+          status:
+            description: |-
+              WorkloadClusterStatus mirrors the underlying CAPI Cluster's readiness, plus
+              where to find the kubeconfig once it exists.
+            properties:
+              conditions:
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              controlPlaneReady:
+                type: boolean
+              infrastructureReady:
+                type: boolean
+              kubeconfigSecretRef:
+                description: |-
+                  KubeconfigSecretRef names the "<cluster>-kubeconfig" Secret CAPI
+                  writes once the control plane is up - what
+                  internal/multicluster.Tracker resolves a clusterRef against.
+                properties:
+                  name:
+                    default: ""
+                    description: |-
+                      Name of the referent.
+                      This field is effectively required, but due to backwards compatibility is
+                      allowed to be empty. Instances of this type with an empty value here are
+                      almost certainly wrong.
+                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                    type: string
+                type: object
+                x-kubernetes-map-type: atomic
+              observedGeneration:
+                format: int64
+                type: integer
+              phase:
+                description: |-
+                  phase mirrors the CAPI Cluster's own status.phase (Provisioning,
+                  Provisioned, Deleting...).
+                type: string
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
+status:
+  acceptedNames:
+    kind: ""
+    plural: ""
+  conditions: []
+  storedVersions: []

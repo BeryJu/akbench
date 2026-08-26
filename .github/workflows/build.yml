@@ -1,0 +1,130 @@
+name: Build and publish
+
+# Only on pushes that land on main (not every branch/PR - publishing is a
+# side effect real pushes should have, not something a PR run should do) and
+# on version tags, so a release can be cut without waiting for main to move.
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+
+permissions: {}
+
+jobs:
+  image:
+    name: Build and push the operator image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      image: ${{ steps.names.outputs.image }}
+      chart-repo: ${{ steps.names.outputs.chart-repo }}
+    steps:
+      - name: Clone the code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      # A single, unprefixed version used by both the image tag and the Helm
+      # chart's version/appVersion below, so they always describe the same
+      # build: the short commit SHA on every push to main, or the tag with
+      # its leading "v" stripped (chart versions must be plain SemVer) on a
+      # version tag push.
+      - name: Compute the version for this build
+        id: version
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            echo "version=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=0.0.0-main.$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+          fi
+
+      # GHCR requires an all-lowercase path; github.repository preserves
+      # whatever case the repo owner/name actually use (this one has an
+      # uppercase letter), so it can't be used directly.
+      - name: Compute lowercase image/chart names
+        id: names
+        run: |
+          repo="$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')"
+          echo "image=ghcr.io/${repo}" >> "$GITHUB_OUTPUT"
+          echo "chart-repo=ghcr.io/${repo}-charts" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+
+      - name: Derive image tags/labels
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ${{ steps.names.outputs.image }}
+          tags: |
+            type=raw,value=${{ steps.version.outputs.version }}
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+            type=semver,pattern={{version}}
+
+      - name: Log in to GHCR
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  chart:
+    name: Package and push the Helm chart
+    needs: image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Clone the code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup Go
+        uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6.3.0
+        with:
+          go-version-file: go.mod
+
+      # Regenerated rather than trusting the checked-in copy: guarantees the
+      # published chart's CRDs/RBAC always match this exact commit's API
+      # types, the same way `make manifests` already keeps config/crd in
+      # sync in CI's test job. The chart's default image reference comes
+      # from config/manager/kustomization.yaml (ghcr.io/.../akbench:latest)
+      # - not repointed at this build's own version-pinned tag, so a plain
+      # `helm install` always tracks latest unless the caller overrides
+      # image.tag, the same way most operator charts default to :latest.
+      - name: Regenerate the chart from config/default
+        run: make helm-chart
+
+      - name: Set chart version/appVersion to match the image just published
+        run: |
+          sed -i "s/^version: .*/version: ${{ needs.image.outputs.version }}/" charts/authentik-bench-operator/Chart.yaml
+          sed -i "s/^appVersion: .*/appVersion: \"${{ needs.image.outputs.version }}\"/" charts/authentik-bench-operator/Chart.yaml
+
+      - name: Setup Helm
+        uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+
+      - name: Log in to GHCR
+        run: helm registry login ghcr.io --username ${{ github.actor }} --password-stdin <<< "${{ secrets.GITHUB_TOKEN }}"
+
+      - name: Package and push
+        run: |
+          helm package charts/authentik-bench-operator --destination /tmp
+          helm push "/tmp/authentik-bench-operator-${{ needs.image.outputs.version }}.tgz" "oci://${{ needs.image.outputs.chart-repo }}"
