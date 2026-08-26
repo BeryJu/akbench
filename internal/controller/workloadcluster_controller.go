@@ -26,6 +26,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/clientcmd"
@@ -198,6 +199,15 @@ func (r *WorkloadClusterReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		if err := r.ensureCNI(ctx, &wc); err != nil {
 			log.Error(err, "failed to ensure CNI on workload cluster")
 		}
+		// Same reasoning as ensureCNI: without a default StorageClass, any
+		// PVC left without an explicit storageClassName (the authentik
+		// chart's bundled postgresql, notably) stays Pending forever with
+		// "unbound immediate PersistentVolumeClaims", so any Helm install
+		// waiting on it times out. Best-effort/idempotent for the same
+		// reason ensureCNI is.
+		if err := r.ensureStorage(ctx, &wc); err != nil {
+			log.Error(err, "failed to ensure default StorageClass on workload cluster")
+		}
 	}
 
 	ready := metav1.ConditionFalse
@@ -218,33 +228,61 @@ func (r *WorkloadClusterReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	return ctrl.Result{}, nil
 }
 
-// ensureCNI installs Flannel onto the workload cluster if it isn't there
-// already. Uses a one-off client built directly from the "<name>-kubeconfig"
-// Secret CAPI writes, rather than internal/multicluster.Tracker: this
-// controller only ever needs an occasional apply here, not the long-lived
+// remoteAddonClient builds a one-off client directly from the
+// "<name>-kubeconfig" Secret CAPI writes, rather than
+// internal/multicluster.Tracker: this controller only ever needs occasional
+// addon applies (ensureCNI, ensureStorage), not the long-lived
 // cached/watching connection Tracker exists for (that's what
 // AuthentikTopology/TestCase/TestRun use once they actually deploy onto this
 // cluster via clusterRef).
-func (r *WorkloadClusterReconciler) ensureCNI(ctx context.Context, wc *benchv1alpha1.WorkloadCluster) error {
+func (r *WorkloadClusterReconciler) remoteAddonClient(ctx context.Context, wc *benchv1alpha1.WorkloadCluster) (client.Client, error) {
 	kubeconfigBytes, err := capikubeconfig.FromSecret(ctx, r.Client, client.ObjectKey{Name: wc.Name, Namespace: wc.Namespace})
 	if err != nil {
-		return fmt.Errorf("get kubeconfig: %w", err)
+		return nil, fmt.Errorf("get kubeconfig: %w", err)
 	}
 	restConfig, err := clientcmd.RESTConfigFromKubeConfig(kubeconfigBytes)
 	if err != nil {
-		return fmt.Errorf("build rest config: %w", err)
+		return nil, fmt.Errorf("build rest config: %w", err)
 	}
 	remoteClient, err := client.New(restConfig, client.Options{})
 	if err != nil {
-		return fmt.Errorf("build remote client: %w", err)
+		return nil, fmt.Errorf("build remote client: %w", err)
 	}
+	return remoteClient, nil
+}
 
+// ensureCNI installs Flannel onto the workload cluster if it isn't there
+// already.
+func (r *WorkloadClusterReconciler) ensureCNI(ctx context.Context, wc *benchv1alpha1.WorkloadCluster) error {
+	remoteClient, err := r.remoteAddonClient(ctx, wc)
+	if err != nil {
+		return err
+	}
 	objs, err := render.CNIObjects()
 	if err != nil {
 		return fmt.Errorf("render CNI manifests: %w", err)
 	}
+	return createAll(ctx, remoteClient, objs)
+}
+
+// ensureStorage installs Rancher's local-path-provisioner, plus a default
+// StorageClass backed by it, onto the workload cluster if it isn't there
+// already.
+func (r *WorkloadClusterReconciler) ensureStorage(ctx context.Context, wc *benchv1alpha1.WorkloadCluster) error {
+	remoteClient, err := r.remoteAddonClient(ctx, wc)
+	if err != nil {
+		return err
+	}
+	objs, err := render.StorageObjects()
+	if err != nil {
+		return fmt.Errorf("render storage manifests: %w", err)
+	}
+	return createAll(ctx, remoteClient, objs)
+}
+
+func createAll(ctx context.Context, c client.Client, objs []*unstructured.Unstructured) error {
 	for _, obj := range objs {
-		if err := remoteClient.Create(ctx, obj); err != nil && !apierrors.IsAlreadyExists(err) {
+		if err := c.Create(ctx, obj); err != nil && !apierrors.IsAlreadyExists(err) {
 			return fmt.Errorf("create %s %s/%s: %w", obj.GetKind(), obj.GetNamespace(), obj.GetName(), err)
 		}
 	}
