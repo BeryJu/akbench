@@ -148,6 +148,14 @@ dev-metrics: ## Install a minimal single-cluster Prometheus (remote-write receiv
 headlamp: ## Install/upgrade Headlamp (the Kubernetes UI replacing web/frontend) on the current kubeconfig context.
 	./hack/install-headlamp.sh
 
+.PHONY: headlamp-plugin
+headlamp-plugin: ## Build web/headlamp-plugin and copy it into the running Headlamp pod.
+	./hack/build-headlamp-plugin.sh
+
+.PHONY: deploy-apiserver
+deploy-apiserver: ## Build and deploy cmd/apiserver in-cluster, for the Headlamp plugin to reach.
+	./hack/deploy-apiserver.sh
+
 .PHONY: fixtures
 fixtures: ## Generate synthetic users and load the k6 credentials Secret every TestCase mounts.
 	./hack/gen-fixtures.sh

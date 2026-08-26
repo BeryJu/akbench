@@ -1,0 +1,100 @@
+# In-cluster deployment of cmd/apiserver, so the Headlamp plugin
+# (web/headlamp-plugin) can reach it through Headlamp's own ApiProxy -> the
+# standard Kubernetes Service-proxy subresource, replacing the old
+# web/frontend Next.js server's direct-to-browser proxy route. Applied by
+# hack/deploy-apiserver.sh (make deploy-apiserver) against whatever image
+# that script just built/loaded (authentik-bench-apiserver:dev for local
+# dev - see that script).
+#
+# cluster-admin, matching this repo's existing dev-only security posture
+# (the operator itself and Headlamp are both bound the same way) - not
+# appropriate for a real multi-tenant deployment, fine for this benchmark
+# tool.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: authentik-bench
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: apiserver
+  namespace: authentik-bench
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: authentik-bench-apiserver
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+  - kind: ServiceAccount
+    name: apiserver
+    namespace: authentik-bench
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: apiserver-token
+  namespace: authentik-bench
+type: Opaque
+stringData:
+  # Dev-only fixed token - matches BENCH_API_TOKEN below. Real deployments
+  # should generate this instead of using a literal.
+  token: dev-token
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: apiserver
+  namespace: authentik-bench
+  labels:
+    app: authentik-bench-apiserver
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: authentik-bench-apiserver
+  template:
+    metadata:
+      labels:
+        app: authentik-bench-apiserver
+    spec:
+      serviceAccountName: apiserver
+      containers:
+        - name: apiserver
+          image: authentik-bench-apiserver:dev
+          imagePullPolicy: IfNotPresent
+          env:
+            # Matches where this dev session's own AuthentikTopology/etc.
+            # objects actually live - see the namespace-mismatch bug this
+            # session already hit once with the Next.js UI's own apiserver.
+            - name: BENCH_NAMESPACE
+              value: default
+            - name: BENCH_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: apiserver-token
+                  key: token
+          ports:
+            - name: http
+              containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: apiserver
+  namespace: authentik-bench
+spec:
+  selector:
+    app: authentik-bench-apiserver
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080

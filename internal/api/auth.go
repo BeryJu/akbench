@@ -44,7 +44,17 @@ func (s *Server) requireToken(next http.Handler) http.Handler {
 	})
 }
 
+// tokenHeader is a fallback to Authorization: a request proxied through
+// Headlamp's own ApiProxy (see web/headlamp-plugin) arrives with
+// Authorization already carrying Headlamp's own Kubernetes bearer token -
+// verified live, that header is overwritten by the proxy layer, not passed
+// through - so the token has nowhere else to go but a header of our own.
+const tokenHeader = "X-Bench-Api-Token"
+
 func bearerToken(r *http.Request) (string, bool) {
+	if v := r.Header.Get(tokenHeader); v != "" {
+		return v, true
+	}
 	const prefix = "Bearer "
 	header := r.Header.Get("Authorization")
 	if len(header) <= len(prefix) || !strings.EqualFold(header[:len(prefix)], prefix) {
