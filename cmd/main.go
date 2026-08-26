@@ -230,6 +230,15 @@ func main() {
 		setupLog.Error(err, "Failed to create controller", "controller", "workloadcluster")
 		os.Exit(1)
 	}
+	if err := (&controller.HeadlampKubeconfigReconciler{
+		Client:     mgr.GetClient(),
+		Scheme:     mgr.GetScheme(),
+		Namespace:  envOr("BENCH_HEADLAMP_NAMESPACE", "headlamp"),
+		SecretName: envOr("BENCH_HEADLAMP_KUBECONFIG_SECRET", "headlamp-kubeconfig"),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "Failed to create controller", "controller", "headlampkubeconfig")
+		os.Exit(1)
+	}
 	// +kubebuilder:scaffold:builder
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
@@ -246,4 +255,11 @@ func main() {
 		setupLog.Error(err, "Failed to run manager")
 		os.Exit(1)
 	}
+}
+
+func envOr(key, def string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return def
 }
