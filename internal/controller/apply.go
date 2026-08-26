@@ -87,6 +87,42 @@ func applyCreateOnly(ctx context.Context, c client.Client, scheme *runtime.Schem
 	return nil
 }
 
+// applyMachineDeploymentPool creates a worker pool's MachineDeployment if it
+// doesn't exist yet, or - if it does - patches only spec.replicas and
+// spec.template.spec.infrastructureRef.name (the two fields a
+// WorkerPoolSpec edit can actually change) rather than comparing/replacing
+// the whole spec the way applyOwned does. A full-spec comparison would hit
+// the same infinite-reconcile bug applyCreateOnly's doc comment describes -
+// CAPI mutates other spec fields (rollout strategy defaults, etc.) after
+// creation - so this only ever touches the two fields this operator itself
+// owns, leaving everything CAPI has defaulted alone.
+func applyMachineDeploymentPool(ctx context.Context, c client.Client, scheme *runtime.Scheme, owner client.Object, desired *clusterv1.MachineDeployment) error {
+	if err := controllerutil.SetControllerReference(owner, desired, scheme); err != nil {
+		return err
+	}
+	var existing clusterv1.MachineDeployment
+	err := c.Get(ctx, types.NamespacedName{Name: desired.Name, Namespace: desired.Namespace}, &existing)
+	if apierrors.IsNotFound(err) {
+		return c.Create(ctx, desired)
+	}
+	if err != nil {
+		return err
+	}
+	changed := false
+	if existing.Spec.Replicas == nil || desired.Spec.Replicas == nil || *existing.Spec.Replicas != *desired.Spec.Replicas {
+		existing.Spec.Replicas = desired.Spec.Replicas
+		changed = true
+	}
+	if existing.Spec.Template.Spec.InfrastructureRef.Name != desired.Spec.Template.Spec.InfrastructureRef.Name {
+		existing.Spec.Template.Spec.InfrastructureRef.Name = desired.Spec.Template.Spec.InfrastructureRef.Name
+		changed = true
+	}
+	if !changed {
+		return nil
+	}
+	return c.Update(ctx, &existing)
+}
+
 // applyUnowned is applyOwned without the ownerReference: for objects applied
 // to a client that may be a different cluster than the owner lives on,
 // where an ownerReference would carry a UID the remote cluster's garbage

@@ -18,7 +18,7 @@ func TestKubeadmControlPlaneBindsDualStack(t *testing.T) {
 			KubernetesVersion: "v1.31.0",
 			Provider:          benchv1alpha1.InfrastructureIncus,
 			ControlPlane:      benchv1alpha1.MachineSpec{Replicas: 1},
-			Workers:           benchv1alpha1.MachineSpec{Replicas: 2},
+			WorkerPools:       []benchv1alpha1.WorkerPoolSpec{{Name: "workers", Replicas: 2}},
 		},
 	}
 
@@ -44,7 +44,7 @@ func TestLXCClusterOverridesHAProxyForDualStack(t *testing.T) {
 			KubernetesVersion: "v1.31.0",
 			Provider:          benchv1alpha1.InfrastructureIncus,
 			ControlPlane:      benchv1alpha1.MachineSpec{Replicas: 1},
-			Workers:           benchv1alpha1.MachineSpec{Replicas: 2},
+			WorkerPools:       []benchv1alpha1.WorkerPoolSpec{{Name: "workers", Replicas: 2}},
 			Incus: &benchv1alpha1.IncusProviderSpec{
 				LXCSecretRef: corev1.LocalObjectReference{Name: "lxc-secret"},
 			},
@@ -74,5 +74,70 @@ func TestLXCClusterOverridesHAProxyForDualStack(t *testing.T) {
 		if !strings.Contains(tmpl, want) {
 			t.Fatalf("customHAProxyConfigTemplate missing expected upstream template fragment %q:\n%s", want, tmpl)
 		}
+	}
+}
+
+func wcWithPools(pools ...benchv1alpha1.WorkerPoolSpec) *benchv1alpha1.WorkloadCluster {
+	return &benchv1alpha1.WorkloadCluster{
+		ObjectMeta: metav1.ObjectMeta{Name: "wc-a", Namespace: "default"},
+		Spec: benchv1alpha1.WorkloadClusterSpec{
+			KubernetesVersion: "v1.31.0",
+			Provider:          benchv1alpha1.InfrastructureIncus,
+			ControlPlane:      benchv1alpha1.MachineSpec{Replicas: 1},
+			WorkerPools:       pools,
+			Incus: &benchv1alpha1.IncusProviderSpec{
+				LXCSecretRef: corev1.LocalObjectReference{Name: "lxc-secret"},
+				Image:        "ubuntu:24.04",
+			},
+		},
+	}
+}
+
+// TestMultiplePoolsGetDistinctNames guards the "add another pool of workers
+// with a different instance type" feature: two pools with different names
+// must render distinct MachineDeployments/LXCMachineTemplates, not collide
+// or overwrite each other.
+func TestMultiplePoolsGetDistinctNames(t *testing.T) {
+	wc := wcWithPools(
+		benchv1alpha1.WorkerPoolSpec{Name: "small", Replicas: 1, Incus: benchv1alpha1.IncusMachineSpec{Flavor: "c1-m2"}},
+		benchv1alpha1.WorkerPoolSpec{Name: "large", Replicas: 3, Incus: benchv1alpha1.IncusMachineSpec{Flavor: "c8-m16"}},
+	)
+
+	small := MachineDeployment(wc, wc.Spec.WorkerPools[0])
+	large := MachineDeployment(wc, wc.Spec.WorkerPools[1])
+
+	if small.Name == large.Name {
+		t.Fatalf("both pools rendered the same MachineDeployment name %q", small.Name)
+	}
+	if *small.Spec.Replicas != 1 || *large.Spec.Replicas != 3 {
+		t.Fatalf("replicas = %d/%d, want 1/3", *small.Spec.Replicas, *large.Spec.Replicas)
+	}
+	if small.Spec.Template.Spec.InfrastructureRef.Name == large.Spec.Template.Spec.InfrastructureRef.Name {
+		t.Fatalf("both pools' MachineDeployments reference the same LXCMachineTemplate %q - a flavor edit to one pool would roll the other too",
+			small.Spec.Template.Spec.InfrastructureRef.Name)
+	}
+}
+
+// TestWorkerMachineTemplateNameChangesWithFlavor guards the day-2 "change a
+// pool's instance type" path: WorkloadClusterReconciler relies on the
+// template's *name* changing to get Cluster API to roll the pool's machines
+// (see workerMachineTemplateName's doc comment) - editing the template
+// object's content in place would silently do nothing.
+func TestWorkerMachineTemplateNameChangesWithFlavor(t *testing.T) {
+	small := benchv1alpha1.WorkerPoolSpec{Name: "workers", Replicas: 2, Incus: benchv1alpha1.IncusMachineSpec{Flavor: "c1-m2"}}
+	large := benchv1alpha1.WorkerPoolSpec{Name: "workers", Replicas: 2, Incus: benchv1alpha1.IncusMachineSpec{Flavor: "c8-m16"}}
+
+	nameForSmall := workerMachineTemplateName(wcWithPools(small), small)
+	nameForLarge := workerMachineTemplateName(wcWithPools(large), large)
+
+	if nameForSmall == nameForLarge {
+		t.Fatalf("workerMachineTemplateName did not change across a flavor edit: both = %q", nameForSmall)
+	}
+
+	// A no-op reconcile (same flavor) must render the exact same name, or
+	// applyCreateOnly would create a redundant new template every time.
+	again := workerMachineTemplateName(wcWithPools(small), small)
+	if again != nameForSmall {
+		t.Fatalf("workerMachineTemplateName is not stable across identical input: %q vs %q", nameForSmall, again)
 	}
 }

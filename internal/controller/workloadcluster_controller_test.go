@@ -63,11 +63,12 @@ var _ = Describe("WorkloadCluster Controller", func() {
 						KubernetesVersion: "v1.31.0",
 						Provider:          benchv1alpha1.InfrastructureIncus,
 						ControlPlane:      benchv1alpha1.MachineSpec{Replicas: 1},
-						Workers:           benchv1alpha1.MachineSpec{Replicas: 2},
+						WorkerPools: []benchv1alpha1.WorkerPoolSpec{
+							{Name: "workers", Replicas: 2, Incus: benchv1alpha1.IncusMachineSpec{Flavor: "c2-m4"}},
+						},
 						Incus: &benchv1alpha1.IncusProviderSpec{
 							LXCSecretRef: corev1.LocalObjectReference{Name: "lxc-secret"},
 							ControlPlane: benchv1alpha1.IncusMachineSpec{Flavor: "c2-m4"},
-							Workers:      benchv1alpha1.IncusMachineSpec{Flavor: "c2-m4"},
 						},
 					},
 				}
@@ -131,6 +132,49 @@ var _ = Describe("WorkloadCluster Controller", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(k8sClient.Get(ctx, typeNamespacedName, workloadcluster)).To(Succeed())
 			Expect(workloadcluster.Status.ControlPlaneReady).To(BeFalse())
+
+			By("confirming the worker pool's MachineDeployment was created")
+			mdName := resourceName + "-workers"
+			var md clusterv1.MachineDeployment
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: mdName, Namespace: resourceNamespace}, &md)).To(Succeed())
+			Expect(*md.Spec.Replicas).To(Equal(int32(2)))
+			originalTemplateName := md.Spec.Template.Spec.InfrastructureRef.Name
+
+			By("editing the pool's replicas and flavor, and confirming they're applied in place")
+			Expect(k8sClient.Get(ctx, typeNamespacedName, workloadcluster)).To(Succeed())
+			workloadcluster.Spec.WorkerPools[0].Replicas = 5
+			workloadcluster.Spec.WorkerPools[0].Incus.Flavor = "c8-m16"
+			Expect(k8sClient.Update(ctx, workloadcluster)).To(Succeed())
+
+			_, err = controllerReconciler.Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: mdName, Namespace: resourceNamespace}, &md)).To(Succeed())
+			Expect(*md.Spec.Replicas).To(Equal(int32(5)))
+			Expect(md.Spec.Template.Spec.InfrastructureRef.Name).NotTo(Equal(originalTemplateName),
+				"a flavor edit must repoint the MachineDeployment at a new LXCMachineTemplate to trigger Cluster API's rollout")
+
+			By("adding a second pool and confirming it gets its own MachineDeployment")
+			Expect(k8sClient.Get(ctx, typeNamespacedName, workloadcluster)).To(Succeed())
+			workloadcluster.Spec.WorkerPools = append(workloadcluster.Spec.WorkerPools,
+				benchv1alpha1.WorkerPoolSpec{Name: "extra", Replicas: 1, Incus: benchv1alpha1.IncusMachineSpec{Flavor: "c1-m2"}})
+			Expect(k8sClient.Update(ctx, workloadcluster)).To(Succeed())
+
+			_, err = controllerReconciler.Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
+			Expect(err).NotTo(HaveOccurred())
+			extraMDName := resourceName + "-extra"
+			var extraMD clusterv1.MachineDeployment
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: extraMDName, Namespace: resourceNamespace}, &extraMD)).To(Succeed())
+
+			By("removing the extra pool and confirming only its MachineDeployment is deleted")
+			Expect(k8sClient.Get(ctx, typeNamespacedName, workloadcluster)).To(Succeed())
+			workloadcluster.Spec.WorkerPools = workloadcluster.Spec.WorkerPools[:1]
+			Expect(k8sClient.Update(ctx, workloadcluster)).To(Succeed())
+
+			_, err = controllerReconciler.Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: extraMDName, Namespace: resourceNamespace}, &extraMD)).
+				To(MatchError(errors.IsNotFound, "IsNotFound"))
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: mdName, Namespace: resourceNamespace}, &md)).To(Succeed())
 		})
 	})
 })

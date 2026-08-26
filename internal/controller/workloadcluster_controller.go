@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -106,14 +107,26 @@ func (r *WorkloadClusterReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	// in ways this operator's freshly-rendered object never has, so a
 	// spec-equality check against them never matches - see applyCreateOnly's
 	// doc comment for what that caused when this used applyOwned instead.
+	// LXCMachineTemplates/KubeadmConfigTemplates are safe to create-only even
+	// for a spec.workerPools edit: workerMachineTemplateName folds the
+	// pool's flavor into the object's own name, so an edited flavor always
+	// means a brand new object here, never an update to an existing one.
 	for _, obj := range []client.Object{
 		render.LXCCluster(&wc),
 		render.ControlPlaneLXCMachineTemplate(&wc),
-		render.WorkerLXCMachineTemplate(&wc),
-		render.WorkerKubeadmConfigTemplate(&wc),
 	} {
 		if err := applyCreateOnly(ctx, r.Client, r.Scheme, &wc, obj); err != nil {
 			return ctrl.Result{}, fmt.Errorf("apply %s: %w", obj.GetObjectKind().GroupVersionKind().Kind, err)
+		}
+	}
+	for _, pool := range wc.Spec.WorkerPools {
+		for _, obj := range []client.Object{
+			render.WorkerLXCMachineTemplate(&wc, pool),
+			render.WorkerKubeadmConfigTemplate(&wc, pool),
+		} {
+			if err := applyCreateOnly(ctx, r.Client, r.Scheme, &wc, obj); err != nil {
+				return ctrl.Result{}, fmt.Errorf("apply %s for pool %q: %w", obj.GetObjectKind().GroupVersionKind().Kind, pool.Name, err)
+			}
 		}
 	}
 
@@ -151,11 +164,21 @@ func (r *WorkloadClusterReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	if err := applyCreateOnly(ctx, r.Client, r.Scheme, &wc, render.KubeadmControlPlane(&wc)); err != nil {
 		return ctrl.Result{}, fmt.Errorf("apply KubeadmControlPlane: %w", err)
 	}
-	// MachineDeployment is applied only once the Cluster exists - CAPI's own
-	// webhook/validation rejects a MachineDeployment naming a Cluster that
-	// isn't there yet.
-	if err := applyCreateOnly(ctx, r.Client, r.Scheme, &wc, render.MachineDeployment(&wc)); err != nil {
-		return ctrl.Result{}, fmt.Errorf("apply MachineDeployment: %w", err)
+	// MachineDeployments are applied only once the Cluster exists - CAPI's
+	// own webhook/validation rejects a MachineDeployment naming a Cluster
+	// that isn't there yet. Unlike everything above, a pool's
+	// MachineDeployment genuinely is updated in place (see
+	// applyMachineDeploymentPool) - replicas/flavor are the one day-2 edit
+	// this controller supports.
+	desiredPools := make(map[string]bool, len(wc.Spec.WorkerPools))
+	for _, pool := range wc.Spec.WorkerPools {
+		desiredPools[pool.Name] = true
+		if err := applyMachineDeploymentPool(ctx, r.Client, r.Scheme, &wc, render.MachineDeployment(&wc, pool)); err != nil {
+			return ctrl.Result{}, fmt.Errorf("apply MachineDeployment for pool %q: %w", pool.Name, err)
+		}
+	}
+	if err := r.deleteRemovedWorkerPools(ctx, &wc, desiredPools); err != nil {
+		return ctrl.Result{}, fmt.Errorf("delete removed worker pools: %w", err)
 	}
 
 	wc.Status.Phase = existing.Status.Phase
@@ -223,6 +246,32 @@ func (r *WorkloadClusterReconciler) ensureCNI(ctx context.Context, wc *benchv1al
 	for _, obj := range objs {
 		if err := remoteClient.Create(ctx, obj); err != nil && !apierrors.IsAlreadyExists(err) {
 			return fmt.Errorf("create %s %s/%s: %w", obj.GetKind(), obj.GetNamespace(), obj.GetName(), err)
+		}
+	}
+	return nil
+}
+
+// deleteRemovedWorkerPools deletes the MachineDeployment (and, via CAPI's own
+// garbage collection of a deleted MachineDeployment's owned objects, its
+// Machines) for any pool that used to be in spec.workerPools but no longer
+// is. Listed by the cluster-name label render.MachineDeployment sets on
+// every pool it renders, rather than an owner-reference index, since every
+// pool's MachineDeployment already carries that label for CAPI's own
+// benefit.
+func (r *WorkloadClusterReconciler) deleteRemovedWorkerPools(ctx context.Context, wc *benchv1alpha1.WorkloadCluster, desiredPools map[string]bool) error {
+	var list clusterv1.MachineDeploymentList
+	if err := r.List(ctx, &list, client.InNamespace(wc.Namespace),
+		client.MatchingLabels{"cluster.x-k8s.io/cluster-name": wc.Name}); err != nil {
+		return fmt.Errorf("list MachineDeployments: %w", err)
+	}
+	for i := range list.Items {
+		md := &list.Items[i]
+		poolName, ok := strings.CutPrefix(md.Name, wc.Name+"-")
+		if !ok || desiredPools[poolName] {
+			continue
+		}
+		if err := r.Delete(ctx, md); err != nil && !apierrors.IsNotFound(err) {
+			return fmt.Errorf("delete MachineDeployment %s: %w", md.Name, err)
 		}
 	}
 	return nil

@@ -1,6 +1,9 @@
 package render
 
 import (
+	"fmt"
+	"hash/fnv"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/utils/ptr"
@@ -53,18 +56,34 @@ func infrastructureMachineTemplateKind(wc *benchv1alpha1.WorkloadCluster) string
 
 // Name helpers, matching the reference cluster-api-provider-incus example
 // (a Cluster named "x" pairs with a KubeadmControlPlane "x-control-plane" and
-// a single worker MachineDeployment "x-md-0").
-func ControlPlaneName(wc *benchv1alpha1.WorkloadCluster) string      { return wc.Name + "-control-plane" }
-func MachineDeploymentName(wc *benchv1alpha1.WorkloadCluster) string { return wc.Name + "-md-0" }
+// a worker MachineDeployment per pool, "x-<pool>").
+func ControlPlaneName(wc *benchv1alpha1.WorkloadCluster) string { return wc.Name + "-control-plane" }
+func MachineDeploymentName(wc *benchv1alpha1.WorkloadCluster, pool benchv1alpha1.WorkerPoolSpec) string {
+	return wc.Name + "-" + pool.Name
+}
 
 func controlPlaneMachineTemplateName(wc *benchv1alpha1.WorkloadCluster) string {
 	return ControlPlaneName(wc)
 }
-func workerMachineTemplateName(wc *benchv1alpha1.WorkloadCluster) string {
-	return MachineDeploymentName(wc)
+
+// workerMachineTemplateName includes a short hash of the pool's flavor/image:
+// LXCMachineTemplates are meant to be immutable once a MachineDeployment
+// references them (editing one in place doesn't trigger Cluster API's
+// rolling-replace machinery, only pointing the MachineDeployment at a
+// differently-*named* template does), so a flavor edit has to produce a new
+// name here rather than update the existing template's content.
+func workerMachineTemplateName(wc *benchv1alpha1.WorkloadCluster, pool benchv1alpha1.WorkerPoolSpec) string {
+	h := fnv.New32a()
+	image := ""
+	if wc.Spec.Incus != nil {
+		image = wc.Spec.Incus.Image
+	}
+	_, _ = h.Write([]byte(pool.Incus.Flavor + "|" + image))
+	return fmt.Sprintf("%s-%x", MachineDeploymentName(wc, pool), h.Sum32())
 }
-func workerKubeadmConfigTemplateName(wc *benchv1alpha1.WorkloadCluster) string {
-	return MachineDeploymentName(wc)
+
+func workerKubeadmConfigTemplateName(wc *benchv1alpha1.WorkloadCluster, pool benchv1alpha1.WorkerPoolSpec) string {
+	return MachineDeploymentName(wc, pool)
 }
 
 // nodeRegistrationArgs are applied to both InitConfiguration and
@@ -201,8 +220,8 @@ func ControlPlaneLXCMachineTemplate(wc *benchv1alpha1.WorkloadCluster) *unstruct
 	return lxcMachineTemplateObject(wc, controlPlaneMachineTemplateName(wc), wc.Spec.Incus.ControlPlane.Flavor)
 }
 
-func WorkerLXCMachineTemplate(wc *benchv1alpha1.WorkloadCluster) *unstructured.Unstructured {
-	return lxcMachineTemplateObject(wc, workerMachineTemplateName(wc), wc.Spec.Incus.Workers.Flavor)
+func WorkerLXCMachineTemplate(wc *benchv1alpha1.WorkloadCluster, pool benchv1alpha1.WorkerPoolSpec) *unstructured.Unstructured {
+	return lxcMachineTemplateObject(wc, workerMachineTemplateName(wc, pool), pool.Incus.Flavor)
 }
 
 // KubeadmControlPlane renders the control plane: kubeadmConfigSpec is shared
@@ -264,21 +283,25 @@ func KubeadmControlPlane(wc *benchv1alpha1.WorkloadCluster) *controlplanev1.Kube
 // machineDeploymentSelectorLabels are applied to both the MachineDeployment's
 // spec.selector and its machine template's metadata - they must match each
 // other, and spec.selector is a required field with no useful zero value.
-func machineDeploymentSelectorLabels(wc *benchv1alpha1.WorkloadCluster) map[string]string {
+// Also applied to the MachineDeployment's own metadata.labels, so the
+// controller can list a WorkloadCluster's pools back out by cluster-name to
+// find any whose pool no longer exists in spec.workerPools.
+func machineDeploymentSelectorLabels(wc *benchv1alpha1.WorkloadCluster, pool benchv1alpha1.WorkerPoolSpec) map[string]string {
 	return map[string]string{
 		"cluster.x-k8s.io/cluster-name":    wc.Name,
-		"cluster.x-k8s.io/deployment-name": MachineDeploymentName(wc),
+		"cluster.x-k8s.io/deployment-name": MachineDeploymentName(wc, pool),
 	}
 }
 
-// MachineDeployment renders the single worker pool.
-func MachineDeployment(wc *benchv1alpha1.WorkloadCluster) *clusterv1.MachineDeployment {
-	replicas := wc.Spec.Workers.Replicas
-	labels := machineDeploymentSelectorLabels(wc)
+// MachineDeployment renders one worker pool.
+func MachineDeployment(wc *benchv1alpha1.WorkloadCluster, pool benchv1alpha1.WorkerPoolSpec) *clusterv1.MachineDeployment {
+	replicas := pool.Replicas
+	labels := machineDeploymentSelectorLabels(wc, pool)
 	return &clusterv1.MachineDeployment{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      MachineDeploymentName(wc),
+			Name:      MachineDeploymentName(wc, pool),
 			Namespace: wc.Namespace,
+			Labels:    labels,
 		},
 		Spec: clusterv1.MachineDeploymentSpec{
 			ClusterName: wc.Name,
@@ -293,13 +316,13 @@ func MachineDeployment(wc *benchv1alpha1.WorkloadCluster) *clusterv1.MachineDepl
 						ConfigRef: clusterv1.ContractVersionedObjectReference{
 							APIGroup: "bootstrap.cluster.x-k8s.io",
 							Kind:     "KubeadmConfigTemplate",
-							Name:     workerKubeadmConfigTemplateName(wc),
+							Name:     workerKubeadmConfigTemplateName(wc, pool),
 						},
 					},
 					InfrastructureRef: clusterv1.ContractVersionedObjectReference{
 						APIGroup: "infrastructure.cluster.x-k8s.io",
 						Kind:     infrastructureMachineTemplateKind(wc),
-						Name:     workerMachineTemplateName(wc),
+						Name:     workerMachineTemplateName(wc, pool),
 					},
 				},
 			},
@@ -310,11 +333,11 @@ func MachineDeployment(wc *benchv1alpha1.WorkloadCluster) *clusterv1.MachineDepl
 // WorkerKubeadmConfigTemplate renders the join-only bootstrap config workers
 // use (no InitConfiguration - only the first control-plane machine inits the
 // cluster, everything else joins it).
-func WorkerKubeadmConfigTemplate(wc *benchv1alpha1.WorkloadCluster) *bootstrapv1.KubeadmConfigTemplate {
+func WorkerKubeadmConfigTemplate(wc *benchv1alpha1.WorkloadCluster, pool benchv1alpha1.WorkerPoolSpec) *bootstrapv1.KubeadmConfigTemplate {
 	nodeReg := bootstrapv1.NodeRegistrationOptions{KubeletExtraArgs: nodeRegistrationArgs()}
 	return &bootstrapv1.KubeadmConfigTemplate{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      workerKubeadmConfigTemplateName(wc),
+			Name:      workerKubeadmConfigTemplateName(wc, pool),
 			Namespace: wc.Namespace,
 		},
 		Spec: bootstrapv1.KubeadmConfigTemplateSpec{

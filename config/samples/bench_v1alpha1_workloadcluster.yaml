@@ -6,16 +6,17 @@ metadata:
     app.kubernetes.io/managed-by: kustomize
   name: workloadcluster-sample
 spec:
-  kubernetesVersion: v1.31.0
+  kubernetesVersion: v1.36.4
   provider: Incus
   controlPlane:
     replicas: 1
-  workers:
-    replicas: 2
+  workerPools:
+    - name: workers
+      replicas: 2
+      incus:
+        flavor: c2-m4
   incus:
     lxcSecretRef:
       name: lxc-secret
     controlPlane:
-      flavor: c2-m4
-    workers:
       flavor: c2-m4

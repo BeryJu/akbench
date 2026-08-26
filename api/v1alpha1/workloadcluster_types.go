@@ -80,8 +80,38 @@ type IncusProviderSpec struct {
 
 	// +optional
 	ControlPlane IncusMachineSpec `json:"controlPlane,omitempty"`
+}
+
+// WorkerPoolSpec is one named, independently-sized group of worker machines,
+// letting a WorkloadCluster run more than one worker shape at once - e.g. a
+// small pool for the k6 runner alongside a larger one sized for load
+// generation. Pool names must be unique within a WorkloadCluster.
+//
+// Editing an existing pool's replicas or flavor is applied in place by
+// WorkloadClusterReconciler: replicas patches the MachineDeployment
+// directly, and a flavor change rolls that pool's machines through Cluster
+// API's normal MachineDeployment rollout (a new, immutably-named
+// LXCMachineTemplate is created and the MachineDeployment is repointed at
+// it - the old template is left behind rather than garbage collected, the
+// same way an unused ReplicaSet lingers after a Deployment rollout).
+// Removing a pool from the list deletes its MachineDeployment; adding a new
+// name creates one. The control plane itself is not resizable/reconfigurable
+// this way yet.
+type WorkerPoolSpec struct {
+	// name identifies this pool; it becomes part of the MachineDeployment's
+	// own name, so it follows the same naming rules as a Kubernetes object.
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
+	Name string `json:"name"`
+
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:default=1
 	// +optional
-	Workers IncusMachineSpec `json:"workers,omitempty"`
+	Replicas int32 `json:"replicas,omitempty"`
+
+	// incus is this pool's Incus-specific sizing. Required when
+	// spec.provider is Incus.
+	// +optional
+	Incus IncusMachineSpec `json:"incus,omitempty"`
 }
 
 // WorkloadClusterSpec describes a Kubernetes cluster this operator asks
@@ -100,8 +130,12 @@ type WorkloadClusterSpec struct {
 
 	// +optional
 	ControlPlane MachineSpec `json:"controlPlane,omitempty"`
-	// +optional
-	Workers MachineSpec `json:"workers,omitempty"`
+
+	// workerPools are the WorkloadCluster's worker machine groups - at least
+	// one is required. See WorkerPoolSpec for how editing this list after
+	// creation behaves.
+	// +kubebuilder:validation:MinItems=1
+	WorkerPools []WorkerPoolSpec `json:"workerPools"`
 
 	// incus configures provisioning when provider is Incus.
 	// +optional
