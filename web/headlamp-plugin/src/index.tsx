@@ -30,7 +30,7 @@ import { TestCaseSection, TopologySection } from './DetailSections';
 registerSidebarEntry({
   parent: null,
   name: 'authentik-bench',
-  label: 'authentik-bench',
+  label: 'authentik Bench',
   url: '/authentik-bench',
   icon: 'mdi:chart-line',
 });
