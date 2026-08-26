@@ -55,6 +55,8 @@ func HelmRepository(namespace string, spec benchv1alpha1.ChartSpec) *sourcev1.He
 
 const helmRepoInterval = 10 * time.Minute
 
+const helmInstallTimeout = 15 * time.Minute
+
 // AuthentikTopologyHelmValues is what AuthentikTopologyHelmRelease renders
 // into spec.values. Exported so unit/contract tests can assert on the
 // concrete shape without re-parsing JSON.
@@ -80,7 +82,15 @@ type AuthentikTopologyHelmValues struct {
 // Password is set (paired with the bundled subchart's own generated
 // auth.password so both sides agree on the same value); for CNPG/External
 // modes the full connection is set and the bundled subchart stays disabled.
-func HelmValues(t *benchv1alpha1.AuthentikTopology, secretKey string, pgConn *PostgresConnection) (*apiextensionsv1.JSON, error) {
+// pyroscopeHost/tracingEndpoint are the caller's already-defaulted-or-
+// overridden values (see AuthentikTopologyReconciler's
+// defaultPyroscopeHost/defaultTracingEndpoint) - neither has a values.yaml
+// hook in the chart (verified against the chart's actual values.yaml: no
+// pyroscope key at all, and error_reporting only has enabled/environment/
+// send_pii, not an OTLP endpoint or sample rate), so both go in as raw
+// AUTHENTIK_* env vars, the same names the Ansible harness this project
+// replaces used (roles/authentik/templates/env.j2).
+func HelmValues(t *benchv1alpha1.AuthentikTopology, secretKey string, pgConn *PostgresConnection, pyroscopeHost, tracingEndpoint string) (*apiextensionsv1.JSON, error) {
 	embedded := t.Spec.Postgres.Mode == benchv1alpha1.PostgresEmbedded
 	values := AuthentikTopologyHelmValues{
 		Server: map[string]any{
@@ -124,9 +134,40 @@ func HelmValues(t *benchv1alpha1.AuthentikTopology, secretKey string, pgConn *Po
 	if t.Spec.Authentik.LogLevel != "" {
 		values.Authentik["log_level"] = t.Spec.Authentik.LogLevel
 	}
+
+	targetName := t.Spec.TargetName
+	if targetName == "" {
+		targetName = t.Name
+	}
+	// Consumed by the Pyroscope SDK as its server address - always set,
+	// unmarked by any enabled flag, matching the reference Ansible harness
+	// (env.j2's AUTHENTIK_PYROSCOPE_HOST): profiling is best-effort and
+	// silently no-ops if nothing is actually listening there.
+	appendEnv := func(w map[string]any, name, value string) {
+		env, _ := w["env"].([]map[string]string)
+		w["env"] = append(env, map[string]string{"name": name, "value": value})
+	}
+	appendEnv(values.Server, "AUTHENTIK_PYROSCOPE_HOST", pyroscopeHost)
+	appendEnv(values.Worker, "AUTHENTIK_PYROSCOPE_HOST", pyroscopeHost)
+
 	if t.Spec.Authentik.ErrorReporting.Enabled {
 		values.Authentik["error_reporting"] = map[string]any{
 			"enabled": true,
+			// deployment.environment carries this topology's target name, so
+			// spans from two topologies sharing one Tempo can be told apart.
+			"environment": targetName,
+		}
+		sampleRate := t.Spec.Authentik.ErrorReporting.SampleRate
+		if sampleRate == "" {
+			sampleRate = "0.1"
+		}
+		for _, w := range []map[string]any{values.Server, values.Worker} {
+			appendEnv(w, "AUTHENTIK_ERROR_REPORTING__OTEL_ENDPOINT", tracingEndpoint)
+			appendEnv(w, "AUTHENTIK_ERROR_REPORTING__SAMPLE_RATE", sampleRate)
+			// Only meaningful for the server (the worker doesn't serve
+			// HTTP), but harmless to set on both - puts the test name that
+			// caused a request on its spans as http.request.header.*.
+			appendEnv(w, "OTEL_INSTRUMENTATION_HTTP_CAPTURE_HEADERS_SERVER_REQUEST", "x-benchmark-test,x-benchmark-target")
 		}
 	}
 
@@ -205,6 +246,15 @@ func HelmRelease(t *benchv1alpha1.AuthentikTopology, kubeConfigSecretName string
 		},
 		Spec: helmv2.HelmReleaseSpec{
 			Interval: metav1.Duration{Duration: helmRepoInterval},
+			// helm-controller's own default (5m) isn't enough on a cold
+			// cluster: pulling the authentik/postgresql images and letting
+			// postgres finish its first-boot initdb can alone take longer
+			// than that, well before authentik itself is even up - and once
+			// an install attempt exceeds this and exhausts retries,
+			// helm-controller marks the release Stalled permanently (no
+			// more automatic retries) even if the workload goes healthy
+			// moments later.
+			Timeout: &metav1.Duration{Duration: helmInstallTimeout},
 			// Explicit, rather than Flux's default "[TargetNamespace-]Name"
 			// composition, so ServiceEndpoint's "<release>-server" naming
 			// stays correct regardless of what the target namespace is

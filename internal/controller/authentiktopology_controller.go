@@ -46,6 +46,17 @@ import (
 // Kubernetes garbage collection cannot reach on its own.
 const authentikTopologyFinalizer = "bench.goauthentik.io/remote-cleanup"
 
+// defaultPyroscopeHost/defaultTracingEndpoint are the central metrics
+// stack's Pyroscope/Tempo, used whenever a topology doesn't set
+// spec.authentik.pyroscopeHost/errorReporting.tracingEndpoint itself -
+// mirrors defaultRemoteWriteURL's env-overridable-default pattern
+// (testcase_controller.go) so every topology gets profiling/tracing wired up
+// for free instead of needing it configured per topology.
+var (
+	defaultPyroscopeHost   = envOrDefault("BENCH_PYROSCOPE_HOST", "http://pyroscope.bench-system.svc.cluster.local:4040")
+	defaultTracingEndpoint = envOrDefault("BENCH_TRACING_ENDPOINT", "http://tempo.bench-system.svc.cluster.local:4318")
+)
+
 // kubeconfigSecretName is the Secret name convention Cluster API itself
 // defines for a Cluster's admin kubeconfig - the same one
 // render.KubeconfigSecretName (internal/render/workloadcluster.go) produces,
@@ -163,7 +174,15 @@ func (r *AuthentikTopologyReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		return ctrl.Result{}, fmt.Errorf("ensure authentik secret key: %w", err)
 	}
 
-	values, err := render.HelmValues(&topo, secretKey, pgConn)
+	pyroscopeHost := topo.Spec.Authentik.PyroscopeHost
+	if pyroscopeHost == "" {
+		pyroscopeHost = defaultPyroscopeHost
+	}
+	tracingEndpoint := topo.Spec.Authentik.ErrorReporting.TracingEndpoint
+	if tracingEndpoint == "" {
+		tracingEndpoint = defaultTracingEndpoint
+	}
+	values, err := render.HelmValues(&topo, secretKey, pgConn, pyroscopeHost, tracingEndpoint)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("build helm values: %w", err)
 	}

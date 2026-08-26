@@ -32,7 +32,7 @@ func decodeValues(t *testing.T, raw json.RawMessage) AuthentikTopologyHelmValues
 
 func TestHelmValuesEmbedded(t *testing.T) {
 	topo := exampleTopology()
-	raw, err := HelmValues(topo, "the-secret-key", &PostgresConnection{Password: "pw"})
+	raw, err := HelmValues(topo, "the-secret-key", &PostgresConnection{Password: "pw"}, "http://pyroscope.example:4040", "http://tempo.example:4318")
 	if err != nil {
 		t.Fatalf("HelmValues: %v", err)
 	}
@@ -72,7 +72,7 @@ func TestHelmValuesEmbedded(t *testing.T) {
 func TestHelmValuesPlacementUsesGlobalAffinityPreset(t *testing.T) {
 	topo := exampleTopology()
 	topo.Spec.Placement = benchv1alpha1.PlacementSpec{Mode: benchv1alpha1.PlacementDedicated}
-	raw, err := HelmValues(topo, "secret", &PostgresConnection{Password: "pw"})
+	raw, err := HelmValues(topo, "secret", &PostgresConnection{Password: "pw"}, "http://pyroscope.example:4040", "http://tempo.example:4318")
 	if err != nil {
 		t.Fatalf("HelmValues: %v", err)
 	}
@@ -98,7 +98,7 @@ func TestHelmValuesPlacementUsesGlobalAffinityPreset(t *testing.T) {
 func TestHelmValuesPacked(t *testing.T) {
 	topo := exampleTopology()
 	topo.Spec.Placement = benchv1alpha1.PlacementSpec{Mode: benchv1alpha1.PlacementPacked}
-	raw, err := HelmValues(topo, "secret", &PostgresConnection{Password: "pw"})
+	raw, err := HelmValues(topo, "secret", &PostgresConnection{Password: "pw"}, "http://pyroscope.example:4040", "http://tempo.example:4318")
 	if err != nil {
 		t.Fatalf("HelmValues: %v", err)
 	}
@@ -135,7 +135,7 @@ func TestHelmValuesExternalDisablesBundledPostgres(t *testing.T) {
 	}
 	raw, err := HelmValues(topo, "secret", &PostgresConnection{
 		Host: "pg.example.com", Port: 5432, Database: "authentik", User: "authentik", Password: "s3cret",
-	})
+	}, "http://pyroscope.example:4040", "http://tempo.example:4318")
 	if err != nil {
 		t.Fatalf("HelmValues: %v", err)
 	}
@@ -155,7 +155,7 @@ func TestHelmValuesExternalDisablesBundledPostgres(t *testing.T) {
 
 func TestHelmReleaseUsesExplicitReleaseName(t *testing.T) {
 	topo := exampleTopology()
-	raw, err := HelmValues(topo, "secret", nil)
+	raw, err := HelmValues(topo, "secret", nil, "http://pyroscope.example:4040", "http://tempo.example:4318")
 	if err != nil {
 		t.Fatalf("HelmValues: %v", err)
 	}
@@ -171,4 +171,84 @@ func TestHelmReleaseUsesExplicitReleaseName(t *testing.T) {
 	if got, want := ServiceEndpoint(topo), "authentik-1-authentik-server.authentik-1.svc.cluster.local:80"; got != want {
 		t.Errorf("ServiceEndpoint() = %q, want %q", got, want)
 	}
+}
+
+func envValue(t *testing.T, w map[string]any, name string) (string, bool) {
+	t.Helper()
+	raw, err := json.Marshal(w["env"])
+	if err != nil {
+		t.Fatalf("marshal env: %v", err)
+	}
+	var entries []map[string]string
+	if err := json.Unmarshal(raw, &entries); err != nil {
+		t.Fatalf("unmarshal env: %v", err)
+	}
+	for _, e := range entries {
+		if e["name"] == name {
+			return e["value"], true
+		}
+	}
+	return "", false
+}
+
+// TestHelmValuesPyroscopeAlwaysSet guards the chart's actual values.yaml
+// having no pyroscope key at all (checked against a live pulled chart
+// tarball) - profiling only reaches authentik via a raw env var, on both
+// workloads, unconditionally (no separate "pyroscope enabled" toggle exists,
+// matching the Ansible harness this project replaces).
+func TestHelmValuesPyroscopeAlwaysSet(t *testing.T) {
+	topo := exampleTopology()
+	raw, err := HelmValues(topo, "secret", &PostgresConnection{Password: "pw"}, "http://pyroscope.example:4040", "http://tempo.example:4318")
+	if err != nil {
+		t.Fatalf("HelmValues: %v", err)
+	}
+	values := decodeValues(t, raw.Raw)
+
+	for name, w := range map[string]map[string]any{"server": values.Server, "worker": values.Worker} {
+		got, ok := envValue(t, w, "AUTHENTIK_PYROSCOPE_HOST")
+		if !ok || got != "http://pyroscope.example:4040" {
+			t.Errorf("%s env AUTHENTIK_PYROSCOPE_HOST = %q, ok=%v, want http://pyroscope.example:4040", name, got, ok)
+		}
+	}
+}
+
+// TestHelmValuesTracingOnlyWhenErrorReportingEnabled guards the chart's
+// error_reporting section having no OTLP endpoint/sample-rate key either
+// (only enabled/environment/send_pii) - both go in as raw env vars, and only
+// when errorReporting.enabled is set, matching env.j2's {% if
+// authentik_error_reporting %} guard in the Ansible harness this project
+// replaces.
+func TestHelmValuesTracingOnlyWhenErrorReportingEnabled(t *testing.T) {
+	topo := exampleTopology()
+	if _, ok := envValue(t, mustValues(t, topo).Server, "AUTHENTIK_ERROR_REPORTING__OTEL_ENDPOINT"); ok {
+		t.Error("AUTHENTIK_ERROR_REPORTING__OTEL_ENDPOINT must not be set when errorReporting.enabled is false")
+	}
+
+	topo.Spec.Authentik.ErrorReporting = benchv1alpha1.ErrorReportingSpec{Enabled: true, SampleRate: "0.25"}
+	values := mustValues(t, topo)
+
+	er, _ := values.Authentik["error_reporting"].(map[string]any)
+	if er["enabled"] != true {
+		t.Errorf("authentik.error_reporting.enabled = %v, want true", er["enabled"])
+	}
+	if er["environment"] != "authentik-1" {
+		t.Errorf("authentik.error_reporting.environment = %v, want the topology's target name", er["environment"])
+	}
+	for name, w := range map[string]map[string]any{"server": values.Server, "worker": values.Worker} {
+		if got, ok := envValue(t, w, "AUTHENTIK_ERROR_REPORTING__OTEL_ENDPOINT"); !ok || got != "http://tempo.example:4318" {
+			t.Errorf("%s env AUTHENTIK_ERROR_REPORTING__OTEL_ENDPOINT = %q, ok=%v", name, got, ok)
+		}
+		if got, ok := envValue(t, w, "AUTHENTIK_ERROR_REPORTING__SAMPLE_RATE"); !ok || got != "0.25" {
+			t.Errorf("%s env AUTHENTIK_ERROR_REPORTING__SAMPLE_RATE = %q, ok=%v, want 0.25", name, got, ok)
+		}
+	}
+}
+
+func mustValues(t *testing.T, topo *benchv1alpha1.AuthentikTopology) AuthentikTopologyHelmValues {
+	t.Helper()
+	raw, err := HelmValues(topo, "secret", &PostgresConnection{Password: "pw"}, "http://pyroscope.example:4040", "http://tempo.example:4318")
+	if err != nil {
+		t.Fatalf("HelmValues: %v", err)
+	}
+	return decodeValues(t, raw.Raw)
 }
