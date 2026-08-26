@@ -34,6 +34,7 @@ import (
 	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
@@ -575,6 +576,12 @@ func (r *AuthentikTopologyReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		// creation (`make fixtures`, run any time after the topology
 		// already exists) doesn't touch the topology at all on its own.
 		Watches(&corev1.ConfigMap{}, handler.EnqueueRequestsFromMapFunc(r.topologiesForConfigMap)).
+		// Defense in depth alongside blueprintApplyTimeout (blueprint.go):
+		// the default of 1 means a single slow reconcile - blueprint
+		// application under load is the known slow one - blocks every
+		// *other* topology's reconciles too, not just its own, since they
+		// all share the one worker.
+		WithOptions(controller.Options{MaxConcurrentReconciles: 5}).
 		Named("authentiktopology").
 		Complete(r)
 }

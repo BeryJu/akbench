@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -62,6 +63,17 @@ func serverPodForExec(ctx context.Context, rc client.Client, topo *benchv1alpha1
 	return newest, nil
 }
 
+// blueprintApplyTimeout bounds ApplyBlueprint's exec: ak apply_blueprint
+// cold-starts a full Django app before doing anything (observed several
+// minutes on a resource-starved dev cluster running multiple authentik
+// instances at once) - without a bound, a slow or wedged attempt blocks
+// this reconcile forever, and since AuthentikTopologyReconciler only runs
+// one reconcile at a time by default, that starves every *other*
+// topology's reconciles too (verified live via a goroutine dump: an exec's
+// stdin/stdout/stderr copy goroutines parked indefinitely on a stream read,
+// and no other AuthentikTopology reconciled again as long as it sat there).
+const blueprintApplyTimeout = 5 * time.Minute
+
 // ApplyBlueprint writes blueprintYAML into the fixtures PVC HelmValues
 // mounted at render.BlueprintMountPath (see withBlueprintVolume) and applies
 // it with `ak apply_blueprint`, via a single exec so the write and the apply
@@ -69,6 +81,9 @@ func serverPodForExec(ctx context.Context, rc client.Client, topo *benchv1alpha1
 // reconciles. restConfig is whichever cluster topo actually runs on
 // (resolveRESTConfig) - always the same cluster rc itself talks to.
 func (r *AuthentikTopologyReconciler) ApplyBlueprint(ctx context.Context, restConfig *rest.Config, rc client.Client, topo *benchv1alpha1.AuthentikTopology, blueprintYAML []byte) error {
+	ctx, cancel := context.WithTimeout(ctx, blueprintApplyTimeout)
+	defer cancel()
+
 	pod, err := serverPodForExec(ctx, rc, topo)
 	if err != nil {
 		return fmt.Errorf("find server pod: %w", err)

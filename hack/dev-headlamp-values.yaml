@@ -1,0 +1,26 @@
+# Helm values for the official headlamp-k8s/headlamp chart, installed via
+# `make headlamp` (hack/install-headlamp.sh). Headlamp itself replaces the
+# old web/frontend Next.js UI; cmd/apiserver stays and is reached from the
+# new web/headlamp-plugin plugin through Headlamp's own ApiProxy -> the
+# standard Kubernetes Service-proxy subresource, not a direct browser call.
+#
+# config.inCluster is left at the chart default (true) for phase 1 (this
+# repo's management cluster only). Multi-cluster access to every
+# CAPI-provisioned WorkloadCluster is added in a follow-up once the merged
+# kubeconfig mechanism (headlampkubeconfig_controller.go) exists - switching
+# this to false plus mounting that Secret happens then, not before, since
+# in-cluster mode and kubeconfig-file mode are not meant to be combined.
+config:
+  pluginsDir: /headlamp/plugins
+
+# Populated by `make headlamp-plugin` (web/headlamp-plugin's own build,
+# copied into ./dist locally) via an initContainer that copies the built
+# plugin (and, once added, the Cluster API plugin) into the shared
+# pluginsDir emptyDir - wired up once web/headlamp-plugin exists.
+initContainers: []
+volumes:
+  - name: plugins
+    emptyDir: {}
+volumeMounts:
+  - name: plugins
+    mountPath: /headlamp/plugins

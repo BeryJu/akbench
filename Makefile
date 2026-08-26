@@ -144,6 +144,10 @@ dev: ## Start the operator, web API, and frontend dev server together against th
 dev-metrics: ## Install a minimal single-cluster Prometheus (remote-write receiver) for local testing.
 	kubectl apply -f hack/dev-prometheus.yaml
 
+.PHONY: headlamp
+headlamp: ## Install/upgrade Headlamp (the Kubernetes UI replacing web/frontend) on the current kubeconfig context.
+	./hack/install-headlamp.sh
+
 .PHONY: fixtures
 fixtures: ## Generate synthetic users and load the k6 credentials Secret every TestCase mounts.
 	./hack/gen-fixtures.sh
