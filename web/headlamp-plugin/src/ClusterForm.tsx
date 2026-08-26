@@ -17,8 +17,7 @@
 // Ported from the deleted web/frontend/components/cluster-form.tsx, on MUI +
 // Headlamp's own SectionBox instead of PatternFly/Next.js's router.
 import { SectionBox } from '@kinvolk/headlamp-plugin/lib/CommonComponents';
-import DeleteIcon from '@mui/icons-material/Delete';
-import { Alert, Box, Button, Grid, IconButton, MenuItem, TextField, Typography } from '@mui/material';
+import { Alert, Box, Button, Grid, MenuItem, TextField, Typography } from '@mui/material';
 import { useState } from 'react';
 import { useHistory } from 'react-router-dom';
 import { api, ApiError } from './api';
@@ -232,13 +231,15 @@ export function ClusterForm({ existing }: { existing?: WorkloadCluster }) {
               </TextField>
             </Grid>
             <Grid item xs={12} md={1}>
-              <IconButton
+              <Button
+                size="small"
+                color="error"
                 aria-label={`Remove pool ${pool.name}`}
                 disabled={spec.workerPools.length <= 1}
                 onClick={() => removePool(i)}
               >
-                <DeleteIcon />
-              </IconButton>
+                Remove
+              </Button>
             </Grid>
           </Grid>
         ))}
