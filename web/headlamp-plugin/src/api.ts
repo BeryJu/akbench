@@ -29,13 +29,24 @@
 // explicitly pins { cluster: MANAGEMENT_CLUSTER } rather than relying on
 // ApiProxy's "current URL cluster" default, which would otherwise silently
 // send requests to whichever workload cluster is currently being viewed.
+//
+// Every method/path here is checked directly against internal/api/server.go's
+// route table (and clusters.go/resources.go/extravalues.go/runs.go's
+// handlers) rather than assumed, since a wrong path fails silently behind
+// ApiProxy's own error formatting (see the "Service Unavailable - undefined"
+// bug this session already hit once for a related reason).
 import { ApiProxy } from '@kinvolk/headlamp-plugin/lib';
 import {
+  Cluster,
   CompareResponse,
   RangeResponse,
   TestCase,
+  TestCaseSpec,
   TestRun,
   Topology,
+  TopologySpec,
+  WorkloadCluster,
+  WorkloadClusterSpec,
 } from './types';
 
 // Must match HeadlampKubeconfigReconciler's managementContextName
@@ -97,22 +108,69 @@ interface List<T> {
   items: T[];
 }
 
+interface ObjectInput<Spec> {
+  metadata: { name?: string; generateName?: string; labels?: Record<string, string> };
+  spec: Spec;
+}
+
 export const api = {
+  // -- Clusters: internal/api/clusters.go's own /clusters convenience
+  // endpoints - listClusters returns the management cluster plus every CAPI
+  // Cluster (for pickers); registerCluster/deleteCluster create/delete the
+  // underlying WorkloadCluster CRD (which WorkloadClusterReconciler then
+  // provisions/tears down for real).
+  clusters: () => request<List<Cluster>>('/api/v1/clusters').then(r => r.items ?? []),
+  registerCluster: (obj: ObjectInput<WorkloadClusterSpec>) =>
+    request<WorkloadCluster>('/api/v1/clusters', { method: 'POST', body: JSON.stringify(obj) }),
+  deprovisionCluster: (name: string) =>
+    request<void>(`/api/v1/clusters/${name}`, { method: 'DELETE' }),
+
+  // -- WorkloadClusters: the CRD itself, at the generic resourceKinds route -
+  // used to read/edit a cluster's full spec (registerCluster/deleteCluster
+  // above only take a name + spec on the way in/out).
+  workloadCluster: (name: string) => request<WorkloadCluster>(`/api/v1/workloadclusters/${name}`),
+  updateWorkloadCluster: (name: string, obj: { spec: WorkloadClusterSpec }) =>
+    request<WorkloadCluster>(`/api/v1/workloadclusters/${name}`, {
+      method: 'PUT',
+      body: JSON.stringify(obj),
+    }),
+
+  // -- Topologies
   topologies: () => request<List<Topology>>('/api/v1/topologies').then(r => r.items ?? []),
   topology: (name: string) => request<Topology>(`/api/v1/topologies/${name}`),
+  createTopology: (obj: ObjectInput<TopologySpec>) =>
+    request<Topology>('/api/v1/topologies', { method: 'POST', body: JSON.stringify(obj) }),
+  updateTopology: (name: string, obj: { spec: TopologySpec }) =>
+    request<Topology>(`/api/v1/topologies/${name}`, { method: 'PUT', body: JSON.stringify(obj) }),
+  deleteTopology: (name: string) => request<void>(`/api/v1/topologies/${name}`, { method: 'DELETE' }),
+  getExtraValues: (name: string) => request<{ valuesYAML: string }>(`/api/v1/topologies/${name}/extra-values`),
+  setExtraValues: (name: string, valuesYAML: string) =>
+    request<{ valuesYAML: string }>(`/api/v1/topologies/${name}/extra-values`, {
+      method: 'PUT',
+      body: JSON.stringify({ valuesYAML }),
+    }),
 
+  // -- Test cases
   testCases: () => request<List<TestCase>>('/api/v1/testcases').then(r => r.items ?? []),
   testCase: (name: string) => request<TestCase>(`/api/v1/testcases/${name}`),
+  createTestCase: (obj: ObjectInput<TestCaseSpec>) =>
+    request<TestCase>('/api/v1/testcases', { method: 'POST', body: JSON.stringify(obj) }),
+  updateTestCase: (name: string, obj: { spec: TestCaseSpec }) =>
+    request<TestCase>(`/api/v1/testcases/${name}`, { method: 'PUT', body: JSON.stringify(obj) }),
+  deleteTestCase: (name: string) => request<void>(`/api/v1/testcases/${name}`, { method: 'DELETE' }),
   runTestCase: (name: string) =>
     request<TestRun>(`/api/v1/testcases/${name}/runs`, { method: 'POST', body: JSON.stringify({}) }),
 
+  // -- Test runs
   testRuns: (testCase?: string) =>
     request<List<TestRun>>(
       testCase
         ? `/api/v1/testruns?labelSelector=${encodeURIComponent(`bench.goauthentik.io/testcase=${testCase}`)}`
         : '/api/v1/testruns'
     ).then(r => r.items ?? []),
+  deleteTestRun: (name: string) => request<void>(`/api/v1/testruns/${name}`, { method: 'DELETE' }),
 
+  // -- Metrics
   compare: (testids: string[], window: string) =>
     request<CompareResponse>(
       `/api/v1/metrics/compare?testids=${encodeURIComponent(testids.join(','))}&window=${encodeURIComponent(window)}`
