@@ -4,13 +4,16 @@
 # new web/headlamp-plugin plugin through Headlamp's own ApiProxy -> the
 # standard Kubernetes Service-proxy subresource, not a direct browser call.
 #
-# config.inCluster is left at the chart default (true) for phase 1 (this
-# repo's management cluster only). Multi-cluster access to every
-# CAPI-provisioned WorkloadCluster is added in a follow-up once the merged
-# kubeconfig mechanism (headlampkubeconfig_controller.go) exists - switching
-# this to false plus mounting that Secret happens then, not before, since
-# in-cluster mode and kubeconfig-file mode are not meant to be combined.
+# config.inCluster: false plus a mounted kubeconfig, rather than the chart's
+# default (true, which only ever shows the one cluster Headlamp itself runs
+# on) - the merged Secret internal/controller/headlampkubeconfig_controller.go
+# maintains includes a synthesized "management" context alongside every
+# CAPI-provisioned WorkloadCluster's own, so this one file is Headlamp's only
+# source of cluster membership. in-cluster mode and kubeconfig-file mode
+# aren't meant to be combined, which is why the management context has to be
+# synthesized into the same file rather than layered on top of config.inCluster.
 config:
+  inCluster: false
   pluginsDir: /headlamp/plugins
 
 # Populated by `make headlamp-plugin` (web/headlamp-plugin's own build,
@@ -21,6 +24,17 @@ initContainers: []
 volumes:
   - name: plugins
     emptyDir: {}
+  - name: kubeconfig
+    secret:
+      # Must match HeadlampKubeconfigReconciler's SecretName
+      # (BENCH_HEADLAMP_KUBECONFIG_SECRET, cmd/main.go).
+      secretName: headlamp-kubeconfig
 volumeMounts:
   - name: plugins
     mountPath: /headlamp/plugins
+  - name: kubeconfig
+    mountPath: /headlamp/kubeconfigs
+    readOnly: true
+env:
+  - name: KUBECONFIG
+    value: /headlamp/kubeconfigs/config

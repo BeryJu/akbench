@@ -17,6 +17,7 @@ limitations under the License.
 package controller
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 
@@ -58,6 +59,7 @@ type HeadlampKubeconfigReconciler struct {
 
 // +kubebuilder:rbac:groups=bench.goauthentik.io,resources=workloadclusters,verbs=get;list;watch
 // +kubebuilder:rbac:groups=core,resources=secrets,verbs=get;list;watch;create;update
+// +kubebuilder:rbac:groups=core,resources=pods,verbs=get;list;delete
 
 func (r *HeadlampKubeconfigReconciler) Reconcile(ctx context.Context, _ ctrl.Request) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
@@ -90,10 +92,27 @@ func (r *HeadlampKubeconfigReconciler) Reconcile(ctx context.Context, _ ctrl.Req
 		return ctrl.Result{}, fmt.Errorf("merge kubeconfigs: %w", err)
 	}
 
-	if err := r.applyKubeconfigSecret(ctx, merged); err != nil {
+	changed, err := r.applyKubeconfigSecret(ctx, merged)
+	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("apply headlamp kubeconfig secret: %w", err)
 	}
-	log.Info("reconciled Headlamp kubeconfig", "workloadClusters", len(workloadClusters))
+	if changed {
+		// Headlamp reads its kubeconfig once at startup - confirmed against
+		// a live instance's own backend log ("Dynamic clusters support:
+		// false", no re-read/watch of the kubeconfig path mentioned at all,
+		// unlike its plugins dir which explicitly logs "Watch Plugins
+		// Changes: true"). Without this, a newly Ready WorkloadCluster (or
+		// one that's gone away) would silently never show up until
+		// something else happened to restart the pod. Deleting the pod
+		// rather than patching the Deployment's own spec: it's Helm-owned,
+		// and a bare delete lets the Deployment's own controller recreate
+		// it without this reconciler needing to know anything about that
+		// object's shape.
+		if err := r.restartHeadlamp(ctx); err != nil {
+			log.Error(err, "restart Headlamp after kubeconfig change")
+		}
+	}
+	log.Info("reconciled Headlamp kubeconfig", "workloadClusters", len(workloadClusters), "restarted", changed)
 	return ctrl.Result{}, nil
 }
 
@@ -101,24 +120,38 @@ func (r *HeadlampKubeconfigReconciler) Reconcile(ctx context.Context, _ ctrl.Req
 // this package's applyOwned/applyUnowned: those compare/copy a resource's
 // .Spec (see apply.go's specEqual/copySpec), which Secret has no equivalent
 // of, and unlike those, this Secret's Data is *meant* to change on every
-// reconcile that observes different cluster membership.
-func (r *HeadlampKubeconfigReconciler) applyKubeconfigSecret(ctx context.Context, kubeconfig []byte) error {
+// reconcile that observes different cluster membership. Returns whether the
+// content actually changed, so the caller only restarts Headlamp when it
+// would otherwise miss a real membership change.
+func (r *HeadlampKubeconfigReconciler) applyKubeconfigSecret(ctx context.Context, kubeconfig []byte) (bool, error) {
 	desired := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{Name: r.SecretName, Namespace: r.Namespace},
 		Data:       map[string][]byte{headlampKubeconfigDataKey: kubeconfig},
 	}
 	if err := r.Create(ctx, desired); err != nil {
 		if !apierrors.IsAlreadyExists(err) {
-			return err
+			return false, err
 		}
 		var existing corev1.Secret
 		if err := r.Get(ctx, types.NamespacedName{Name: r.SecretName, Namespace: r.Namespace}, &existing); err != nil {
-			return err
+			return false, err
+		}
+		if bytes.Equal(existing.Data[headlampKubeconfigDataKey], kubeconfig) {
+			return false, nil
 		}
 		existing.Data = desired.Data
-		return r.Update(ctx, &existing)
+		return true, r.Update(ctx, &existing)
 	}
-	return nil
+	return true, nil
+}
+
+// restartHeadlamp deletes every Headlamp pod in r.Namespace so its
+// Deployment recreates them against the just-updated kubeconfig Secret.
+func (r *HeadlampKubeconfigReconciler) restartHeadlamp(ctx context.Context) error {
+	return r.DeleteAllOf(ctx, &corev1.Pod{},
+		client.InNamespace(r.Namespace),
+		client.MatchingLabels{"app.kubernetes.io/name": "headlamp"},
+	)
 }
 
 // SetupWithManager sets up the controller with the Manager.
