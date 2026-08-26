@@ -36,5 +36,8 @@
   },
   "devDependencies": {
     "@kinvolk/headlamp-plugin": "^0.14.0"
+  },
+  "dependencies": {
+    "recharts": "^3.10.1"
   }
 }

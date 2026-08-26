@@ -14,20 +14,64 @@
  * limitations under the License.
  */
 
-// Scaffolding only - the real pages (Dashboard, Compare, TestCase/
-// AuthentikTopology detail metrics sections, "Run now") are follow-up work.
-// Verified live before writing any of that: this plugin loads and hot-reloads
-// via Headlamp's pluginsDir (make headlamp-plugin), and reaches cmd/apiserver
-// (deployed in-cluster - make deploy-apiserver) through Headlamp's own
-// ApiProxy.request() against the standard Kubernetes Service-proxy
-// subresource, e.g.:
-//
-//   ApiProxy.request(
-//     '/api/v1/namespaces/authentik-bench/services/apiserver:8080/proxy/api/v1/topologies',
-//     {}, false, true
-//   )
-//
-// cmd/apiserver's BENCH_API_TOKEN must be sent as X-Bench-Api-Token, not
-// Authorization - that header is overwritten by Headlamp's own proxy layer
-// with its own Kubernetes bearer token before the request reaches the
-// proxied service (see internal/api/auth.go's tokenHeader).
+// Replaces web/frontend (deleted): benchmark-specific pages/actions on top
+// of Headlamp's own generic Kubernetes UI (resource browsing, logs, events,
+// multi-cluster switching - the actual reason for this pivot) and its
+// official Prometheus plugin (ships bundled, no setup here). See
+// api.ts/DetailSections.tsx for how this reaches cmd/apiserver, deployed
+// in-cluster (hack/dev-apiserver.yaml) rather than through a Next.js
+// server-side proxy the old UI used.
+import { registerDetailsViewSection, registerRoute, registerSidebarEntry } from '@kinvolk/headlamp-plugin/lib';
+import { SectionBox } from '@kinvolk/headlamp-plugin/lib/CommonComponents';
+import { ComparePage } from './ComparePage';
+import { DashboardPage } from './DashboardPage';
+import { TestCaseSection, TopologySection } from './DetailSections';
+
+registerSidebarEntry({
+  parent: null,
+  name: 'authentik-bench',
+  label: 'authentik-bench',
+  url: '/authentik-bench',
+  icon: 'mdi:chart-line',
+});
+registerRoute({
+  path: '/authentik-bench',
+  sidebar: 'authentik-bench',
+  name: 'authentik-bench',
+  component: () => <DashboardPage />,
+});
+
+registerSidebarEntry({
+  parent: 'authentik-bench',
+  name: 'authentik-bench-compare',
+  label: 'Compare',
+  url: '/authentik-bench/compare',
+});
+registerRoute({
+  path: '/authentik-bench/compare',
+  sidebar: { item: 'authentik-bench-compare', sidebar: 'authentik-bench' },
+  name: 'authentik-bench-compare',
+  component: () => <ComparePage />,
+});
+
+registerDetailsViewSection(resource => {
+  if (resource?.kind !== 'TestCase') {
+    return null;
+  }
+  return (
+    <SectionBox title="Benchmark">
+      <TestCaseSection name={resource.metadata.name} profile={resource.jsonData?.spec?.profile} />
+    </SectionBox>
+  );
+});
+
+registerDetailsViewSection(resource => {
+  if (resource?.kind !== 'AuthentikTopology') {
+    return null;
+  }
+  return (
+    <SectionBox title="Benchmark metrics">
+      <TopologySection topologyName={resource.metadata.name} />
+    </SectionBox>
+  );
+});
