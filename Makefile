@@ -136,6 +136,10 @@ run-webui: ## Run the frontend dev server against a backend on :8080.
 	cd web/frontend && npm install --no-audit --no-fund && \
 		BENCH_API_URL=http://127.0.0.1:8080 BENCH_API_TOKEN=$${BENCH_API_TOKEN:-dev-token} npm run dev
 
+.PHONY: dev
+dev: ## Start the operator, web API, and frontend dev server together against the current kubeconfig context.
+	./hack/dev.sh
+
 .PHONY: dev-metrics
 dev-metrics: ## Install a minimal single-cluster Prometheus (remote-write receiver) for local testing.
 	kubectl apply -f hack/dev-prometheus.yaml
