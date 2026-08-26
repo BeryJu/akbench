@@ -33,7 +33,9 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
 	"github.com/goauthentik/authentik-bench/internal/multicluster"
@@ -322,6 +324,31 @@ func (r *TestCaseReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		For(&benchv1alpha1.TestCase{}).
 		Owns(&appsv1.Deployment{}).
 		Owns(&corev1.ConfigMap{}).
+		// Without this, a TestCase left in DependencyNotReady only
+		// re-checks its topology on its own next unrelated reconcile (a
+		// spec edit, an owned object changing, or the informer's resync
+		// period) - the topology later becoming Ready doesn't trigger
+		// anything on its own, so the stale condition can sit for a long
+		// time even though the real dependency is satisfied.
+		Watches(&benchv1alpha1.AuthentikTopology{}, handler.EnqueueRequestsFromMapFunc(r.testCasesForTopology)).
 		Named("testcase").
 		Complete(r)
+}
+
+// testCasesForTopology maps an AuthentikTopology change to every TestCase in
+// the same namespace referencing it, so its controller re-checks readiness
+// as soon as the topology's own status changes instead of waiting for an
+// unrelated trigger.
+func (r *TestCaseReconciler) testCasesForTopology(ctx context.Context, topo client.Object) []reconcile.Request {
+	var list benchv1alpha1.TestCaseList
+	if err := r.List(ctx, &list, client.InNamespace(topo.GetNamespace())); err != nil {
+		return nil
+	}
+	var reqs []reconcile.Request
+	for _, tc := range list.Items {
+		if tc.Spec.TopologyRef.Name == topo.GetName() {
+			reqs = append(reqs, reconcile.Request{NamespacedName: types.NamespacedName{Name: tc.Name, Namespace: tc.Namespace}})
+		}
+	}
+	return reqs
 }
