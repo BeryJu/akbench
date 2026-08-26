@@ -80,18 +80,23 @@ func New(c client.Client, cfg Config) *Server {
 	return &Server{client: c, cfg: cfg, http: httpClient}
 }
 
+// probeStatusField is the JSON key /healthz and /readyz answer under -
+// unrelated to (and coincidentally the same string as) every k8s object's
+// own status field elsewhere in this package, kept named just for goconst's
+// sake.
+const probeStatusField = "status"
+
 // Router builds the full HTTP surface. Everything under /api/v1 requires the
 // bearer token; /healthz and /readyz do not, so probes stay credential-free.
 func (s *Server) Router() http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID, middleware.Recoverer)
 
-	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, r, http.StatusOK, map[string]string{"status": "ok"})
-	})
-	r.Get("/readyz", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, r, http.StatusOK, map[string]string{"status": "ok"})
-	})
+	probeOK := func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, r, http.StatusOK, map[string]string{probeStatusField: "ok"})
+	}
+	r.Get("/healthz", probeOK)
+	r.Get("/readyz", probeOK)
 
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Use(s.requireToken)

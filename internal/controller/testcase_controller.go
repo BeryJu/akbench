@@ -185,7 +185,7 @@ func (r *TestCaseReconciler) reconcileDelete(ctx context.Context, tc *benchv1alp
 	// topology or its cluster is already gone, skip remote cleanup rather
 	// than block finalizer removal forever on a cluster that may never come
 	// back.
-	rc := client.Client(r.Client)
+	rc := r.Client
 	var topo benchv1alpha1.AuthentikTopology
 	if err := r.Get(ctx, types.NamespacedName{Name: tc.Spec.TopologyRef.Name, Namespace: tc.Namespace}, &topo); err == nil {
 		resolved, _, err := resolveRunnerClient(ctx, r.Tracker, r.Client, tc.Namespace, tc.Spec.RunnerClusterRef, topo.Spec.ClusterRef)

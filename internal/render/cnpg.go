@@ -1,6 +1,7 @@
 package render
 
 import (
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
@@ -80,9 +81,9 @@ func CNPGReady(u *unstructured.Unstructured) bool {
 		if !ok {
 			continue
 		}
-		if cond["type"] == "Ready" {
+		if cond["type"] == benchv1alpha1.ConditionReady {
 			status, _ := cond["status"].(string)
-			return status == "True"
+			return status == string(metav1.ConditionTrue)
 		}
 	}
 	return false

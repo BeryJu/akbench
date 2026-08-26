@@ -18,6 +18,19 @@ import (
 // install from the same chart repository.
 const HelmRepositoryName = "authentik"
 
+// chartName is the chart to install from that repository - coincidentally
+// the same string as HelmRepositoryName, but a different thing (the
+// HelmRepository object's own name vs. the chart's name within it), so kept
+// as its own constant rather than reusing HelmRepositoryName.
+const chartName = "authentik"
+
+// Helm values map keys the chart's own schema defines, repeated across
+// server/worker/postgresql sections of HelmValues below.
+const (
+	valuesKeyReplicas = "replicas"
+	valuesKeyPassword = "password"
+)
+
 const defaultChartRepo = "https://charts.goauthentik.io"
 
 // HelmRepository returns the (singleton, namespace-scoped) HelmRepository
@@ -71,10 +84,10 @@ func HelmValues(t *benchv1alpha1.AuthentikTopology, secretKey string, pgConn *Po
 	embedded := t.Spec.Postgres.Mode == benchv1alpha1.PostgresEmbedded
 	values := AuthentikTopologyHelmValues{
 		Server: map[string]any{
-			"replicas": t.Spec.Server.Replicas,
+			valuesKeyReplicas: t.Spec.Server.Replicas,
 		},
 		Worker: map[string]any{
-			"replicas": t.Spec.Worker.Replicas,
+			valuesKeyReplicas: t.Spec.Worker.Replicas,
 		},
 		// secret_key as a literal value, not authentik.existingSecret: the
 		// chart only renders its authentik.env-derived config Secret (which
@@ -136,15 +149,15 @@ func HelmValues(t *benchv1alpha1.AuthentikTopology, secretKey string, pgConn *Po
 		// The bundled subchart auto-generates its own password unless told
 		// otherwise; we pin it to our generated value so authentik's own
 		// AUTHENTIK_POSTGRESQL__PASSWORD (below) actually matches it.
-		values.Postgres["auth"] = map[string]any{"password": pgConn.Password}
-		values.Authentik["postgresql"] = map[string]any{"password": pgConn.Password}
+		values.Postgres["auth"] = map[string]any{valuesKeyPassword: pgConn.Password}
+		values.Authentik["postgresql"] = map[string]any{valuesKeyPassword: pgConn.Password}
 	case !embedded && pgConn != nil:
 		values.Authentik["postgresql"] = map[string]any{
-			"host":     pgConn.Host,
-			"port":     pgConn.Port,
-			"name":     pgConn.Database,
-			"user":     pgConn.User,
-			"password": pgConn.Password,
+			"host":            pgConn.Host,
+			"port":            pgConn.Port,
+			"name":            pgConn.Database,
+			"user":            pgConn.User,
+			valuesKeyPassword: pgConn.Password,
 		}
 	}
 
@@ -199,7 +212,7 @@ func HelmRelease(t *benchv1alpha1.AuthentikTopology, kubeConfigSecretName string
 			ReleaseName: HelmReleaseName(t),
 			Chart: &helmv2.HelmChartTemplate{
 				Spec: helmv2.HelmChartTemplateSpec{
-					Chart:   "authentik",
+					Chart:   chartName,
 					Version: version,
 					SourceRef: helmv2.CrossNamespaceObjectReference{
 						Kind:      sourcev1.HelmRepositoryKind,

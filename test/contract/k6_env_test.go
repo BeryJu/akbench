@@ -8,7 +8,7 @@
 package contract
 
 import (
-	"sort"
+	"slices"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -119,7 +119,7 @@ func TestK6TagScheme(t *testing.T) {
 			"profile=" + wantProfile,
 			"suite=smoke", // extraTags must reach the command line too
 		} {
-			if !containsArg(args, want) {
+			if !slices.Contains(args, want) {
 				t.Errorf("k6 args %v missing --tag %q", args, want)
 			}
 		}
@@ -131,15 +131,6 @@ func TestK6TagScheme(t *testing.T) {
 			t.Errorf("k6 args end with %q, want the script path /data/tests/login.ts", last)
 		}
 	}
-}
-
-func containsArg(args []string, want string) bool {
-	for _, a := range args {
-		if a == want {
-			return true
-		}
-	}
-	return false
 }
 
 func envValueMap(vars []corev1.EnvVar) map[string]string {
@@ -154,8 +145,8 @@ func assertSameSet(t *testing.T, label string, want, got []string) {
 	t.Helper()
 	w := append([]string(nil), want...)
 	g := append([]string(nil), got...)
-	sort.Strings(w)
-	sort.Strings(g)
+	slices.Sort(w)
+	slices.Sort(g)
 	if len(w) != len(g) {
 		t.Fatalf("%s: got %v, want %v", label, g, w)
 	}

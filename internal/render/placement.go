@@ -30,11 +30,20 @@ import (
 // to "none": the chart's own root default is "soft", which would already
 // bias pods apart, so Default must say "none" explicitly to let pods land on
 // the same node (the noisy-neighbor case the benchmark compares against).
+// affinityPresetHard/affinityPresetNone are the chart's preset strings this
+// package sets (never "soft" - see AffinityPreset's doc comment for why
+// Default has to say "none" explicitly rather than leave the chart's own
+// "soft" root default in place).
+const (
+	affinityPresetHard = "hard"
+	affinityPresetNone = "none"
+)
+
 func AffinityPreset(spec benchv1alpha1.PlacementSpec) string {
 	if spec.Mode == benchv1alpha1.PlacementDedicated {
-		return "hard"
+		return affinityPresetHard
 	}
-	return "none"
+	return affinityPresetNone
 }
 
 // PackedAffinity returns the raw pod affinity Packed mode needs - the

@@ -79,7 +79,7 @@ func (c *Client) Annotate(ctx context.Context, start, end time.Time, tags []stri
 	if err != nil {
 		return 0, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return 0, fmt.Errorf("grafana annotation POST returned %s", resp.Status)
 	}

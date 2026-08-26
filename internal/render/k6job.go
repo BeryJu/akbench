@@ -2,7 +2,7 @@ package render
 
 import (
 	"fmt"
-	"sort"
+	"slices"
 
 	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
@@ -93,20 +93,24 @@ func scriptFileName(tc *benchv1alpha1.TestCase) string {
 // dashboard splits on: testid, target, profile, plus any extraTags.
 func (p K6WorkloadParams) Args() []string {
 	tc := p.TestCase
-	args := []string{
-		"run",
-		"--out", "experimental-prometheus-rw",
-		"--tag", "testid=" + tc.Name,
-		"--tag", "target=" + p.TargetName,
-		"--tag", "profile=" + k6ProfileValue(tc.Spec.Profile),
-	}
 	keys := make([]string, 0, len(tc.Spec.ExtraTags))
 	for k := range tc.Spec.ExtraTags {
 		keys = append(keys, k)
 	}
-	sort.Strings(keys)
+	slices.Sort(keys)
+
+	const tagFlag = "--tag"
+
+	args := make([]string, 0, 9+2*len(keys)+1)
+	args = append(args,
+		"run",
+		"--out", "experimental-prometheus-rw",
+		tagFlag, "testid="+tc.Name,
+		tagFlag, "target="+p.TargetName,
+		tagFlag, "profile="+k6ProfileValue(tc.Spec.Profile),
+	)
 	for _, k := range keys {
-		args = append(args, "--tag", fmt.Sprintf("%s=%s", k, tc.Spec.ExtraTags[k]))
+		args = append(args, tagFlag, fmt.Sprintf("%s=%s", k, tc.Spec.ExtraTags[k]))
 	}
 	args = append(args, ScriptVolumeMountPath+"/"+scriptFileName(tc))
 	return args

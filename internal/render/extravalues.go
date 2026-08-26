@@ -19,6 +19,7 @@ package render
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"sigs.k8s.io/yaml"
@@ -56,9 +57,7 @@ func MergeExtraValues(base *apiextensionsv1.JSON, extraValuesYAML string) (*apie
 // non-map) is replaced outright by the overlay's value.
 func deepMergeMaps(base, overlay map[string]any) map[string]any {
 	out := make(map[string]any, len(base)+len(overlay))
-	for k, v := range base {
-		out[k] = v
-	}
+	maps.Copy(out, base)
 	for k, overlayValue := range overlay {
 		if baseValue, ok := out[k]; ok {
 			baseMap, baseIsMap := baseValue.(map[string]any)

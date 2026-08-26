@@ -27,6 +27,10 @@ const (
 	lxcInfraAPIVersion = "infrastructure.cluster.x-k8s.io/v1alpha2"
 	lxcClusterKind     = "LXCCluster"
 	lxcMachineTemplate = "LXCMachineTemplate"
+
+	// infrastructureAPIGroup is every InfrastructureRef's APIGroup below,
+	// regardless of which provider-specific Kind it names.
+	infrastructureAPIGroup = "infrastructure.cluster.x-k8s.io"
 )
 
 // infrastructureClusterKind and infrastructureMachineTemplateKind are the
@@ -36,6 +40,8 @@ const (
 // ...) means adding a case here and a set of provider-specific object
 // builders alongside LXCCluster/lxcMachineTemplateObject below - Cluster,
 // KubeadmControlPlane, and MachineDeployment themselves don't change.
+//
+//nolint:unparam // always LXCCluster today - Incus is the only implemented provider; the switch is the extension point a second provider adds a case to.
 func infrastructureClusterKind(wc *benchv1alpha1.WorkloadCluster) string {
 	switch wc.Spec.Provider {
 	case benchv1alpha1.InfrastructureIncus, "":
@@ -45,6 +51,7 @@ func infrastructureClusterKind(wc *benchv1alpha1.WorkloadCluster) string {
 	}
 }
 
+//nolint:unparam // always LXCMachineTemplate today - Incus is the only implemented provider; the switch is the extension point a second provider adds a case to.
 func infrastructureMachineTemplateKind(wc *benchv1alpha1.WorkloadCluster) string {
 	switch wc.Spec.Provider {
 	case benchv1alpha1.InfrastructureIncus, "":
@@ -242,7 +249,7 @@ func KubeadmControlPlane(wc *benchv1alpha1.WorkloadCluster) *controlplanev1.Kube
 			MachineTemplate: controlplanev1.KubeadmControlPlaneMachineTemplate{
 				Spec: controlplanev1.KubeadmControlPlaneMachineTemplateSpec{
 					InfrastructureRef: clusterv1.ContractVersionedObjectReference{
-						APIGroup: "infrastructure.cluster.x-k8s.io",
+						APIGroup: infrastructureAPIGroup,
 						Kind:     infrastructureMachineTemplateKind(wc),
 						Name:     controlPlaneMachineTemplateName(wc),
 					},
@@ -320,7 +327,7 @@ func MachineDeployment(wc *benchv1alpha1.WorkloadCluster, pool benchv1alpha1.Wor
 						},
 					},
 					InfrastructureRef: clusterv1.ContractVersionedObjectReference{
-						APIGroup: "infrastructure.cluster.x-k8s.io",
+						APIGroup: infrastructureAPIGroup,
 						Kind:     infrastructureMachineTemplateKind(wc),
 						Name:     workerMachineTemplateName(wc, pool),
 					},
@@ -374,7 +381,7 @@ func Cluster(wc *benchv1alpha1.WorkloadCluster) *clusterv1.Cluster {
 				Name:     ControlPlaneName(wc),
 			},
 			InfrastructureRef: clusterv1.ContractVersionedObjectReference{
-				APIGroup: "infrastructure.cluster.x-k8s.io",
+				APIGroup: infrastructureAPIGroup,
 				Kind:     infrastructureClusterKind(wc),
 				Name:     wc.Name,
 			},

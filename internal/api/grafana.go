@@ -21,7 +21,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
-	"sort"
+	"slices"
 	"strings"
 )
 
@@ -33,15 +33,22 @@ type dashboard struct {
 	Slug string
 }
 
+// dashboardCompareTests is embedURL's default when the caller doesn't name
+// one, and a key into the dashboards map below.
+const dashboardCompareTests = "compare-tests"
+
+// dashboardPostgres is a key into the dashboards map below.
+const dashboardPostgres = "postgres"
+
 // dashboards is the allowlist of embeddable dashboards. An allowlist rather
 // than free-form UIDs: the returned URL is fed straight into an iframe, so
 // anything a caller can influence there is an open-redirect surface.
 var dashboards = map[string]dashboard{
-	"compare-tests": {UID: "akbench-compare", Slug: "authentik-bench-compare-tests"},
-	"k6":            {UID: "akbench-k6", Slug: "authentik-bench-k6-load-generator"},
-	"authentik":     {UID: "akbench-authentik", Slug: "authentik-bench-authentik-under-load"},
-	"postgres":      {UID: "akbench-postgres", Slug: "authentik-bench-postgres"},
-	"nodes":         {UID: "akbench-nodes", Slug: "authentik-bench-nodes"},
+	dashboardCompareTests: {UID: "akbench-compare", Slug: "authentik-bench-compare-tests"},
+	"k6":                  {UID: "akbench-k6", Slug: "authentik-bench-k6-load-generator"},
+	"authentik":           {UID: "akbench-authentik", Slug: "authentik-bench-authentik-under-load"},
+	dashboardPostgres:     {UID: "akbench-postgres", Slug: "authentik-bench-postgres"},
+	"nodes":               {UID: "akbench-nodes", Slug: "authentik-bench-nodes"},
 }
 
 // embedURL answers GET /grafana/embed-url?dashboard=compare-tests&
@@ -57,7 +64,7 @@ func (s *Server) embedURL(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	name := q.Get("dashboard")
 	if name == "" {
-		name = "compare-tests"
+		name = dashboardCompareTests
 	}
 	dash, ok := dashboards[name]
 	if !ok {
@@ -85,7 +92,7 @@ func (s *Server) embedURL(w http.ResponseWriter, r *http.Request) {
 	for name := range vars {
 		names = append(names, name)
 	}
-	sort.Strings(names)
+	slices.Sort(names)
 	for _, name := range names {
 		for _, value := range vars[name] {
 			params.Add("var-"+name, value)
@@ -104,7 +111,7 @@ func (s *Server) embedURL(w http.ResponseWriter, r *http.Request) {
 func parseTemplateVars(raw []string) (map[string][]string, error) {
 	vars := map[string][]string{}
 	for _, group := range raw {
-		for _, pair := range strings.Split(group, ",") {
+		for pair := range strings.SplitSeq(group, ",") {
 			pair = strings.TrimSpace(pair)
 			if pair == "" {
 				continue

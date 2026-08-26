@@ -53,6 +53,12 @@ linters:
           - dupl
           - lll
         path: internal/*
+      - linters:
+          - goconst
+        path: _test\.go
+        # Repeated fixture literals ("authentik-1", "replicas", "True", ...)
+        # are the point in tests - a shared const would trade readability at
+        # each call site for less duplication that was never the risk here.
     paths:
       - third_party$
       - builtin$

@@ -48,25 +48,40 @@ type CompareMetric struct {
 	Better string `json:"better"`
 }
 
+// betterHigher/betterLower are CompareMetric.Better's two directions.
+const (
+	betterHigher = "higher"
+	betterLower  = "lower"
+)
+
+// metricKeyIterations/metricKeyVUs also name TestCaseSpec's json fields of
+// the same values - not the same string by coincidence, but two independent
+// literals goconst can't tell apart, so kept named here for its sake.
+const (
+	metricKeyHTTPReqs   = "http_reqs"
+	metricKeyIterations = "iterations"
+	metricKeyVUs        = "vus"
+)
+
 // compareMetrics is the fixed summary every test comparison reports. Kept
 // small on purpose: anything deeper belongs in the Grafana dashboards the
 // compare view embeds alongside this table.
 var compareMetrics = []CompareMetric{
-	{Key: "http_reqs", Label: "HTTP requests/s", Unit: "req/s", Better: "higher",
+	{Key: metricKeyHTTPReqs, Label: "HTTP requests/s", Unit: "req/s", Better: betterHigher,
 		Query: `sum(rate(k6_http_reqs_total{%s}[%s]))`},
-	{Key: "iterations", Label: "Logins/s", Unit: "logins/s", Better: "higher",
+	{Key: metricKeyIterations, Label: "Logins/s", Unit: "logins/s", Better: betterHigher,
 		Query: `sum(rate(k6_iterations_total{%s}[%s]))`},
-	{Key: "http_req_duration_p95", Label: "Request duration p95", Unit: "s", Better: "lower",
+	{Key: "http_req_duration_p95", Label: "Request duration p95", Unit: "s", Better: betterLower,
 		Query: `histogram_quantile(0.95, sum(rate(k6_http_req_duration_seconds{%s}[%s])))`},
-	{Key: "http_req_duration_p99", Label: "Request duration p99", Unit: "s", Better: "lower",
+	{Key: "http_req_duration_p99", Label: "Request duration p99", Unit: "s", Better: betterLower,
 		Query: `histogram_quantile(0.99, sum(rate(k6_http_req_duration_seconds{%s}[%s])))`},
-	{Key: "iteration_duration_p95", Label: "Login duration p95", Unit: "s", Better: "lower",
+	{Key: "iteration_duration_p95", Label: "Login duration p95", Unit: "s", Better: betterLower,
 		Query: `histogram_quantile(0.95, sum(rate(k6_iteration_duration_seconds{%s}[%s])))`},
-	{Key: "http_req_failed", Label: "Failed requests", Unit: "ratio", Better: "lower",
+	{Key: "http_req_failed", Label: "Failed requests", Unit: "ratio", Better: betterLower,
 		Query: `avg(k6_http_req_failed_rate{%s})`},
-	{Key: "checks", Label: "Passing checks", Unit: "ratio", Better: "higher",
+	{Key: "checks", Label: "Passing checks", Unit: "ratio", Better: betterHigher,
 		Query: `avg(k6_checks_rate{%s})`},
-	{Key: "vus", Label: "Peak VUs", Unit: "vus", Better: "higher",
+	{Key: metricKeyVUs, Label: "Peak VUs", Unit: metricKeyVUs, Better: betterHigher,
 		Query: `max(k6_vus{%s})`},
 }
 
@@ -82,6 +97,19 @@ var safeWindow = regexp.MustCompile(`^[0-9]+(ms|s|m|h|d|w|y)$`)
 // metricsRange accepts start/end in.
 var safeUnixTime = regexp.MustCompile(`^[0-9]{1,10}$`)
 
+// defaultStep is the range-query resolution used when the caller doesn't
+// specify one.
+const defaultStep = "15s"
+
+// queryParam is the PromQL-query url.Values key every query/query_range
+// call passes.
+const queryParam = "query"
+
+// promStatusSuccess is Prometheus' own query-response status field value on
+// success (the only one these handlers ever act on; anything else falls
+// through to its own error message).
+const promStatusSuccess = "success"
+
 // proxyQuery forwards a PromQL query to the central Prometheus. Only the
 // parameters below are passed through, and only the two query endpoints are
 // reachable, so this stays a query proxy rather than a general-purpose hole
@@ -92,13 +120,13 @@ func (s *Server) proxyQuery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	q := r.URL.Query()
-	query := q.Get("query")
+	query := q.Get(queryParam)
 	if query == "" {
 		writeError(w, r, http.StatusBadRequest, "query is required")
 		return
 	}
 
-	params := url.Values{"query": {query}}
+	params := url.Values{queryParam: {query}}
 	path := "/api/v1/query"
 	if start, end := q.Get("start"), q.Get("end"); start != "" && end != "" {
 		path = "/api/v1/query_range"
@@ -106,7 +134,7 @@ func (s *Server) proxyQuery(w http.ResponseWriter, r *http.Request) {
 		params.Set("end", end)
 		step := q.Get("step")
 		if step == "" {
-			step = "15s"
+			step = defaultStep
 		}
 		params.Set("step", step)
 	} else if ts := q.Get("time"); ts != "" {
@@ -118,7 +146,7 @@ func (s *Server) proxyQuery(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusBadGateway, err.Error())
 		return
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxPromResponseBytes))
 	if err != nil {
@@ -165,7 +193,7 @@ func (s *Server) compare(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var testids []string
-	for _, id := range strings.Split(raw, ",") {
+	for id := range strings.SplitSeq(raw, ",") {
 		id = strings.TrimSpace(id)
 		if id == "" {
 			continue
@@ -253,7 +281,7 @@ func (s *Server) metricsRange(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var testids []string
-	for _, id := range strings.Split(raw, ",") {
+	for id := range strings.SplitSeq(raw, ",") {
 		id = strings.TrimSpace(id)
 		if id == "" {
 			continue
@@ -297,7 +325,7 @@ func (s *Server) metricsRange(w http.ResponseWriter, r *http.Request) {
 	}
 	step := q.Get("step")
 	if step == "" {
-		step = "15s"
+		step = defaultStep
 	}
 	if !safeWindow.MatchString(step) {
 		writeError(w, r, http.StatusBadRequest, fmt.Sprintf("invalid step %q", step))
@@ -341,18 +369,18 @@ type promMatrixResponse struct {
 // promRange runs a range query and returns its single series, dropping
 // non-finite samples the same way promInstant drops a NaN quantile.
 func (s *Server) promRange(ctx context.Context, query, start, end, step string) ([]RangePoint, error) {
-	params := url.Values{"query": {query}, "start": {start}, "end": {end}, "step": {step}}
+	params := url.Values{queryParam: {query}, "start": {start}, "end": {end}, "step": {step}}
 	resp, err := s.promGet(ctx, "/api/v1/query_range", params)
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	var parsed promMatrixResponse
 	if err := json.NewDecoder(io.LimitReader(resp.Body, maxPromResponseBytes)).Decode(&parsed); err != nil {
 		return nil, fmt.Errorf("decode Prometheus response: %w", err)
 	}
-	if parsed.Status != "success" {
+	if parsed.Status != promStatusSuccess {
 		if parsed.Error != "" {
 			return nil, fmt.Errorf("prometheus: %s", parsed.Error)
 		}
@@ -409,7 +437,7 @@ type promVectorResponse struct {
 // promInstant runs an instant query and returns its single value, reporting
 // ok=false for an empty result (a test that reported nothing in the window).
 func (s *Server) promInstant(ctx context.Context, query, at string) (float64, bool, error) {
-	params := url.Values{"query": {query}}
+	params := url.Values{queryParam: {query}}
 	if at != "" {
 		params.Set("time", at)
 	}
@@ -417,13 +445,13 @@ func (s *Server) promInstant(ctx context.Context, query, at string) (float64, bo
 	if err != nil {
 		return 0, false, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	var parsed promVectorResponse
 	if err := json.NewDecoder(io.LimitReader(resp.Body, maxPromResponseBytes)).Decode(&parsed); err != nil {
 		return 0, false, fmt.Errorf("decode Prometheus response: %w", err)
 	}
-	if parsed.Status != "success" {
+	if parsed.Status != promStatusSuccess {
 		if parsed.Error != "" {
 			return 0, false, fmt.Errorf("prometheus: %s", parsed.Error)
 		}
