@@ -2,19 +2,28 @@
 
 import { useSearchParams } from "next/navigation";
 import { Suspense, useMemo, useState } from "react";
+import {
+  Checkbox,
+  Content,
+  Flex,
+  FlexItem,
+  Form,
+  FormGroup,
+  FormSelect,
+  FormSelectOption,
+  Grid,
+  GridItem,
+  Title,
+} from "@patternfly/react-core";
+import { Table, Tbody, Td, Th, Thead, Tr } from "@patternfly/react-table";
 import { api } from "@/lib/api";
 import { formatMetricValue } from "@/lib/format";
 import type { CompareResponse } from "@/lib/types";
 import { Empty, ErrorBanner, useResource } from "@/components/ui";
 import { MetricsChart } from "@/components/metrics-chart";
+import { DEFAULT_RANGE, TimeRangePicker } from "@/components/time-range-picker";
 
 const windows = ["1m", "5m", "15m", "1h"];
-const ranges: { label: string; seconds: number }[] = [
-  { label: "Last 15m", seconds: 15 * 60 },
-  { label: "Last 1h", seconds: 60 * 60 },
-  { label: "Last 6h", seconds: 6 * 60 * 60 },
-  { label: "Last 24h", seconds: 24 * 60 * 60 },
-];
 
 /** best picks the winning test per metric, honouring the metric's direction. */
 function best(response: CompareResponse, key: string, better: string): string | undefined {
@@ -35,7 +44,7 @@ function Compare() {
     search.get("testids")?.split(",").filter(Boolean) ?? [],
   );
   const [window, setWindow] = useState("5m");
-  const [range, setRange] = useState(ranges[1]);
+  const [range, setRange] = useState(DEFAULT_RANGE.seconds);
 
   const comparison = useResource(
     () =>
@@ -56,101 +65,92 @@ function Compare() {
 
   return (
     <>
-      <h1>Compare</h1>
-      <p className="subtitle">
+      <Title headingLevel="h1">Compare</Title>
+      <Content component="p">
         Pick the tests to put side by side. The table summarises the last {window} of each;
         the charts below plot them over time.
-      </p>
+      </Content>
 
       <ErrorBanner error={comparison.error ?? testCases.error} />
 
-      <fieldset>
-        <legend>Tests</legend>
-        <div className="row">
+      <Form>
+        <Title headingLevel="h2">Tests</Title>
+        <Flex>
           {(testCases.data ?? []).map((testCase) => (
-            <label key={testCase.metadata.name} style={{ marginBottom: 8, width: "auto" }}>
-              <input
-                type="checkbox"
+            <FlexItem key={testCase.metadata.name}>
+              <Checkbox
+                id={`testid-${testCase.metadata.name}`}
                 name={`testid-${testCase.metadata.name}`}
-                style={{ width: "auto", marginRight: 6 }}
-                checked={selected.includes(testCase.metadata.name)}
+                label={testCase.metadata.name}
+                isChecked={selected.includes(testCase.metadata.name)}
                 onChange={() => toggle(testCase.metadata.name)}
               />
-              {testCase.metadata.name}
-            </label>
+            </FlexItem>
           ))}
-          {testCases.data?.length === 0 && <span className="muted">No test cases yet.</span>}
-        </div>
-        <div className="row">
-          <label style={{ width: "auto" }}>
-            <span>Summary window</span>
-            <select name="window" value={window} onChange={(e) => setWindow(e.target.value)}>
-              {windows.map((option) => (
-                <option key={option}>{option}</option>
-              ))}
-            </select>
-          </label>
-          <label style={{ width: "auto" }}>
-            <span>Chart range</span>
-            <select
-              name="range"
-              value={range.label}
-              onChange={(e) => setRange(ranges.find((r) => r.label === e.target.value) ?? ranges[1])}
-            >
-              {ranges.map((option) => (
-                <option key={option.label}>{option.label}</option>
-              ))}
-            </select>
-          </label>
-        </div>
-      </fieldset>
+          {testCases.data?.length === 0 && <Content component="small">No test cases yet.</Content>}
+        </Flex>
+        <Grid hasGutter md={4}>
+          <GridItem span={12} md={4}>
+            <FormGroup label="Summary window" fieldId="window">
+              <FormSelect id="window" value={window} onChange={(_e, value) => setWindow(value)}>
+                {windows.map((option) => (
+                  <FormSelectOption key={option} value={option} label={option} />
+                ))}
+              </FormSelect>
+            </FormGroup>
+          </GridItem>
+          <GridItem span={12} md={4}>
+            <FormGroup label="Chart range" fieldId="range">
+              <TimeRangePicker seconds={range} onChange={setRange} />
+            </FormGroup>
+          </GridItem>
+        </Grid>
+      </Form>
 
       {selected.length === 0 ? (
         <Empty>Select at least one test.</Empty>
       ) : (
         <>
-          <h2>Summary</h2>
-          <table>
-            <thead>
-              <tr>
-                <th>Metric</th>
+          <Title headingLevel="h2">Summary</Title>
+          <Table role="table">
+            <Thead>
+              <Tr>
+                <Th>Metric</Th>
                 {(comparison.data?.results ?? []).map((result) => (
-                  <th key={result.testid}>{result.testid}</th>
+                  <Th key={result.testid}>{result.testid}</Th>
                 ))}
-              </tr>
-            </thead>
-            <tbody>
+              </Tr>
+            </Thead>
+            <Tbody>
               {rows.map((metric) => {
                 const winner = comparison.data ? best(comparison.data, metric.key, metric.better) : undefined;
                 return (
-                  <tr key={metric.key}>
-                    <td>
-                      {metric.label}{" "}
-                      <span className="muted">({metric.better} is better)</span>
-                    </td>
+                  <Tr key={metric.key}>
+                    <Td>
+                      {metric.label} <Content component="small">({metric.better} is better)</Content>
+                    </Td>
                     {(comparison.data?.results ?? []).map((result) => (
-                      <td key={result.testid} className="mono">
-                        {formatMetricValue(result.values[metric.key], metric.unit)}
-                        {winner === result.testid ? " ✓" : ""}
-                      </td>
+                      <Td key={result.testid}>
+                        <code>
+                          {formatMetricValue(result.values[metric.key], metric.unit)}
+                          {winner === result.testid ? " ✓" : ""}
+                        </code>
+                      </Td>
                     ))}
-                  </tr>
+                  </Tr>
                 );
               })}
-            </tbody>
-          </table>
+            </Tbody>
+          </Table>
 
-          <h2>Over time</h2>
-          <div className="charts">
+          <Title headingLevel="h2">Over time</Title>
+          <Grid hasGutter>
             {rows.map((metric) => (
-              <MetricsChart
-                key={metric.key}
-                metric={metric.key}
-                testids={selected}
-                rangeSeconds={range.seconds}
-              />
+              <GridItem key={metric.key} span={6}>
+                <MetricsChart metric={metric.key} testids={selected} rangeSeconds={range} />
+              </GridItem>
             ))}
-          </div>
+          </Grid>
         </>
       )}
     </>
@@ -159,7 +159,7 @@ function Compare() {
 
 export default function ComparePage() {
   return (
-    <Suspense fallback={<p className="muted">Loading...</p>}>
+    <Suspense fallback={<p>Loading...</p>}>
       <Compare />
     </Suspense>
   );

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { Alert, Button, EmptyState, EmptyStateBody, Label } from "@patternfly/react-core";
 import { ApiError } from "@/lib/api";
 import type { Condition, TestRunPhase } from "@/lib/types";
 import { readyCondition } from "@/lib/types";
@@ -48,37 +49,34 @@ export function ErrorBanner({ error }: { error?: string }) {
     return null;
   }
   return (
-    <p className="error" role="alert">
-      {error}
-    </p>
+    <Alert variant="danger" isInline title={error} style={{ marginBottom: "1rem" }} />
   );
 }
 
 export function ReadyBadge({ conditions }: { conditions?: Condition[] }) {
   const ready = readyCondition(conditions);
   if (!ready) {
-    return <span className="badge warn">Pending</span>;
+    return <Label color="orange">Pending</Label>;
   }
   if (ready.status === "True") {
-    return <span className="badge ok">Ready</span>;
+    return <Label color="green">Ready</Label>;
   }
   return (
-    <span className="badge err" title={ready.message ?? ready.reason}>
+    <Label color="red" title={ready.message ?? ready.reason}>
       {ready.reason ?? "Not ready"}
-    </span>
+    </Label>
   );
 }
 
 export function PhaseBadge({ phase }: { phase?: TestRunPhase }) {
-  const className =
-    phase === "Succeeded" ? "ok" : phase === "Failed" ? "err" : "warn";
-  return <span className={`badge ${className}`}>{phase ?? "Pending"}</span>;
+  const color = phase === "Succeeded" ? "green" : phase === "Failed" ? "red" : "orange";
+  return <Label color={color}>{phase ?? "Pending"}</Label>;
 }
 
 /** Ages are relative because "3m ago" answers the only question being asked. */
 export function Age({ time }: { time?: string }) {
   if (!time) {
-    return <span className="muted">-</span>;
+    return <span style={{ color: "var(--pf-t--global--text--color--subtle)" }}>-</span>;
   }
   const seconds = Math.max(0, (Date.now() - new Date(time).getTime()) / 1000);
   const [value, unit] =
@@ -93,7 +91,11 @@ export function Age({ time }: { time?: string }) {
 }
 
 export function Empty({ children }: { children: React.ReactNode }) {
-  return <p className="empty">{children}</p>;
+  return (
+    <EmptyState variant="xs" headingLevel="h4" titleText="Nothing here yet">
+      <EmptyStateBody>{children}</EmptyStateBody>
+    </EmptyState>
+  );
 }
 
 /**
@@ -105,12 +107,12 @@ export function ConfirmButton({
   children,
   onConfirm,
   confirmLabel = "Really?",
-  className = "danger",
+  danger = true,
 }: {
   children: React.ReactNode;
   onConfirm: () => void | Promise<void>;
   confirmLabel?: string;
-  className?: string;
+  danger?: boolean;
 }) {
   const [armed, setArmed] = useState(false);
   useEffect(() => {
@@ -122,9 +124,8 @@ export function ConfirmButton({
   }, [armed]);
 
   return (
-    <button
-      type="button"
-      className={className}
+    <Button
+      variant={armed ? "danger" : danger ? "secondary" : "primary"}
       onClick={() => {
         if (armed) {
           setArmed(false);
@@ -135,6 +136,6 @@ export function ConfirmButton({
       }}
     >
       {armed ? confirmLabel : children}
-    </button>
+    </Button>
   );
 }

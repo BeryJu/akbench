@@ -1,6 +1,8 @@
 "use client";
 
 import Link from "next/link";
+import { Button, Content, Flex, FlexItem, Title } from "@patternfly/react-core";
+import { Table, Tbody, Td, Th, Thead, Tr } from "@patternfly/react-table";
 import { api } from "@/lib/api";
 import { Age, ConfirmButton, Empty, ErrorBanner, ReadyBadge, useResource } from "@/components/ui";
 
@@ -9,58 +11,62 @@ export default function TopologiesPage() {
 
   return (
     <>
-      <div className="spread">
-        <div>
-          <h1>Topologies</h1>
-          <p className="subtitle">
+      <Flex justifyContent={{ default: "justifyContentSpaceBetween" }} alignItems={{ default: "alignItemsFlexStart" }}>
+        <FlexItem>
+          <Title headingLevel="h1">Topologies</Title>
+          <Content component="p">
             One authentik deployment shape each: replica counts, node placement and
             Postgres backend.
-          </p>
-        </div>
-        <Link className="button primary" href="/topologies/new">
-          New topology
-        </Link>
-      </div>
+          </Content>
+        </FlexItem>
+        <FlexItem>
+          <Button component={Link} href="/topologies/new">
+            New topology
+          </Button>
+        </FlexItem>
+      </Flex>
 
       <ErrorBanner error={error} />
 
       {data?.length ? (
-        <table>
-          <thead>
-            <tr>
-              <th>Name</th>
-              <th>Target</th>
-              <th>Namespace</th>
-              <th>Server</th>
-              <th>Worker</th>
-              <th>Postgres</th>
-              <th>Placement</th>
-              <th>Status</th>
-              <th>Age</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
+        <Table role="table">
+          <Thead>
+            <Tr>
+              <Th>Name</Th>
+              <Th>Target</Th>
+              <Th>Namespace</Th>
+              <Th>Server</Th>
+              <Th>Worker</Th>
+              <Th>Postgres</Th>
+              <Th>Placement</Th>
+              <Th>Status</Th>
+              <Th>Age</Th>
+              <Th />
+            </Tr>
+          </Thead>
+          <Tbody>
             {data.map((topology) => (
-              <tr key={topology.metadata.name}>
-                <td>
-                  <Link href={`/topologies/${topology.metadata.name}`}>
-                    {topology.metadata.name}
-                  </Link>
-                </td>
-                <td className="mono">{topology.spec.targetName ?? topology.metadata.name}</td>
-                <td className="mono">{topology.spec.namespace}</td>
-                <td>{topology.spec.server.replicas}</td>
-                <td>{topology.spec.worker.replicas}</td>
-                <td>{topology.spec.postgres.mode}</td>
-                <td>{topology.spec.placement?.mode ?? "Default"}</td>
-                <td>
+              <Tr key={topology.metadata.name}>
+                <Td>
+                  <Link href={`/topologies/${topology.metadata.name}`}>{topology.metadata.name}</Link>
+                </Td>
+                <Td>
+                  <code>{topology.spec.targetName ?? topology.metadata.name}</code>
+                </Td>
+                <Td>
+                  <code>{topology.spec.namespace}</code>
+                </Td>
+                <Td>{topology.spec.server.replicas}</Td>
+                <Td>{topology.spec.worker.replicas}</Td>
+                <Td>{topology.spec.postgres.mode}</Td>
+                <Td>{topology.spec.placement?.mode ?? "Default"}</Td>
+                <Td>
                   <ReadyBadge conditions={topology.status?.conditions} />
-                </td>
-                <td>
+                </Td>
+                <Td>
                   <Age time={topology.metadata.creationTimestamp} />
-                </td>
-                <td>
+                </Td>
+                <Td>
                   <ConfirmButton
                     onConfirm={async () => {
                       await api.deleteTopology(topology.metadata.name);
@@ -69,11 +75,11 @@ export default function TopologiesPage() {
                   >
                     Delete
                   </ConfirmButton>
-                </td>
-              </tr>
+                </Td>
+              </Tr>
             ))}
-          </tbody>
-        </table>
+          </Tbody>
+        </Table>
       ) : (
         <Empty>
           No topologies yet. <Link href="/topologies/new">Define one</Link>.

@@ -10,6 +10,10 @@
     "test:e2e": "playwright test"
   },
   "dependencies": {
+    "@patternfly/react-core": "^6.6.1",
+    "@patternfly/react-icons": "^6.6.1",
+    "@patternfly/react-table": "^6.6.1",
+    "@patternfly/react-tokens": "^6.6.1",
     "next": "15.5.23",
     "react": "19.0.0",
     "react-dom": "19.0.0",

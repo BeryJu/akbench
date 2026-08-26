@@ -1,3 +1,12 @@
+import t100 from "@patternfly/react-tokens/dist/esm/chart_theme_multi_color_ordered_ColorScale_100";
+import t200 from "@patternfly/react-tokens/dist/esm/chart_theme_multi_color_ordered_ColorScale_200";
+import t300 from "@patternfly/react-tokens/dist/esm/chart_theme_multi_color_ordered_ColorScale_300";
+import t400 from "@patternfly/react-tokens/dist/esm/chart_theme_multi_color_ordered_ColorScale_400";
+import t500 from "@patternfly/react-tokens/dist/esm/chart_theme_multi_color_ordered_ColorScale_500";
+import t600 from "@patternfly/react-tokens/dist/esm/chart_theme_multi_color_ordered_ColorScale_600";
+import t700 from "@patternfly/react-tokens/dist/esm/chart_theme_multi_color_ordered_ColorScale_700";
+import t800 from "@patternfly/react-tokens/dist/esm/chart_theme_multi_color_ordered_ColorScale_800";
+
 /** formatMetricValue renders a CompareMetric value the same way in the compare
  * table and every chart tooltip/axis, so a number means the same thing
  * wherever it appears. */
@@ -14,18 +23,10 @@ export function formatMetricValue(value: number | undefined, unit: string): stri
   return value >= 100 ? value.toFixed(0) : value.toFixed(2);
 }
 
-/** A qualitative palette for per-test series, cycled by index so the same
- * test keeps the same colour across every chart on a page. */
-const palette = [
-  "#fd4b2d",
-  "#2f7de1",
-  "#1a7f4b",
-  "#b06000",
-  "#8654d6",
-  "#c02a20",
-  "#1596a9",
-  "#c73e8f",
-];
+/** PatternFly's own qualitative chart palette, cycled by index so the same
+ * test keeps the same colour across every chart on a page - not a hand-
+ * picked palette of this project's own. */
+const palette = [t100, t200, t300, t400, t500, t600, t700, t800].map((token) => token.var);
 
 export function colorFor(index: number): string {
   return palette[index % palette.length];

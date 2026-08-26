@@ -2,6 +2,20 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import {
+  ActionGroup,
+  Button,
+  Content,
+  Form,
+  FormGroup,
+  FormSelect,
+  FormSelectOption,
+  Grid,
+  GridItem,
+  TextArea,
+  TextInput,
+  Title,
+} from "@patternfly/react-core";
 import { api, ApiError } from "@/lib/api";
 import type { PlacementMode, PostgresMode, Topology, TopologySpec } from "@/lib/types";
 import { ErrorBanner, useResource } from "@/components/ui";
@@ -92,323 +106,305 @@ export function TopologyForm({ existing }: { existing?: Topology }) {
   }
 
   return (
-    <form onSubmit={submit}>
+    <Form onSubmit={submit}>
       <ErrorBanner error={error} />
 
-      <fieldset>
-        <legend>Identity</legend>
-        <div className="grid2">
-          <label>
-            <span>Name</span>
-            <input
+      <Title headingLevel="h2">Identity</Title>
+      <Grid hasGutter md={6}>
+        <GridItem span={12} md={6}>
+          <FormGroup label="Name" isRequired fieldId="name">
+            <TextInput
+              id="name"
               name="name"
               value={name}
-              required
-              disabled={Boolean(existing)}
+              isRequired
+              isDisabled={Boolean(existing)}
               pattern="[a-z0-9]([-a-z0-9]*[a-z0-9])?"
               title="A Kubernetes object name: lowercase letters, digits and dashes"
-              onChange={(e) => {
-                const value = e.target.value;
+              onChange={(_e, value) => {
                 setName(value);
                 if (!namespaceEdited) {
                   patch({ namespace: slugify(value) });
                 }
               }}
             />
-          </label>
-          <label>
-            <span>Target name (defaults to the name)</span>
-            <input
+          </FormGroup>
+        </GridItem>
+        <GridItem span={12} md={6}>
+          <FormGroup label="Target name (defaults to the name)" fieldId="targetName">
+            <TextInput
+              id="targetName"
               name="targetName"
               value={spec.targetName ?? ""}
               placeholder={name}
-              onChange={(e) => patch({ targetName: e.target.value || undefined })}
+              onChange={(_e, value) => patch({ targetName: value || undefined })}
             />
-          </label>
-          <label>
-            <span>Namespace on the target cluster</span>
-            <input
+          </FormGroup>
+        </GridItem>
+        <GridItem span={12} md={6}>
+          <FormGroup label="Namespace on the target cluster" isRequired fieldId="namespace">
+            <TextInput
+              id="namespace"
               name="namespace"
               value={spec.namespace}
-              required
-              onChange={(e) => {
+              isRequired
+              onChange={(_e, value) => {
                 setNamespaceEdited(true);
-                patch({ namespace: e.target.value });
+                patch({ namespace: value });
               }}
             />
-          </label>
-          <label>
-            <span>Cluster</span>
-            <select
+          </FormGroup>
+        </GridItem>
+        <GridItem span={12} md={6}>
+          <FormGroup label="Cluster" fieldId="cluster">
+            <FormSelect
+              id="cluster"
               name="cluster"
               value={spec.clusterRef?.name ?? ""}
-              onChange={(e) =>
-                patch({ clusterRef: e.target.value ? { name: e.target.value } : undefined })
-              }
+              onChange={(_e, value) => patch({ clusterRef: value ? { name: value } : undefined })}
             >
-              <option value="">Management cluster</option>
+              <FormSelectOption value="" label="Management cluster" />
               {(clusters.data ?? [])
                 .filter((cluster) => !cluster.management)
                 .map((cluster) => (
-                  <option key={cluster.name} value={cluster.name}>
-                    {cluster.name}
-                  </option>
+                  <FormSelectOption key={cluster.name} value={cluster.name} label={cluster.name} />
                 ))}
-            </select>
-          </label>
-        </div>
-      </fieldset>
+            </FormSelect>
+          </FormGroup>
+        </GridItem>
+      </Grid>
 
-      <fieldset>
-        <legend>Workloads</legend>
-        <div className="grid2">
-          <label>
-            <span>Server replicas</span>
-            <input
+      <Title headingLevel="h2">Workloads</Title>
+      <Grid hasGutter md={6}>
+        <GridItem span={12} md={6}>
+          <FormGroup label="Server replicas" fieldId="serverReplicas">
+            <TextInput
+              id="serverReplicas"
               name="serverReplicas"
               type="number"
               min={1}
               value={spec.server.replicas}
-              onChange={(e) => patch({ server: { ...spec.server, replicas: Number(e.target.value) } })}
+              onChange={(_e, value) => patch({ server: { ...spec.server, replicas: Number(value) } })}
             />
-          </label>
-          <label>
-            <span>Worker replicas</span>
-            <input
+          </FormGroup>
+        </GridItem>
+        <GridItem span={12} md={6}>
+          <FormGroup label="Worker replicas" fieldId="workerReplicas">
+            <TextInput
+              id="workerReplicas"
               name="workerReplicas"
               type="number"
               min={1}
               value={spec.worker.replicas}
-              onChange={(e) => patch({ worker: { ...spec.worker, replicas: Number(e.target.value) } })}
+              onChange={(_e, value) => patch({ worker: { ...spec.worker, replicas: Number(value) } })}
             />
-          </label>
-          <label>
-            <span>authentik image</span>
-            <input
+          </FormGroup>
+        </GridItem>
+        <GridItem span={12} md={6}>
+          <FormGroup label="authentik image" fieldId="image">
+            <TextInput
+              id="image"
               name="image"
               value={spec.authentik?.image ?? ""}
               placeholder="ghcr.io/goauthentik/server"
-              onChange={(e) =>
-                patch({ authentik: { ...spec.authentik, image: e.target.value || undefined } })
-              }
+              onChange={(_e, value) => patch({ authentik: { ...spec.authentik, image: value || undefined } })}
             />
-          </label>
-          <label>
-            <span>authentik image tag (defaults to the chart&apos;s)</span>
-            <input
+          </FormGroup>
+        </GridItem>
+        <GridItem span={12} md={6}>
+          <FormGroup label="authentik image tag (defaults to the chart's)" fieldId="tag">
+            <TextInput
+              id="tag"
               name="tag"
               value={spec.authentik?.tag ?? ""}
               placeholder="2026.6.0"
-              onChange={(e) =>
-                patch({ authentik: { ...spec.authentik, tag: e.target.value || undefined } })
-              }
+              onChange={(_e, value) => patch({ authentik: { ...spec.authentik, tag: value || undefined } })}
             />
-          </label>
-          <label>
-            <span>Chart version (defaults to latest)</span>
-            <input
+          </FormGroup>
+        </GridItem>
+        <GridItem span={12} md={6}>
+          <FormGroup label="Chart version (defaults to latest)" fieldId="chartVersion">
+            <TextInput
+              id="chartVersion"
               name="chartVersion"
               value={spec.chart?.version ?? ""}
-              onChange={(e) =>
-                patch({ chart: { ...spec.chart, version: e.target.value || undefined } })
-              }
+              onChange={(_e, value) => patch({ chart: { ...spec.chart, version: value || undefined } })}
             />
-          </label>
-        </div>
-      </fieldset>
+          </FormGroup>
+        </GridItem>
+      </Grid>
 
-      <fieldset>
-        <legend>Placement</legend>
-        <label>
-          <span>Mode</span>
-          <select
-            name="placementMode"
-            value={spec.placement?.mode ?? "Default"}
-            onChange={(e) =>
-              patch({ placement: { ...spec.placement, mode: e.target.value as PlacementMode } })
-            }
-          >
-            <option value="Default">Default - pods may share nodes</option>
-            <option value="Dedicated">Dedicated - one pod per node</option>
-            <option value="Packed">Packed - all pods on the same node</option>
-          </select>
-        </label>
-        {spec.placement?.mode === "Dedicated" && (
-          <label>
-            <span>Anti-affinity topology key</span>
-            <input
-              name="topologyKey"
-              value={spec.placement?.topologyKey ?? ""}
-              placeholder="kubernetes.io/hostname"
-              onChange={(e) => patch({ placement: { ...spec.placement, topologyKey: e.target.value } })}
-            />
-          </label>
-        )}
-      </fieldset>
+      <Title headingLevel="h2">Placement</Title>
+      <FormGroup label="Mode" fieldId="placementMode">
+        <FormSelect
+          id="placementMode"
+          name="placementMode"
+          value={spec.placement?.mode ?? "Default"}
+          onChange={(_e, value) => patch({ placement: { ...spec.placement, mode: value as PlacementMode } })}
+        >
+          <FormSelectOption value="Default" label="Default - pods may share nodes" />
+          <FormSelectOption value="Dedicated" label="Dedicated - one pod per node" />
+          <FormSelectOption value="Packed" label="Packed - all pods on the same node" />
+        </FormSelect>
+      </FormGroup>
+      {spec.placement?.mode === "Dedicated" && (
+        <FormGroup label="Anti-affinity topology key" fieldId="topologyKey">
+          <TextInput
+            id="topologyKey"
+            name="topologyKey"
+            value={spec.placement?.topologyKey ?? ""}
+            placeholder="kubernetes.io/hostname"
+            onChange={(_e, value) => patch({ placement: { ...spec.placement, topologyKey: value } })}
+          />
+        </FormGroup>
+      )}
 
-      <fieldset>
-        <legend>Postgres</legend>
-        <label>
-          <span>Mode</span>
-          <select
-            name="postgresMode"
-            value={spec.postgres.mode}
-            onChange={(e) => {
-              const mode = e.target.value as PostgresMode;
+      <Title headingLevel="h2">Postgres</Title>
+      <FormGroup label="Mode" fieldId="postgresMode">
+        <FormSelect
+          id="postgresMode"
+          name="postgresMode"
+          value={spec.postgres.mode}
+          onChange={(_e, value) => {
+            const mode = value as PostgresMode;
+            patch({
+              postgres: {
+                mode,
+                embedded: mode === "Embedded" ? (spec.postgres.embedded ?? {}) : undefined,
+                cnpg: mode === "CNPG" ? (spec.postgres.cnpg ?? { instances: 3 }) : undefined,
+                external:
+                  mode === "External"
+                    ? (spec.postgres.external ?? { secretRef: { name: "" }, sslMode: "require" })
+                    : undefined,
+              },
+            });
+          }}
+        >
+          <FormSelectOption value="Embedded" label="Embedded - the chart's bundled subchart" />
+          <FormSelectOption value="CNPG" label="CloudNativePG - HA cluster" />
+          <FormSelectOption value="External" label="External - an instance you manage" />
+        </FormSelect>
+      </FormGroup>
+
+      {spec.postgres.mode === "Embedded" && (
+        <FormGroup label="Storage size" fieldId="embeddedStorage">
+          <TextInput
+            id="embeddedStorage"
+            name="embeddedStorage"
+            value={spec.postgres.embedded?.storageSize ?? ""}
+            placeholder="8Gi"
+            onChange={(_e, value) =>
               patch({
-                postgres: {
-                  mode,
-                  embedded: mode === "Embedded" ? (spec.postgres.embedded ?? {}) : undefined,
-                  cnpg: mode === "CNPG" ? (spec.postgres.cnpg ?? { instances: 3 }) : undefined,
-                  external:
-                    mode === "External"
-                      ? (spec.postgres.external ?? { secretRef: { name: "" }, sslMode: "require" })
-                      : undefined,
-                },
-              });
-            }}
-          >
-            <option value="Embedded">Embedded - the chart&apos;s bundled subchart</option>
-            <option value="CNPG">CloudNativePG - HA cluster</option>
-            <option value="External">External - an instance you manage</option>
-          </select>
-        </label>
+                postgres: { ...spec.postgres, embedded: { ...spec.postgres.embedded, storageSize: value || undefined } },
+              })
+            }
+          />
+        </FormGroup>
+      )}
 
-        {spec.postgres.mode === "Embedded" && (
-          <label>
-            <span>Storage size</span>
-            <input
-              name="embeddedStorage"
-              value={spec.postgres.embedded?.storageSize ?? ""}
-              placeholder="8Gi"
-              onChange={(e) =>
-                patch({
-                  postgres: {
-                    ...spec.postgres,
-                    embedded: { ...spec.postgres.embedded, storageSize: e.target.value || undefined },
-                  },
-                })
-              }
-            />
-          </label>
-        )}
-
-        {spec.postgres.mode === "CNPG" && (
-          <div className="grid2">
-            <label>
-              <span>Instances</span>
-              <input
+      {spec.postgres.mode === "CNPG" && (
+        <Grid hasGutter md={6}>
+          <GridItem span={12} md={6}>
+            <FormGroup label="Instances" fieldId="cnpgInstances">
+              <TextInput
+                id="cnpgInstances"
                 name="cnpgInstances"
                 type="number"
                 min={1}
                 value={spec.postgres.cnpg?.instances ?? 3}
-                onChange={(e) =>
-                  patch({
-                    postgres: {
-                      ...spec.postgres,
-                      cnpg: { ...spec.postgres.cnpg, instances: Number(e.target.value) },
-                    },
-                  })
+                onChange={(_e, value) =>
+                  patch({ postgres: { ...spec.postgres, cnpg: { ...spec.postgres.cnpg, instances: Number(value) } } })
                 }
               />
-            </label>
-            <label>
-              <span>Storage size</span>
-              <input
+            </FormGroup>
+          </GridItem>
+          <GridItem span={12} md={6}>
+            <FormGroup label="Storage size" fieldId="cnpgStorage">
+              <TextInput
+                id="cnpgStorage"
                 name="cnpgStorage"
                 value={spec.postgres.cnpg?.storageSize ?? ""}
                 placeholder="10Gi"
-                onChange={(e) =>
+                onChange={(_e, value) =>
                   patch({
-                    postgres: {
-                      ...spec.postgres,
-                      cnpg: { ...spec.postgres.cnpg, storageSize: e.target.value || undefined },
-                    },
+                    postgres: { ...spec.postgres, cnpg: { ...spec.postgres.cnpg, storageSize: value || undefined } },
                   })
                 }
               />
-            </label>
-          </div>
-        )}
+            </FormGroup>
+          </GridItem>
+        </Grid>
+      )}
 
-        {spec.postgres.mode === "External" && (
-          <div className="grid2">
-            <label>
-              <span>Connection secret name</span>
-              <input
+      {spec.postgres.mode === "External" && (
+        <Grid hasGutter md={6}>
+          <GridItem span={12} md={6}>
+            <FormGroup label="Connection secret name" isRequired fieldId="externalSecret">
+              <TextInput
+                id="externalSecret"
                 name="externalSecret"
-                required
+                isRequired
                 value={spec.postgres.external?.secretRef.name ?? ""}
-                onChange={(e) =>
+                onChange={(_e, value) =>
                   patch({
-                    postgres: {
-                      ...spec.postgres,
-                      external: {
-                        ...spec.postgres.external,
-                        secretRef: { name: e.target.value },
-                      },
-                    },
+                    postgres: { ...spec.postgres, external: { ...spec.postgres.external, secretRef: { name: value } } },
                   })
                 }
               />
-            </label>
-            <label>
-              <span>SSL mode</span>
-              <select
+            </FormGroup>
+          </GridItem>
+          <GridItem span={12} md={6}>
+            <FormGroup label="SSL mode" fieldId="externalSslMode">
+              <FormSelect
+                id="externalSslMode"
                 name="externalSslMode"
                 value={spec.postgres.external?.sslMode ?? "require"}
-                onChange={(e) =>
+                onChange={(_e, value) =>
                   patch({
                     postgres: {
                       ...spec.postgres,
-                      external: {
-                        secretRef: spec.postgres.external?.secretRef ?? { name: "" },
-                        sslMode: e.target.value,
-                      },
+                      external: { secretRef: spec.postgres.external?.secretRef ?? { name: "" }, sslMode: value },
                     },
                   })
                 }
               >
                 {["disable", "require", "verify-ca", "verify-full"].map((mode) => (
-                  <option key={mode} value={mode}>
-                    {mode}
-                  </option>
+                  <FormSelectOption key={mode} value={mode} label={mode} />
                 ))}
-              </select>
-            </label>
-          </div>
-        )}
-      </fieldset>
+              </FormSelect>
+            </FormGroup>
+          </GridItem>
+        </Grid>
+      )}
 
-      <fieldset>
-        <legend>Advanced: extra Helm values</legend>
-        <p className="muted">
-          Raw <code>values.yaml</code> for the authentik chart, merged over everything above
-          last - the escape hatch for settings this form doesn&apos;t expose a field for.
-          Deep-merged: a key you don&apos;t set here is left alone.
-        </p>
-        <label>
-          <span className="sr-only">Extra Helm values (YAML)</span>
-          <textarea
-            name="extraValuesYAML"
-            className="mono"
-            rows={10}
-            spellCheck={false}
-            placeholder={"authentik:\n  geoip:\n    enabled: true\n"}
-            value={extraValuesYAML}
-            onChange={(e) => setExtraValuesYAML(e.target.value)}
-          />
-        </label>
-      </fieldset>
+      <Title headingLevel="h2">Advanced: extra Helm values</Title>
+      <Content component="small">
+        Raw <code>values.yaml</code> for the authentik chart, merged over everything above
+        last - the escape hatch for settings this form doesn&apos;t expose a field for.
+        Deep-merged: a key you don&apos;t set here is left alone.
+      </Content>
+      <FormGroup label="Extra Helm values (YAML)" fieldId="extraValuesYAML">
+        <TextArea
+          id="extraValuesYAML"
+          name="extraValuesYAML"
+          resizeOrientation="vertical"
+          rows={10}
+          spellCheck={false}
+          placeholder={"authentik:\n  geoip:\n    enabled: true\n"}
+          value={extraValuesYAML}
+          onChange={(_e, value) => setExtraValuesYAML(value)}
+          style={{ fontFamily: "monospace" }}
+        />
+      </FormGroup>
 
-      <div className="row">
-        <button type="submit" className="primary" disabled={saving}>
+      <ActionGroup>
+        <Button type="submit" isDisabled={saving}>
           {saving ? "Saving..." : existing ? "Save changes" : "Create topology"}
-        </button>
-        <button type="button" onClick={() => router.push("/topologies")}>
+        </Button>
+        <Button variant="link" onClick={() => router.push("/topologies")}>
           Cancel
-        </button>
-      </div>
-    </form>
+        </Button>
+      </ActionGroup>
+    </Form>
   );
 }

@@ -2,8 +2,22 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import {
+  ActionGroup,
+  Button,
+  Content,
+  Form,
+  FormGroup,
+  FormSelect,
+  FormSelectOption,
+  Grid,
+  GridItem,
+  TextInput,
+  Title,
+} from "@patternfly/react-core";
+import { TrashIcon } from "@patternfly/react-icons";
 import { api, ApiError } from "@/lib/api";
-import type { WorkloadClusterSpec } from "@/lib/types";
+import type { WorkerPoolSpec, WorkloadCluster, WorkloadClusterSpec } from "@/lib/types";
 import { ErrorBanner } from "@/components/ui";
 
 // KUBERNETES_VERSIONS is the latest patch of each of the last 5 minor
@@ -32,6 +46,10 @@ function flavorLabel(flavor: string): string {
   return `${flavor} - ${cpu} vCPU, ${memGiB} GiB RAM`;
 }
 
+function emptyPool(name: string): WorkerPoolSpec {
+  return { name, replicas: 2, incus: { flavor: "c2-m4" } };
+}
+
 /**
  * emptySpec mirrors WorkloadClusterSpec's own CRD defaults, the same way
  * topology-form's emptySpec does - what you see is what gets created.
@@ -41,27 +59,31 @@ function emptySpec(): WorkloadClusterSpec {
     kubernetesVersion: KUBERNETES_VERSIONS[0],
     provider: "Incus",
     controlPlane: { replicas: 1 },
-    workers: { replicas: 2 },
+    workerPools: [emptyPool("workers")],
     incus: {
       lxcSecretRef: { name: "lxc-secret" },
       image: "ubuntu:24.04",
       profiles: ["default"],
       controlPlane: { flavor: "c2-m4" },
-      workers: { flavor: "c2-m4" },
     },
   };
 }
 
 /**
- * ClusterForm registers a new WorkloadCluster - there is no edit path: once
- * provisioned, WorkloadClusterReconciler never updates the Cluster API
- * objects it created (see applyCreateOnly), so resizing or reconfiguring
- * means deprovisioning and registering a replacement.
+ * ClusterForm registers a new WorkloadCluster, or - given `existing` - edits
+ * one already provisioned. Editing is deliberately narrow: only worker pool
+ * replicas/flavor (and adding/removing whole pools) actually do anything on
+ * an existing cluster, since WorkloadClusterReconciler only supports day-2
+ * changes to worker pools (see WorkerPoolSpec's doc comment) - the control
+ * plane and every Incus/LXC-wide setting (image, profiles, secret) is
+ * provisioned once and left alone after that, so those fields are read-only
+ * once a cluster exists rather than silently accepting an edit that would
+ * never take effect.
  */
-export function ClusterForm() {
+export function ClusterForm({ existing }: { existing?: WorkloadCluster }) {
   const router = useRouter();
-  const [name, setName] = useState("");
-  const [spec, setSpec] = useState<WorkloadClusterSpec>(emptySpec());
+  const [name, setName] = useState(existing?.metadata.name ?? "");
+  const [spec, setSpec] = useState<WorkloadClusterSpec>(existing?.spec ?? emptySpec());
   const [error, setError] = useState<string>();
   const [saving, setSaving] = useState(false);
 
@@ -69,12 +91,29 @@ export function ClusterForm() {
   const patchIncus = (changes: Partial<NonNullable<WorkloadClusterSpec["incus"]>>) =>
     setSpec({ ...spec, incus: { ...spec.incus!, ...changes } });
 
+  function patchPool(index: number, changes: Partial<WorkerPoolSpec>) {
+    const pools = spec.workerPools.slice();
+    pools[index] = { ...pools[index], ...changes };
+    patch({ workerPools: pools });
+  }
+  function addPool() {
+    const name = `pool-${spec.workerPools.length + 1}`;
+    patch({ workerPools: [...spec.workerPools, emptyPool(name)] });
+  }
+  function removePool(index: number) {
+    patch({ workerPools: spec.workerPools.filter((_, i) => i !== index) });
+  }
+
   async function submit(event: React.FormEvent) {
     event.preventDefault();
     setSaving(true);
     setError(undefined);
     try {
-      await api.registerCluster({ metadata: { name }, spec });
+      if (existing) {
+        await api.updateWorkloadCluster(existing.metadata.name, { spec });
+      } else {
+        await api.registerCluster({ metadata: { name }, spec });
+      }
       router.push("/clusters");
       router.refresh();
     } catch (err) {
@@ -84,162 +123,209 @@ export function ClusterForm() {
   }
 
   return (
-    <form onSubmit={submit}>
+    <Form onSubmit={submit}>
       <ErrorBanner error={error} />
 
-      <fieldset>
-        <legend>Identity</legend>
-        <div className="grid2">
-          <label>
-            <span>Name</span>
-            <input
+      <Title headingLevel="h2">Identity</Title>
+      <Grid hasGutter md={4}>
+        <GridItem span={12} md={4}>
+          <FormGroup label="Name" isRequired fieldId="name">
+            <TextInput
+              id="name"
               name="name"
               value={name}
-              required
+              isRequired
+              isDisabled={Boolean(existing)}
               pattern="[a-z0-9]([-a-z0-9]*[a-z0-9])?"
               title="A Kubernetes object name: lowercase letters, digits and dashes"
-              onChange={(e) => setName(e.target.value)}
+              onChange={(_e, value) => setName(value)}
             />
-          </label>
-          <label>
-            <span>Kubernetes version</span>
-            <select
+          </FormGroup>
+        </GridItem>
+        <GridItem span={12} md={4}>
+          <FormGroup label="Kubernetes version" fieldId="kubernetesVersion">
+            <FormSelect
+              id="kubernetesVersion"
               name="kubernetesVersion"
+              isDisabled={Boolean(existing)}
               value={spec.kubernetesVersion}
-              onChange={(e) => patch({ kubernetesVersion: e.target.value })}
+              onChange={(_e, value) => patch({ kubernetesVersion: value })}
             >
-              {KUBERNETES_VERSIONS.map((version, i) => (
-                <option key={version} value={version}>
-                  {version}
-                  {i === 0 ? " (latest)" : ""}
-                </option>
+              {(existing && !KUBERNETES_VERSIONS.includes(spec.kubernetesVersion)
+                ? [spec.kubernetesVersion, ...KUBERNETES_VERSIONS]
+                : KUBERNETES_VERSIONS
+              ).map((version, i) => (
+                <FormSelectOption key={version} value={version} label={`${version}${i === 0 && !existing ? " (latest)" : ""}`} />
               ))}
-            </select>
-          </label>
-          <label>
-            <span>Infrastructure provider</span>
-            <select
+            </FormSelect>
+          </FormGroup>
+        </GridItem>
+        <GridItem span={12} md={4}>
+          <FormGroup label="Infrastructure provider" fieldId="provider">
+            <FormSelect
+              id="provider"
               name="provider"
+              isDisabled={Boolean(existing)}
               value={spec.provider}
-              onChange={(e) => patch({ provider: e.target.value as WorkloadClusterSpec["provider"] })}
+              onChange={(_e, value) => patch({ provider: value as WorkloadClusterSpec["provider"] })}
             >
-              <option value="Incus">Incus / LXC</option>
-            </select>
-          </label>
-        </div>
-      </fieldset>
+              <FormSelectOption value="Incus" label="Incus / LXC" />
+            </FormSelect>
+          </FormGroup>
+        </GridItem>
+      </Grid>
 
-      <fieldset>
-        <legend>Machines</legend>
-        <div className="grid2">
-          <label>
-            <span>Control plane replicas</span>
-            <input
-              name="controlPlaneReplicas"
-              type="number"
-              min={1}
-              value={spec.controlPlane.replicas}
-              onChange={(e) =>
-                patch({ controlPlane: { replicas: Number(e.target.value) } })
-              }
-            />
-          </label>
-          <label>
-            <span>Worker replicas</span>
-            <input
-              name="workerReplicas"
-              type="number"
-              min={1}
-              value={spec.workers.replicas}
-              onChange={(e) => patch({ workers: { replicas: Number(e.target.value) } })}
-            />
-          </label>
-        </div>
-      </fieldset>
+      <Title headingLevel="h2">Control plane</Title>
+      {existing && (
+        <Content component="small">
+          Not resizable/reconfigurable after creation - deprovision and register a
+          replacement to change it.
+        </Content>
+      )}
+      <FormGroup label="Control plane replicas" fieldId="controlPlaneReplicas">
+        <TextInput
+          id="controlPlaneReplicas"
+          name="controlPlaneReplicas"
+          type="number"
+          min={1}
+          isDisabled={Boolean(existing)}
+          value={spec.controlPlane.replicas}
+          onChange={(_e, value) => patch({ controlPlane: { replicas: Number(value) } })}
+        />
+      </FormGroup>
+
+      <Title headingLevel="h2">Worker pools</Title>
+      {spec.workerPools.map((pool, i) => (
+        <Grid hasGutter md={4} key={i} style={{ marginBottom: "1rem", alignItems: "flex-end" }}>
+          <GridItem span={12} md={4}>
+            <FormGroup label="Pool name" isRequired fieldId={`pool-${i}-name`}>
+              <TextInput
+                id={`pool-${i}-name`}
+                value={pool.name}
+                isRequired
+                pattern="[a-z0-9]([-a-z0-9]*[a-z0-9])?"
+                title="Lowercase letters, digits and dashes"
+                onChange={(_e, value) => patchPool(i, { name: value })}
+              />
+            </FormGroup>
+          </GridItem>
+          <GridItem span={12} md={3}>
+            <FormGroup label="Replicas" fieldId={`pool-${i}-replicas`}>
+              <TextInput
+                id={`pool-${i}-replicas`}
+                type="number"
+                min={1}
+                value={pool.replicas}
+                onChange={(_e, value) => patchPool(i, { replicas: Number(value) })}
+              />
+            </FormGroup>
+          </GridItem>
+          <GridItem span={12} md={4}>
+            <FormGroup label="Flavor" fieldId={`pool-${i}-flavor`}>
+              <FormSelect
+                id={`pool-${i}-flavor`}
+                value={pool.incus?.flavor ?? INSTANCE_FLAVORS[1]}
+                onChange={(_e, value) => patchPool(i, { incus: { ...pool.incus, flavor: value } })}
+              >
+                {INSTANCE_FLAVORS.map((flavor) => (
+                  <FormSelectOption key={flavor} value={flavor} label={flavorLabel(flavor)} />
+                ))}
+              </FormSelect>
+            </FormGroup>
+          </GridItem>
+          <GridItem span={12} md={1}>
+            <Button
+              variant="plain"
+              aria-label={`Remove pool ${pool.name}`}
+              isDisabled={spec.workerPools.length <= 1}
+              onClick={() => removePool(i)}
+            >
+              <TrashIcon />
+            </Button>
+          </GridItem>
+        </Grid>
+      ))}
+      <Button variant="secondary" onClick={addPool}>
+        Add worker pool
+      </Button>
 
       {spec.provider === "Incus" && (
-        <fieldset>
-          <legend>Incus / LXC</legend>
-          <div className="grid2">
-            <label>
-              <span>LXC daemon connection secret</span>
-              <input
-                name="lxcSecretRef"
-                required
-                value={spec.incus?.lxcSecretRef.name ?? ""}
-                placeholder="lxc-secret"
-                onChange={(e) => patchIncus({ lxcSecretRef: { name: e.target.value } })}
-              />
-            </label>
-            <label>
-              <span>Image</span>
-              <input
-                name="image"
-                value={spec.incus?.image ?? ""}
-                placeholder="ubuntu:24.04"
-                onChange={(e) => patchIncus({ image: e.target.value })}
-              />
-            </label>
-            <label>
-              <span>Profiles (comma-separated)</span>
-              <input
-                name="profiles"
-                value={(spec.incus?.profiles ?? []).join(",")}
-                placeholder="default"
-                onChange={(e) =>
-                  patchIncus({
-                    profiles: e.target.value
-                      .split(",")
-                      .map((p) => p.trim())
-                      .filter(Boolean),
-                  })
-                }
-              />
-            </label>
-          </div>
-          <div className="grid2">
-            <label>
-              <span>Control plane flavor</span>
-              <select
-                name="controlPlaneFlavor"
-                value={spec.incus?.controlPlane?.flavor ?? INSTANCE_FLAVORS[1]}
-                onChange={(e) =>
-                  patchIncus({ controlPlane: { flavor: e.target.value } })
-                }
-              >
-                {INSTANCE_FLAVORS.map((flavor) => (
-                  <option key={flavor} value={flavor}>
-                    {flavorLabel(flavor)}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              <span>Worker flavor</span>
-              <select
-                name="workerFlavor"
-                value={spec.incus?.workers?.flavor ?? INSTANCE_FLAVORS[1]}
-                onChange={(e) => patchIncus({ workers: { flavor: e.target.value } })}
-              >
-                {INSTANCE_FLAVORS.map((flavor) => (
-                  <option key={flavor} value={flavor}>
-                    {flavorLabel(flavor)}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
-        </fieldset>
+        <>
+          <Title headingLevel="h2">Incus / LXC</Title>
+          {existing && (
+            <Content component="small">
+              Applies to new/edited worker pools only - the control plane and
+              already-provisioned pools keep what they were created with.
+            </Content>
+          )}
+          <Grid hasGutter md={4}>
+            <GridItem span={12} md={4}>
+              <FormGroup label="LXC daemon connection secret" isRequired fieldId="lxcSecretRef">
+                <TextInput
+                  id="lxcSecretRef"
+                  name="lxcSecretRef"
+                  isRequired
+                  isDisabled={Boolean(existing)}
+                  value={spec.incus?.lxcSecretRef.name ?? ""}
+                  placeholder="lxc-secret"
+                  onChange={(_e, value) => patchIncus({ lxcSecretRef: { name: value } })}
+                />
+              </FormGroup>
+            </GridItem>
+            <GridItem span={12} md={4}>
+              <FormGroup label="Image" fieldId="image">
+                <TextInput
+                  id="image"
+                  name="image"
+                  value={spec.incus?.image ?? ""}
+                  placeholder="ubuntu:24.04"
+                  onChange={(_e, value) => patchIncus({ image: value })}
+                />
+              </FormGroup>
+            </GridItem>
+            <GridItem span={12} md={4}>
+              <FormGroup label="Profiles (comma-separated)" fieldId="profiles">
+                <TextInput
+                  id="profiles"
+                  name="profiles"
+                  value={(spec.incus?.profiles ?? []).join(",")}
+                  placeholder="default"
+                  onChange={(_e, value) =>
+                    patchIncus({
+                      profiles: value
+                        .split(",")
+                        .map((p) => p.trim())
+                        .filter(Boolean),
+                    })
+                  }
+                />
+              </FormGroup>
+            </GridItem>
+          </Grid>
+          <FormGroup label="Control plane flavor" fieldId="controlPlaneFlavor">
+            <FormSelect
+              id="controlPlaneFlavor"
+              name="controlPlaneFlavor"
+              isDisabled={Boolean(existing)}
+              value={spec.incus?.controlPlane?.flavor ?? INSTANCE_FLAVORS[1]}
+              onChange={(_e, value) => patchIncus({ controlPlane: { flavor: value } })}
+            >
+              {INSTANCE_FLAVORS.map((flavor) => (
+                <FormSelectOption key={flavor} value={flavor} label={flavorLabel(flavor)} />
+              ))}
+            </FormSelect>
+          </FormGroup>
+        </>
       )}
 
-      <div className="row">
-        <button type="submit" className="primary" disabled={saving}>
-          {saving ? "Provisioning..." : "Register cluster"}
-        </button>
-        <button type="button" onClick={() => router.push("/clusters")}>
+      <ActionGroup>
+        <Button type="submit" isDisabled={saving}>
+          {saving ? "Saving..." : existing ? "Save changes" : "Register cluster"}
+        </Button>
+        <Button variant="link" onClick={() => router.push("/clusters")}>
           Cancel
-        </button>
-      </div>
-    </form>
+        </Button>
+      </ActionGroup>
+    </Form>
   );
 }

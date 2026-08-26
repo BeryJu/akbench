@@ -2,6 +2,8 @@
 
 import Link from "next/link";
 import { use } from "react";
+import { Content, Title } from "@patternfly/react-core";
+import { Table, Tbody, Td, Th, Thead, Tr } from "@patternfly/react-table";
 import { api } from "@/lib/api";
 import { TopologyForm } from "@/components/topology-form";
 import { ErrorBanner, ReadyBadge, useResource } from "@/components/ui";
@@ -12,50 +14,52 @@ export default function TopologyPage({ params }: { params: Promise<{ name: strin
 
   return (
     <>
-      <h1>{name}</h1>
-      <p className="subtitle">
+      <Title headingLevel="h1">{name}</Title>
+      <Content component="p">
         <ReadyBadge conditions={data?.status?.conditions} />{" "}
         {data?.status?.serviceEndpoint ? (
-          <span className="mono">{data.status.serviceEndpoint}</span>
+          <code>{data.status.serviceEndpoint}</code>
         ) : (
-          <span className="muted">no service endpoint yet</span>
+          <Content component="small">no service endpoint yet</Content>
         )}
-      </p>
+      </Content>
 
       <ErrorBanner error={error} />
 
       {data?.status?.conditions?.length ? (
         <>
-          <h2>Conditions</h2>
-          <table>
-            <thead>
-              <tr>
-                <th>Type</th>
-                <th>Status</th>
-                <th>Reason</th>
-                <th>Message</th>
-              </tr>
-            </thead>
-            <tbody>
+          <Title headingLevel="h2">Conditions</Title>
+          <Table role="table">
+            <Thead>
+              <Tr>
+                <Th>Type</Th>
+                <Th>Status</Th>
+                <Th>Reason</Th>
+                <Th>Message</Th>
+              </Tr>
+            </Thead>
+            <Tbody>
               {data.status.conditions.map((condition) => (
-                <tr key={condition.type}>
-                  <td>{condition.type}</td>
-                  <td>{condition.status}</td>
-                  <td>{condition.reason}</td>
-                  <td className="muted">{condition.message}</td>
-                </tr>
+                <Tr key={condition.type}>
+                  <Td>{condition.type}</Td>
+                  <Td>{condition.status}</Td>
+                  <Td>{condition.reason}</Td>
+                  <Td>
+                    <Content component="small">{condition.message}</Content>
+                  </Td>
+                </Tr>
               ))}
-            </tbody>
-          </table>
+            </Tbody>
+          </Table>
         </>
       ) : null}
 
-      <h2>Specification</h2>
-      {data ? <TopologyForm existing={data} /> : <p className="muted">Loading...</p>}
+      <Title headingLevel="h2">Specification</Title>
+      {data ? <TopologyForm existing={data} /> : <p>Loading...</p>}
 
-      <p className="muted">
+      <Content component="small">
         <Link href="/topologies">Back to topologies</Link>
-      </p>
+      </Content>
     </>
   );
 }

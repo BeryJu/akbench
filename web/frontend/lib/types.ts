@@ -145,14 +145,23 @@ export interface IncusProviderSpec {
   image?: string;
   profiles?: string[];
   controlPlane?: IncusMachineSpec;
-  workers?: IncusMachineSpec;
+}
+
+// WorkerPoolSpec is one named, independently-sized/flavored group of worker
+// machines - see the CRD's own WorkerPoolSpec doc comment for what editing
+// an existing pool's replicas/flavor (applied in place) vs. adding/removing
+// a pool name (creates/deletes its MachineDeployment) does.
+export interface WorkerPoolSpec {
+  name: string;
+  replicas: number;
+  incus?: IncusMachineSpec;
 }
 
 export interface WorkloadClusterSpec {
   kubernetesVersion: string;
   provider: InfrastructureProvider;
   controlPlane: MachineSpec;
-  workers: MachineSpec;
+  workerPools: WorkerPoolSpec[];
   incus?: IncusProviderSpec;
 }
 

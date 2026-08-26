@@ -2,6 +2,18 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import {
+  ActionGroup,
+  Button,
+  Form,
+  FormGroup,
+  FormSelect,
+  FormSelectOption,
+  Grid,
+  GridItem,
+  TextInput,
+  Title,
+} from "@patternfly/react-core";
 import { api, ApiError } from "@/lib/api";
 import type { TestCase, TestCaseSpec, TestProfile } from "@/lib/types";
 import { ErrorBanner, useResource } from "@/components/ui";
@@ -49,129 +61,143 @@ export function TestCaseForm({ existing }: { existing?: TestCase }) {
   }
 
   return (
-    <form onSubmit={submit}>
+    <Form onSubmit={submit}>
       <ErrorBanner error={error} />
 
-      <fieldset>
-        <legend>Identity</legend>
-        <div className="grid2">
-          <label>
-            <span>Name - this is the k6 testid every dashboard splits on</span>
-            <input
+      <Title headingLevel="h2">Identity</Title>
+      <Grid hasGutter md={6}>
+        <GridItem span={12} md={6}>
+          <FormGroup label="Name - this is the k6 testid every dashboard splits on" isRequired fieldId="name">
+            <TextInput
+              id="name"
               name="name"
               value={name}
-              required
-              disabled={Boolean(existing)}
+              isRequired
+              isDisabled={Boolean(existing)}
               pattern="[a-z0-9]([-a-z0-9]*[a-z0-9])?"
               title="A Kubernetes object name: lowercase letters, digits and dashes"
-              onChange={(e) => setName(e.target.value)}
+              onChange={(_e, value) => setName(value)}
             />
-          </label>
-          <label>
-            <span>Topology to drive</span>
-            <select
+          </FormGroup>
+        </GridItem>
+        <GridItem span={12} md={6}>
+          <FormGroup label="Topology to drive" isRequired fieldId="topology">
+            <FormSelect
+              id="topology"
               name="topology"
-              required
+              isRequired
               value={spec.topologyRef.name}
-              onChange={(e) => patch({ topologyRef: { name: e.target.value } })}
+              onChange={(_e, value) => patch({ topologyRef: { name: value } })}
             >
-              <option value="">Choose a topology</option>
+              <FormSelectOption value="" label="Choose a topology" isPlaceholder />
               {(topologies.data ?? []).map((topology) => (
-                <option key={topology.metadata.name} value={topology.metadata.name}>
-                  {topology.metadata.name}
-                </option>
+                <FormSelectOption
+                  key={topology.metadata.name}
+                  value={topology.metadata.name}
+                  label={topology.metadata.name}
+                />
               ))}
-            </select>
-          </label>
-        </div>
-      </fieldset>
+            </FormSelect>
+          </FormGroup>
+        </GridItem>
+      </Grid>
 
-      <fieldset>
-        <legend>Load</legend>
-        <label>
-          <span>Profile</span>
-          <select
-            name="profile"
-            value={spec.profile}
-            onChange={(e) => patch({ profile: e.target.value as TestProfile })}
-          >
-            <option value="Quick">Quick - a bounded run, started from a test run</option>
-            <option value="Burn">Burn - sustained load until stopped</option>
-          </select>
-        </label>
-        <div className="grid2">
-          <label>
-            <span>Virtual users</span>
-            <input
+      <Title headingLevel="h2">Load</Title>
+      <FormGroup label="Profile" fieldId="profile">
+        <FormSelect
+          id="profile"
+          name="profile"
+          value={spec.profile}
+          onChange={(_e, value) => patch({ profile: value as TestProfile })}
+        >
+          <FormSelectOption value="Quick" label="Quick - a bounded run, started from a test run" />
+          <FormSelectOption value="Burn" label="Burn - sustained load until stopped" />
+        </FormSelect>
+      </FormGroup>
+      <Grid hasGutter md={6}>
+        <GridItem span={12} md={6}>
+          <FormGroup label="Virtual users" fieldId="vus">
+            <TextInput
+              id="vus"
               name="vus"
               type="number"
               min={1}
               value={spec.vus}
-              onChange={(e) => patch({ vus: Number(e.target.value) })}
+              onChange={(_e, value) => patch({ vus: Number(value) })}
             />
-          </label>
-          {spec.profile === "Quick" ? (
-            <>
-              <label>
-                <span>Logins per virtual user</span>
-                <input
+          </FormGroup>
+        </GridItem>
+        {spec.profile === "Quick" ? (
+          <>
+            <GridItem span={12} md={6}>
+              <FormGroup label="Logins per virtual user" fieldId="iterations">
+                <TextInput
+                  id="iterations"
                   name="iterations"
                   type="number"
                   min={1}
                   value={spec.iterations ?? 1000}
-                  onChange={(e) => patch({ iterations: Number(e.target.value) })}
+                  onChange={(_e, value) => patch({ iterations: Number(value) })}
                 />
-              </label>
-              <label>
-                <span>Time limit - caps a run that cannot finish its logins</span>
-                <input
+              </FormGroup>
+            </GridItem>
+            <GridItem span={12} md={6}>
+              <FormGroup label="Time limit - caps a run that cannot finish its logins" fieldId="quickDuration">
+                <TextInput
+                  id="quickDuration"
                   name="quickDuration"
                   value={spec.quickDuration ?? ""}
                   placeholder="150s"
-                  onChange={(e) => patch({ quickDuration: e.target.value })}
+                  onChange={(_e, value) => patch({ quickDuration: value })}
                 />
-              </label>
-            </>
-          ) : (
-            <label>
-              <span>Time limit</span>
-              <input
+              </FormGroup>
+            </GridItem>
+          </>
+        ) : (
+          <GridItem span={12} md={6}>
+            <FormGroup label="Time limit" fieldId="burnDuration">
+              <TextInput
+                id="burnDuration"
                 name="burnDuration"
                 value={spec.burnDuration ?? ""}
                 placeholder="8760h"
-                onChange={(e) => patch({ burnDuration: e.target.value })}
+                onChange={(_e, value) => patch({ burnDuration: value })}
               />
-            </label>
-          )}
-          <label>
-            <span>Flow slug</span>
-            <input
+            </FormGroup>
+          </GridItem>
+        )}
+        <GridItem span={12} md={6}>
+          <FormGroup label="Flow slug" fieldId="flow">
+            <TextInput
+              id="flow"
               name="flow"
               value={spec.flow ?? ""}
               placeholder="default-authentication-flow"
-              onChange={(e) => patch({ flow: e.target.value })}
+              onChange={(_e, value) => patch({ flow: value })}
             />
-          </label>
-          <label>
-            <span>Trace sample rate</span>
-            <input
+          </FormGroup>
+        </GridItem>
+        <GridItem span={12} md={6}>
+          <FormGroup label="Trace sample rate" fieldId="traceSampleRate">
+            <TextInput
+              id="traceSampleRate"
               name="traceSampleRate"
               value={spec.traceSampleRate ?? ""}
               placeholder="0.01"
-              onChange={(e) => patch({ traceSampleRate: e.target.value })}
+              onChange={(_e, value) => patch({ traceSampleRate: value })}
             />
-          </label>
-        </div>
-      </fieldset>
+          </FormGroup>
+        </GridItem>
+      </Grid>
 
-      <div className="row">
-        <button type="submit" className="primary" disabled={saving}>
+      <ActionGroup>
+        <Button type="submit" isDisabled={saving}>
           {saving ? "Saving..." : existing ? "Save changes" : "Create test case"}
-        </button>
-        <button type="button" onClick={() => router.push("/testcases")}>
+        </Button>
+        <Button variant="link" onClick={() => router.push("/testcases")}>
           Cancel
-        </button>
-      </div>
-    </form>
+        </Button>
+      </ActionGroup>
+    </Form>
   );
 }

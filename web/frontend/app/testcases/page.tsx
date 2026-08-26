@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { Button, Content, Flex, FlexItem, Label, Title } from "@patternfly/react-core";
+import { Table, Tbody, Td, Th, Thead, Tr } from "@patternfly/react-table";
 import { api, ApiError } from "@/lib/api";
 import { Age, ConfirmButton, Empty, ErrorBanner, ReadyBadge, useResource } from "@/components/ui";
 
@@ -24,84 +26,88 @@ export default function TestCasesPage() {
 
   return (
     <>
-      <div className="spread">
-        <div>
-          <h1>Test cases</h1>
-          <p className="subtitle">
+      <Flex justifyContent={{ default: "justifyContentSpaceBetween" }} alignItems={{ default: "alignItemsFlexStart" }}>
+        <FlexItem>
+          <Title headingLevel="h1">Test cases</Title>
+          <Content component="p">
             A Quick test case is executed by starting a run; a Burn test case runs
             continuously for as long as it exists.
-          </p>
-        </div>
-        <Link className="button primary" href="/testcases/new">
-          New test case
-        </Link>
-      </div>
+          </Content>
+        </FlexItem>
+        <FlexItem>
+          <Button component={Link} href="/testcases/new">
+            New test case
+          </Button>
+        </FlexItem>
+      </Flex>
 
       <ErrorBanner error={actionError ?? error} />
 
       {data?.length ? (
-        <table>
-          <thead>
-            <tr>
-              <th>Name</th>
-              <th>Topology</th>
-              <th>Profile</th>
-              <th>VUs</th>
-              <th>Iterations</th>
-              <th>Status</th>
-              <th>Age</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
+        <Table role="table">
+          <Thead>
+            <Tr>
+              <Th>Name</Th>
+              <Th>Topology</Th>
+              <Th>Profile</Th>
+              <Th>VUs</Th>
+              <Th>Iterations</Th>
+              <Th>Status</Th>
+              <Th>Age</Th>
+              <Th />
+            </Tr>
+          </Thead>
+          <Tbody>
             {data.map((testCase) => (
-              <tr key={testCase.metadata.name}>
-                <td>
-                  <Link href={`/testcases/${testCase.metadata.name}`}>
-                    {testCase.metadata.name}
-                  </Link>
-                </td>
-                <td>
+              <Tr key={testCase.metadata.name}>
+                <Td>
+                  <Link href={`/testcases/${testCase.metadata.name}`}>{testCase.metadata.name}</Link>
+                </Td>
+                <Td>
                   <Link href={`/topologies/${testCase.spec.topologyRef.name}`}>
                     {testCase.spec.topologyRef.name}
                   </Link>
-                </td>
-                <td>{testCase.spec.profile}</td>
-                <td>{testCase.spec.vus}</td>
-                <td>{testCase.spec.profile === "Quick" ? testCase.spec.iterations : "-"}</td>
-                <td>
+                </Td>
+                <Td>{testCase.spec.profile}</Td>
+                <Td>{testCase.spec.vus}</Td>
+                <Td>{testCase.spec.profile === "Quick" ? testCase.spec.iterations : "-"}</Td>
+                <Td>
                   <ReadyBadge conditions={testCase.status?.conditions} />
-                </td>
-                <td>
+                </Td>
+                <Td>
                   <Age time={testCase.metadata.creationTimestamp} />
-                </td>
-                <td>
-                  <div className="row">
-                    {testCase.spec.profile === "Quick" ? (
-                      <button
-                        type="button"
-                        name={`run-${testCase.metadata.name}`}
-                        onClick={() => void run(testCase.metadata.name)}
+                </Td>
+                <Td>
+                  <Flex spaceItems={{ default: "spaceItemsSm" }}>
+                    <FlexItem>
+                      {testCase.spec.profile === "Quick" ? (
+                        <Button
+                          variant="secondary"
+                          name={`run-${testCase.metadata.name}`}
+                          onClick={() => void run(testCase.metadata.name)}
+                        >
+                          Run now
+                        </Button>
+                      ) : (
+                        <Label color="orange">Burning</Label>
+                      )}
+                    </FlexItem>
+                    <FlexItem>
+                      <ConfirmButton
+                        onConfirm={async () => {
+                          await api.deleteTestCase(testCase.metadata.name);
+                          reload();
+                        }}
                       >
-                        Run now
-                      </button>
-                    ) : (
-                      <span className="badge warn">Burning</span>
-                    )}
-                    <ConfirmButton
-                      onConfirm={async () => {
-                        await api.deleteTestCase(testCase.metadata.name);
-                        reload();
-                      }}
-                    >
-                      Delete
-                    </ConfirmButton>
-                  </div>
-                </td>
-              </tr>
+                        Delete
+                      </ConfirmButton>
+                    </FlexItem>
+                  </Flex>
+                </Td>
+              </Tr>
             ))}
-          </tbody>
-        </table>
+          </Tbody>
+        </Table>
       ) : (
         <Empty>
           No test cases yet. <Link href="/testcases/new">Define one</Link>.

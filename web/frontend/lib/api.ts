@@ -57,6 +57,13 @@ export const api = {
   registerCluster: (body: Partial<WorkloadCluster>) =>
     request<WorkloadCluster>("/clusters", { method: "POST", body: JSON.stringify(body) }),
   deprovisionCluster: (name: string) => request<void>(`/clusters/${name}`, { method: "DELETE" }),
+  // The management cluster and a workload cluster's readiness both come
+  // from /clusters (a synthesized view); its full spec - what a workload
+  // cluster's edit form needs - is the raw CRD at /workloadclusters
+  // instead, the same generic resource route every other kind uses.
+  workloadCluster: (name: string) => request<WorkloadCluster>(`/workloadclusters/${name}`),
+  updateWorkloadCluster: (name: string, body: Partial<WorkloadCluster>) =>
+    request<WorkloadCluster>(`/workloadclusters/${name}`, { method: "PUT", body: JSON.stringify(body) }),
 
   topologies: () => request<List<Topology>>("/topologies").then((r) => r.items ?? []),
   topology: (name: string) => request<Topology>(`/topologies/${name}`),

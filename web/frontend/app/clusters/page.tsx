@@ -1,6 +1,8 @@
 "use client";
 
 import Link from "next/link";
+import { Button, Content, Flex, FlexItem, Label, Title } from "@patternfly/react-core";
+import { Table, Tbody, Td, Th, Thead, Tr } from "@patternfly/react-table";
 import { api } from "@/lib/api";
 import { ConfirmButton, ErrorBanner, useResource } from "@/components/ui";
 
@@ -9,50 +11,60 @@ export default function ClustersPage() {
 
   return (
     <>
-      <div className="spread">
-        <div>
-          <h1>Clusters</h1>
-          <p className="subtitle">
+      <Flex justifyContent={{ default: "justifyContentSpaceBetween" }} alignItems={{ default: "alignItemsFlexStart" }}>
+        <FlexItem>
+          <Title headingLevel="h1">Clusters</Title>
+          <Content component="p">
             Where topologies can be deployed. Workload clusters are provisioned via Cluster
-            API - registering one here creates a <span className="mono">WorkloadCluster</span>{" "}
-            the operator provisions from.
-          </p>
-        </div>
-        <Link className="button primary" href="/clusters/new">
-          Register cluster
-        </Link>
-      </div>
+            API - registering one here creates a <code>WorkloadCluster</code> the operator
+            provisions from.
+          </Content>
+        </FlexItem>
+        <FlexItem>
+          <Button component={Link} href="/clusters/new">
+            Register cluster
+          </Button>
+        </FlexItem>
+      </Flex>
 
       <ErrorBanner error={error} />
 
-      <table>
-        <thead>
-          <tr>
-            <th>Name</th>
-            <th>Role</th>
-            <th>Phase</th>
-            <th>Control plane</th>
-            <th>Infrastructure</th>
-            <th />
-          </tr>
-        </thead>
-        <tbody>
+      <Table role="table">
+        <Thead>
+          <Tr>
+            <Th>Name</Th>
+            <Th>Role</Th>
+            <Th>Phase</Th>
+            <Th>Control plane</Th>
+            <Th>Infrastructure</Th>
+            <Th />
+          </Tr>
+        </Thead>
+        <Tbody>
           {(data ?? []).map((cluster) => (
-            <tr key={cluster.name}>
-              <td className="mono">{cluster.name}</td>
-              <td>{cluster.management ? "Management" : "Workload"}</td>
-              <td>{cluster.phase ?? "-"}</td>
-              <td>
-                <span className={`badge ${cluster.controlPlaneReady ? "ok" : "warn"}`}>
+            <Tr key={cluster.name}>
+              <Td>
+                {cluster.management ? (
+                  <code>{cluster.name}</code>
+                ) : (
+                  <Link href={`/clusters/${cluster.name}`}>
+                    <code>{cluster.name}</code>
+                  </Link>
+                )}
+              </Td>
+              <Td>{cluster.management ? "Management" : "Workload"}</Td>
+              <Td>{cluster.phase ?? "-"}</Td>
+              <Td>
+                <Label color={cluster.controlPlaneReady ? "green" : "orange"}>
                   {cluster.controlPlaneReady ? "Ready" : "Not ready"}
-                </span>
-              </td>
-              <td>
-                <span className={`badge ${cluster.infrastructureReady ? "ok" : "warn"}`}>
+                </Label>
+              </Td>
+              <Td>
+                <Label color={cluster.infrastructureReady ? "green" : "orange"}>
                   {cluster.infrastructureReady ? "Ready" : "Not ready"}
-                </span>
-              </td>
-              <td>
+                </Label>
+              </Td>
+              <Td>
                 {!cluster.management && (
                   <ConfirmButton
                     onConfirm={async () => {
@@ -63,11 +75,11 @@ export default function ClustersPage() {
                     Deprovision
                   </ConfirmButton>
                 )}
-              </td>
-            </tr>
+              </Td>
+            </Tr>
           ))}
-        </tbody>
-      </table>
+        </Tbody>
+      </Table>
     </>
   );
 }

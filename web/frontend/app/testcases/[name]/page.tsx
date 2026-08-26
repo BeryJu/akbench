@@ -2,17 +2,13 @@
 
 import Link from "next/link";
 import { use, useState } from "react";
+import { Content, FormGroup, Grid, GridItem, Title } from "@patternfly/react-core";
+import { Table, Tbody, Td, Th, Thead, Tr } from "@patternfly/react-table";
 import { api } from "@/lib/api";
 import { TestCaseForm } from "@/components/testcase-form";
 import { MetricsChart } from "@/components/metrics-chart";
+import { DEFAULT_RANGE, TimeRangePicker } from "@/components/time-range-picker";
 import { Age, Empty, ErrorBanner, PhaseBadge, ReadyBadge, useResource } from "@/components/ui";
-
-const ranges: { label: string; seconds: number }[] = [
-  { label: "Last 15m", seconds: 15 * 60 },
-  { label: "Last 1h", seconds: 60 * 60 },
-  { label: "Last 6h", seconds: 6 * 60 * 60 },
-  { label: "Last 24h", seconds: 24 * 60 * 60 },
-];
 
 export default function TestCasePage({ params }: { params: Promise<{ name: string }> }) {
   const { name } = use(params);
@@ -22,90 +18,79 @@ export default function TestCasePage({ params }: { params: Promise<{ name: strin
   // metrics exist to chart - compare's response happens to carry that
   // catalog alongside its (unused here) per-test summary values.
   const catalog = useResource(() => api.compare([name], "5m"), [name], 60000);
-  const [range, setRange] = useState(ranges[1]);
+  const [range, setRange] = useState(DEFAULT_RANGE.seconds);
 
   return (
     <>
-      <h1>{name}</h1>
-      <p className="subtitle">
+      <Title headingLevel="h1">{name}</Title>
+      <Content component="p">
         <ReadyBadge conditions={testCase.data?.status?.conditions} />{" "}
         {testCase.data?.status?.burnWorkloadRef ? (
-          <span className="mono">{testCase.data.status.burnWorkloadRef.name}</span>
+          <code>{testCase.data.status.burnWorkloadRef.name}</code>
         ) : null}
-      </p>
+      </Content>
 
       <ErrorBanner error={testCase.error ?? runs.error} />
 
-      <h2>Metrics</h2>
+      <Title headingLevel="h2">Metrics</Title>
       <ErrorBanner error={catalog.error} />
-      <div className="row">
-        <label style={{ width: "auto" }}>
-          <span>Range</span>
-          <select
-            value={range.label}
-            onChange={(e) => setRange(ranges.find((r) => r.label === e.target.value) ?? ranges[1])}
-          >
-            {ranges.map((option) => (
-              <option key={option.label}>{option.label}</option>
-            ))}
-          </select>
-        </label>
-      </div>
+      <FormGroup label="Range" fieldId="range" style={{ maxWidth: "260px" }}>
+        <TimeRangePicker seconds={range} onChange={setRange} />
+      </FormGroup>
       {catalog.data?.metrics.length ? (
-        <div className="charts">
+        <Grid hasGutter>
           {catalog.data.metrics.map((metric) => (
-            <MetricsChart
-              key={metric.key}
-              metric={metric.key}
-              testids={[name]}
-              rangeSeconds={range.seconds}
-            />
+            <GridItem key={metric.key} span={6}>
+              <MetricsChart metric={metric.key} testids={[name]} rangeSeconds={range} />
+            </GridItem>
           ))}
-        </div>
+        </Grid>
       ) : (
         !catalog.error && <Empty>No metrics available.</Empty>
       )}
 
-      <h2>Runs</h2>
+      <Title headingLevel="h2">Runs</Title>
       {runs.data?.length ? (
-        <table>
-          <thead>
-            <tr>
-              <th>Run</th>
-              <th>Phase</th>
-              <th>VUs</th>
-              <th>Started</th>
-              <th>Finished</th>
-            </tr>
-          </thead>
-          <tbody>
+        <Table role="table">
+          <Thead>
+            <Tr>
+              <Th>Run</Th>
+              <Th>Phase</Th>
+              <Th>VUs</Th>
+              <Th>Started</Th>
+              <Th>Finished</Th>
+            </Tr>
+          </Thead>
+          <Tbody>
             {runs.data.map((run) => (
-              <tr key={run.metadata.name}>
-                <td className="mono">{run.metadata.name}</td>
-                <td>
+              <Tr key={run.metadata.name}>
+                <Td>
+                  <code>{run.metadata.name}</code>
+                </Td>
+                <Td>
                   <PhaseBadge phase={run.status?.phase} />
-                </td>
-                <td>{run.status?.resolvedSpec?.vus ?? run.spec.overrides?.vus ?? "-"}</td>
-                <td>
+                </Td>
+                <Td>{run.status?.resolvedSpec?.vus ?? run.spec.overrides?.vus ?? "-"}</Td>
+                <Td>
                   <Age time={run.status?.startTime} />
-                </td>
-                <td>
+                </Td>
+                <Td>
                   <Age time={run.status?.completionTime} />
-                </td>
-              </tr>
+                </Td>
+              </Tr>
             ))}
-          </tbody>
-        </table>
+          </Tbody>
+        </Table>
       ) : (
         <Empty>No runs yet.</Empty>
       )}
 
-      <h2>Specification</h2>
-      {testCase.data ? <TestCaseForm existing={testCase.data} /> : <p className="muted">Loading...</p>}
+      <Title headingLevel="h2">Specification</Title>
+      {testCase.data ? <TestCaseForm existing={testCase.data} /> : <p>Loading...</p>}
 
-      <p className="muted">
+      <Content component="small">
         <Link href="/testcases">Back to test cases</Link>
-      </p>
+      </Content>
     </>
   );
 }
