@@ -43,7 +43,14 @@ import { TestCaseSection, TopologySection } from './DetailSections';
 import { TestCaseCreatePage, TestCaseEditPage, TestCasesPage } from './TestCasesPage';
 import { TopologiesPage,TopologyCreatePage, TopologyEditPage } from './TopologiesPage';
 
-const ICON = 'simple-icons:authentik';
+// simple-icons:authentik (the actual authentik brand mark) was tried first,
+// but @iconify/react resolves icon names via a runtime fetch to
+// api.iconify.design - when that lookup 404s or the request fails (no
+// egress from this cluster, or the slug being wrong), the sidebar entry
+// fails to render at all rather than falling back to a blank/default glyph.
+// mdi: icons are the set every other built-in Headlamp sidebar entry uses
+// and are already confirmed working here.
+const ICON = 'mdi:speedometer';
 
 registerSidebarEntry({
   parent: null,
