@@ -8,7 +8,9 @@ import (
 	helmv2 "github.com/fluxcd/helm-controller/api/v2"
 	fluxmeta "github.com/fluxcd/pkg/apis/meta"
 	sourcev1 "github.com/fluxcd/source-controller/api/v1"
+	corev1 "k8s.io/api/core/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
@@ -29,6 +31,7 @@ const chartName = "authentik"
 const (
 	valuesKeyReplicas = "replicas"
 	valuesKeyPassword = "password"
+	valuesKeyName     = "name"
 )
 
 const defaultChartRepo = "https://charts.goauthentik.io"
@@ -90,7 +93,19 @@ type AuthentikTopologyHelmValues struct {
 // send_pii, not an OTLP endpoint or sample rate), so both go in as raw
 // AUTHENTIK_* env vars, the same names the Ansible harness this project
 // replaces used (roles/authentik/templates/env.j2).
-func HelmValues(t *benchv1alpha1.AuthentikTopology, secretKey string, pgConn *PostgresConnection, pyroscopeHost, tracingEndpoint string) (*apiextensionsv1.JSON, error) {
+// withBlueprintVolume, if true, mounts a PVC (BlueprintPVCName) into the
+// server pod at BlueprintMountPath so AuthentikTopologyReconciler's
+// ApplyBlueprint can write a fixtures blueprint into it and exec
+// `ak apply_blueprint` against it once the release is Ready. A volume at
+// all (rather than exec writing straight into the image's own filesystem)
+// is required for two independently-verified reasons: /blueprints itself
+// isn't writable by the container's non-root user ("Permission denied" on a
+// live pod), and ak apply_blueprint rejects any path outside
+// CONFIG.blueprints_dir anyway ("Invalid blueprint path", also verified
+// live). A PVC rather than a ConfigMap volume specifically because a
+// benchmark-scale blueprint (thousands of synthetic users) can exceed a
+// ConfigMap's ~1MiB etcd-backed size limit.
+func HelmValues(t *benchv1alpha1.AuthentikTopology, secretKey string, pgConn *PostgresConnection, pyroscopeHost, tracingEndpoint string, withBlueprintVolume bool) (*apiextensionsv1.JSON, error) {
 	embedded := t.Spec.Postgres.Mode == benchv1alpha1.PostgresEmbedded
 	values := AuthentikTopologyHelmValues{
 		Server: map[string]any{
@@ -145,7 +160,7 @@ func HelmValues(t *benchv1alpha1.AuthentikTopology, secretKey string, pgConn *Po
 	// silently no-ops if nothing is actually listening there.
 	appendEnv := func(w map[string]any, name, value string) {
 		env, _ := w["env"].([]map[string]string)
-		w["env"] = append(env, map[string]string{"name": name, "value": value})
+		w["env"] = append(env, map[string]string{valuesKeyName: name, "value": value})
 	}
 	appendEnv(values.Server, "AUTHENTIK_PYROSCOPE_HOST", pyroscopeHost)
 	appendEnv(values.Worker, "AUTHENTIK_PYROSCOPE_HOST", pyroscopeHost)
@@ -168,6 +183,23 @@ func HelmValues(t *benchv1alpha1.AuthentikTopology, secretKey string, pgConn *Po
 			// HTTP), but harmless to set on both - puts the test name that
 			// caused a request on its spans as http.request.header.*.
 			appendEnv(w, "OTEL_INSTRUMENTATION_HTTP_CAPTURE_HEADERS_SERVER_REQUEST", "x-benchmark-test,x-benchmark-target")
+		}
+	}
+
+	if withBlueprintVolume {
+		const volumeName = "bench-fixtures-blueprint"
+		values.Server["volumes"] = []map[string]any{
+			{valuesKeyName: volumeName, "persistentVolumeClaim": map[string]any{"claimName": BlueprintPVCName(t)}},
+		}
+		values.Server["volumeMounts"] = []map[string]any{
+			// Not read-only: AuthentikTopologyReconciler writes the blueprint
+			// file into this mount itself (see ApplyBlueprint), rather than
+			// the content coming from a mounted ConfigMap - a benchmark-scale
+			// fixture set (thousands of synthetic users) can exceed a
+			// ConfigMap/Secret's ~1MiB etcd-backed size limit, which a PVC
+			// (backed by real disk via the local-path-provisioner every
+			// workload cluster gets) has no equivalent of.
+			{valuesKeyName: volumeName, "mountPath": BlueprintMountPath},
 		}
 	}
 
@@ -196,7 +228,7 @@ func HelmValues(t *benchv1alpha1.AuthentikTopology, secretKey string, pgConn *Po
 		values.Authentik["postgresql"] = map[string]any{
 			"host":            pgConn.Host,
 			"port":            pgConn.Port,
-			"name":            pgConn.Database,
+			valuesKeyName:     pgConn.Database,
 			"user":            pgConn.User,
 			valuesKeyPassword: pgConn.Password,
 		}
@@ -227,6 +259,41 @@ type PostgresConnection struct {
 // status.helmReleaseRef for clarity.
 func HelmReleaseName(t *benchv1alpha1.AuthentikTopology) string {
 	return t.Name
+}
+
+// BlueprintMountPath is where the fixtures blueprint PVC (see
+// withBlueprintVolume on HelmValues) is mounted into the server pod - must
+// stay under authentik's own configured blueprints_dir (verified live:
+// "/blueprints"), since ak apply_blueprint rejects any path outside it.
+const BlueprintMountPath = "/blueprints/custom"
+
+// BlueprintFileName is the file AuthentikTopologyReconciler.ApplyBlueprint
+// writes the blueprint content into, under BlueprintMountPath.
+const BlueprintFileName = "bench-fixtures.yaml"
+
+// BlueprintPVCName is deterministic from the topology name, mirroring
+// HelmReleaseName, so the operator can look it up without storing it.
+func BlueprintPVCName(t *benchv1alpha1.AuthentikTopology) string {
+	return t.Name + "-bench-fixtures"
+}
+
+// BlueprintPVC is the (small - a benchmark-scale blueprint is at most a few
+// MB of YAML) PVC AuthentikTopologyReconciler applies onto the runner
+// cluster before installing the chart, so the server pod has somewhere
+// writable to receive the fixtures blueprint ApplyBlueprint execs in.
+func BlueprintPVC(t *benchv1alpha1.AuthentikTopology) *corev1.PersistentVolumeClaim {
+	return &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      BlueprintPVCName(t),
+			Namespace: t.Spec.Namespace,
+		},
+		Spec: corev1.PersistentVolumeClaimSpec{
+			AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+			Resources: corev1.VolumeResourceRequirements{
+				Requests: corev1.ResourceList{corev1.ResourceStorage: resource.MustParse("256Mi")},
+			},
+		},
+	}
 }
 
 // HelmRelease builds the Flux HelmRelease that installs the authentik chart

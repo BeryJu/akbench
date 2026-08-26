@@ -22,6 +22,7 @@ import (
 
 	helmv2 "github.com/fluxcd/helm-controller/api/v2"
 	sourcev1 "github.com/fluxcd/source-controller/api/v1"
+	corev1 "k8s.io/api/core/v1"
 	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -217,6 +218,15 @@ func specEqual(existing, desired client.Object) bool {
 	case *unstructured.Unstructured:
 		e, ok := existing.(*unstructured.Unstructured)
 		return ok && apiequality.Semantic.DeepEqual(e.Object["spec"], d.Object["spec"])
+	case *corev1.PersistentVolumeClaim:
+		// Treated as always equal (never updated) rather than compared:
+		// most of a PVC's spec is immutable after creation (storage can
+		// only ever be *increased*, via a separate resize flow this
+		// operator doesn't implement, and nothing here renders anything
+		// else). d's own request size is fixed/deterministic, so if one
+		// already exists there's nothing meaningful to reconcile.
+		_, ok := existing.(*corev1.PersistentVolumeClaim)
+		return ok
 	default:
 		return false
 	}

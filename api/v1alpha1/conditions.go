@@ -27,6 +27,10 @@ const (
 	// ConditionHelmReleaseReady mirrors the status of the HelmRelease an
 	// AuthentikTopology owns.
 	ConditionHelmReleaseReady = "HelmReleaseReady"
+	// ConditionBlueprintApplied is True once the fixtures blueprint (if any
+	// is configured) has been applied against this topology's authentik
+	// instance - True with no work done if none is configured.
+	ConditionBlueprintApplied = "BlueprintApplied"
 	// ConditionTopologyReady is True once a TestCase's AuthentikTopology is
 	// itself Ready.
 	ConditionTopologyReady = "TopologyReady"

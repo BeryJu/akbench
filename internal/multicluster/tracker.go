@@ -24,6 +24,7 @@ package multicluster
 import (
 	"context"
 
+	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -69,4 +70,11 @@ func SetupWithManager(ctx context.Context, mgr ctrl.Manager) (*Tracker, error) {
 // namespace as the bench.goauthentik.io object naming it via clusterRef).
 func (t *Tracker) GetClient(ctx context.Context, cluster client.ObjectKey) (client.Client, error) {
 	return t.cache.GetClient(ctx, cluster)
+}
+
+// GetRESTConfig returns a raw REST config for the named Cluster - for
+// callers that need something a controller-runtime client.Client can't do
+// (pod exec, in this operator's case), not for general reads/writes.
+func (t *Tracker) GetRESTConfig(ctx context.Context, cluster client.ObjectKey) (*rest.Config, error) {
+	return t.cache.GetRESTConfig(ctx, cluster)
 }

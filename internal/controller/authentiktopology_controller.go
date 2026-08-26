@@ -24,16 +24,20 @@ import (
 
 	helmv2 "github.com/fluxcd/helm-controller/api/v2"
 	corev1 "k8s.io/api/core/v1"
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
 	"github.com/goauthentik/authentik-bench/internal/multicluster"
@@ -79,8 +83,12 @@ func kubeconfigSecretName(clusterName string) string {
 // controller generates move with clusterRef.
 type AuthentikTopologyReconciler struct {
 	client.Client
-	Scheme  *runtime.Scheme
-	Tracker *multicluster.Tracker
+	Scheme *runtime.Scheme
+	// RESTConfig is the management cluster's own config (mgr.GetConfig()) -
+	// resolveRESTConfig's answer when spec.clusterRef is empty, the same
+	// split resolveClient makes for the controller-runtime client.
+	RESTConfig *rest.Config
+	Tracker    *multicluster.Tracker
 }
 
 // resolveClient returns the client this reconcile should use for
@@ -99,6 +107,134 @@ func (r *AuthentikTopologyReconciler) resolveClient(ctx context.Context, topo *b
 	return r.Tracker.GetClient(ctx, client.ObjectKey{Namespace: topo.Namespace, Name: topo.Spec.ClusterRef.Name})
 }
 
+// resolveRESTConfig is resolveClient's counterpart for ApplyBlueprint, which
+// needs a raw REST config (for pod exec) rather than a controller-runtime
+// client - always the same cluster resolveClient itself would pick.
+func (r *AuthentikTopologyReconciler) resolveRESTConfig(ctx context.Context, topo *benchv1alpha1.AuthentikTopology) (*rest.Config, error) {
+	if topo.Spec.ClusterRef.Name == "" {
+		return r.RESTConfig, nil
+	}
+	if r.Tracker == nil {
+		return nil, fmt.Errorf("multicluster tracker not configured")
+	}
+	return r.Tracker.GetRESTConfig(ctx, client.ObjectKey{Namespace: topo.Namespace, Name: topo.Spec.ClusterRef.Name})
+}
+
+// resolveFixturesBlueprint looks up the fixtures blueprint ConfigMap, which,
+// like extraValuesRef, always lives alongside the AuthentikTopology object
+// itself (topo.Namespace on the management cluster) rather than on rc -
+// `make fixtures` writes it there, and it's config for the deployment, not
+// part of it. Optional: a topology with none configured just skips
+// blueprint application entirely (fixtures are a dev/benchmark convenience,
+// not required). When one is configured, also applies the PVC the chart's
+// server pod will mount it into (see render.HelmValues' withBlueprintVolume)
+// before the caller renders values referencing it.
+func (r *AuthentikTopologyReconciler) resolveFixturesBlueprint(ctx context.Context, rc client.Client, topo *benchv1alpha1.AuthentikTopology) (bool, corev1.ConfigMap, error) {
+	var cm corev1.ConfigMap
+	if err := r.Get(ctx, types.NamespacedName{Name: fixturesBlueprintConfigMapName, Namespace: topo.Namespace}, &cm); err != nil {
+		if apierrors.IsNotFound(err) {
+			return false, cm, nil
+		}
+		return false, cm, fmt.Errorf("get fixtures blueprint configmap: %w", err)
+	}
+	if err := applyUnowned(ctx, rc, render.BlueprintPVC(topo)); err != nil {
+		return false, cm, fmt.Errorf("apply blueprint PVC: %w", err)
+	}
+	return true, cm, nil
+}
+
+// applyExtraValues merges topo.Spec.Authentik.ExtraValuesRef's ConfigMap
+// (which, like the fixtures blueprint ConfigMap, always lives alongside the
+// AuthentikTopology object itself rather than on rc) over values, if one is
+// referenced. done=true means the caller should return (result, err)
+// immediately - either a real error, or this reconcile already updated
+// status itself (a not-yet-existing ConfigMap requeues on a timer; invalid
+// YAML doesn't, since the extra-values API always touches the topology
+// object on save, which re-triggers this reconcile as soon as the user
+// corrects it).
+func (r *AuthentikTopologyReconciler) applyExtraValues(ctx context.Context, topo *benchv1alpha1.AuthentikTopology, values *apiextensionsv1.JSON) (*apiextensionsv1.JSON, ctrl.Result, bool, error) {
+	ref := topo.Spec.Authentik.ExtraValuesRef
+	if ref == nil || ref.Name == "" {
+		return values, ctrl.Result{}, false, nil
+	}
+	var cm corev1.ConfigMap
+	if err := r.Get(ctx, types.NamespacedName{Name: ref.Name, Namespace: topo.Namespace}, &cm); err != nil {
+		if apierrors.IsNotFound(err) {
+			setCondition(&topo.Status.Conditions, topo.Generation, benchv1alpha1.ConditionReady, metav1.ConditionFalse,
+				benchv1alpha1.ReasonDependencyNotReady, fmt.Sprintf("extraValuesRef ConfigMap %q not found", ref.Name))
+			if err := r.Status().Update(ctx, topo); err != nil {
+				return nil, ctrl.Result{}, true, err
+			}
+			return nil, ctrl.Result{RequeueAfter: 5 * time.Second}, true, nil
+		}
+		return nil, ctrl.Result{}, true, fmt.Errorf("get extra values configmap: %w", err)
+	}
+	merged, err := render.MergeExtraValues(values, cm.Data["values.yaml"])
+	if err != nil {
+		setCondition(&topo.Status.Conditions, topo.Generation, benchv1alpha1.ConditionReady, metav1.ConditionFalse,
+			benchv1alpha1.ReasonReconcileError, fmt.Sprintf("invalid extraValuesRef YAML: %v", err))
+		return nil, ctrl.Result{}, true, r.Status().Update(ctx, topo)
+	}
+	return merged, ctrl.Result{}, false, nil
+}
+
+// helmReleaseReadiness mirrors hr's own Ready condition - but only once
+// helm-controller has actually observed the exact spec (generation) this
+// reconcile just applied. Without that check, a Ready=True left over from
+// the *previous* generation reads as ready immediately after this reconcile
+// pushes a new one - fine for the Ready condition alone (self-corrects next
+// reconcile), but reconcileBlueprint acts on this signal synchronously via
+// pod exec, and raced a rolling update this way: it read a stale Ready=True
+// from before a spec change added the fixtures volume mount, and exec'd
+// into whichever pod happened to still be running - the old one, without
+// the mount ("Directory nonexistent"), not the new one the still-in-flight
+// rollout was replacing it with.
+func (r *AuthentikTopologyReconciler) helmReleaseReadiness(ctx context.Context, hr *helmv2.HelmRelease) (metav1.ConditionStatus, string, error) {
+	var existing helmv2.HelmRelease
+	if err := r.Get(ctx, types.NamespacedName{Name: hr.Name, Namespace: hr.Namespace}, &existing); err != nil {
+		if apierrors.IsNotFound(err) {
+			return metav1.ConditionFalse, "waiting for helm-controller to reconcile", nil
+		}
+		return metav1.ConditionFalse, "", fmt.Errorf("get HelmRelease: %w", err)
+	}
+	if existing.Status.ObservedGeneration != existing.Generation {
+		return metav1.ConditionFalse, "waiting for helm-controller to observe the latest spec", nil
+	}
+	cond := meta.FindStatusCondition(existing.Status.Conditions, "Ready")
+	if cond == nil {
+		return metav1.ConditionFalse, "waiting for helm-controller to reconcile", nil
+	}
+	if cond.Status == metav1.ConditionTrue {
+		return metav1.ConditionTrue, "HelmRelease is Ready", nil
+	}
+	return metav1.ConditionFalse, cond.Message, nil
+}
+
+// reconcileBlueprint applies the fixtures blueprint (if any is configured)
+// once the HelmRelease itself is Ready (a server pod actually exists to
+// exec into), returning the BlueprintApplied condition to set and whether
+// the caller should requeue on a timer to retry a transient failure. A
+// topology with no blueprint configured reports Ready with nothing done, so
+// it never blocks the overall Ready condition.
+func (r *AuthentikTopologyReconciler) reconcileBlueprint(ctx context.Context, rc client.Client, topo *benchv1alpha1.AuthentikTopology,
+	hasBlueprint bool, helmReleaseReady metav1.ConditionStatus, blueprintCM corev1.ConfigMap) (metav1.ConditionStatus, string, bool) {
+	switch {
+	case !hasBlueprint:
+		return metav1.ConditionTrue, "no fixtures blueprint configured", false
+	case helmReleaseReady != metav1.ConditionTrue:
+		return metav1.ConditionFalse, "waiting for the HelmRelease to be Ready before applying the fixtures blueprint", false
+	}
+
+	restConfig, err := r.resolveRESTConfig(ctx, topo)
+	if err != nil {
+		return metav1.ConditionFalse, fmt.Sprintf("waiting for cluster to be reachable: %v", err), true
+	}
+	if err := r.ApplyBlueprint(ctx, restConfig, rc, topo, []byte(blueprintCM.Data[fixturesBlueprintKey])); err != nil {
+		return metav1.ConditionFalse, err.Error(), true
+	}
+	return metav1.ConditionTrue, "fixtures blueprint applied", false
+}
+
 // +kubebuilder:rbac:groups=bench.goauthentik.io,resources=authentiktopologies,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=bench.goauthentik.io,resources=authentiktopologies/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=bench.goauthentik.io,resources=authentiktopologies/finalizers,verbs=update
@@ -108,6 +244,9 @@ func (r *AuthentikTopologyReconciler) resolveClient(ctx context.Context, topo *b
 // +kubebuilder:rbac:groups=core,resources=namespaces,verbs=get;list;watch;create;delete
 // +kubebuilder:rbac:groups=core,resources=secrets,verbs=get;list;watch;create;update
 // +kubebuilder:rbac:groups=core,resources=configmaps,verbs=get;list;watch
+// +kubebuilder:rbac:groups=core,resources=persistentvolumeclaims,verbs=get;list;watch;create;update
+// +kubebuilder:rbac:groups=core,resources=pods,verbs=get;list;watch
+// +kubebuilder:rbac:groups=core,resources=pods/exec,verbs=create
 
 func (r *AuthentikTopologyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
@@ -182,40 +321,21 @@ func (r *AuthentikTopologyReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	if tracingEndpoint == "" {
 		tracingEndpoint = defaultTracingEndpoint
 	}
-	values, err := render.HelmValues(&topo, secretKey, pgConn, pyroscopeHost, tracingEndpoint)
+
+	hasBlueprint, blueprintCM, err := r.resolveFixturesBlueprint(ctx, rc, &topo)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+
+	values, err := render.HelmValues(&topo, secretKey, pgConn, pyroscopeHost, tracingEndpoint, hasBlueprint)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("build helm values: %w", err)
 	}
-	if ref := topo.Spec.Authentik.ExtraValuesRef; ref != nil && ref.Name != "" {
-		// The extra-values ConfigMap always lives alongside the
-		// AuthentikTopology object itself (the management cluster, in
-		// topo.Namespace), not on rc: it's config for the deployment, not
-		// part of the deployment, and reading it locally means this works
-		// the same way regardless of clusterRef.
-		var cm corev1.ConfigMap
-		if err := r.Get(ctx, types.NamespacedName{Name: ref.Name, Namespace: topo.Namespace}, &cm); err != nil {
-			if apierrors.IsNotFound(err) {
-				setCondition(&topo.Status.Conditions, topo.Generation, benchv1alpha1.ConditionReady, metav1.ConditionFalse,
-					benchv1alpha1.ReasonDependencyNotReady, fmt.Sprintf("extraValuesRef ConfigMap %q not found", ref.Name))
-				if err := r.Status().Update(ctx, &topo); err != nil {
-					return ctrl.Result{}, err
-				}
-				return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
-			}
-			return ctrl.Result{}, fmt.Errorf("get extra values configmap: %w", err)
-		}
-		merged, err := render.MergeExtraValues(values, cm.Data["values.yaml"])
-		if err != nil {
-			// A bad YAML edit is a user-fixable input error, not something
-			// to retry on a timer - the extra-values API always touches the
-			// topology object on save, which re-triggers this reconcile as
-			// soon as the user corrects it.
-			setCondition(&topo.Status.Conditions, topo.Generation, benchv1alpha1.ConditionReady, metav1.ConditionFalse,
-				benchv1alpha1.ReasonReconcileError, fmt.Sprintf("invalid extraValuesRef YAML: %v", err))
-			return ctrl.Result{}, r.Status().Update(ctx, &topo)
-		}
-		values = merged
+	merged, result, done, err := r.applyExtraValues(ctx, &topo, values)
+	if done {
+		return result, err
 	}
+	values = merged
 	kubeConfigSecretName := ""
 	if topo.Spec.ClusterRef.Name != "" {
 		kubeConfigSecretName = kubeconfigSecretName(topo.Spec.ClusterRef.Name)
@@ -225,20 +345,9 @@ func (r *AuthentikTopologyReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		return ctrl.Result{}, fmt.Errorf("apply HelmRelease: %w", err)
 	}
 
-	var existing helmv2.HelmRelease
-	helmReleaseReady := metav1.ConditionFalse
-	helmReleaseMessage := "waiting for helm-controller to reconcile"
-	if err := r.Get(ctx, types.NamespacedName{Name: hr.Name, Namespace: hr.Namespace}, &existing); err != nil {
-		if !apierrors.IsNotFound(err) {
-			return ctrl.Result{}, fmt.Errorf("get HelmRelease: %w", err)
-		}
-	} else if cond := meta.FindStatusCondition(existing.Status.Conditions, "Ready"); cond != nil {
-		if cond.Status == metav1.ConditionTrue {
-			helmReleaseReady = metav1.ConditionTrue
-			helmReleaseMessage = "HelmRelease is Ready"
-		} else {
-			helmReleaseMessage = cond.Message
-		}
+	helmReleaseReady, helmReleaseMessage, err := r.helmReleaseReadiness(ctx, hr)
+	if err != nil {
+		return ctrl.Result{}, err
 	}
 	setCondition(&topo.Status.Conditions, topo.Generation, benchv1alpha1.ConditionHelmReleaseReady, helmReleaseReady,
 		benchv1alpha1.ReasonReady, helmReleaseMessage)
@@ -247,18 +356,30 @@ func (r *AuthentikTopologyReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	topo.Status.ServiceEndpoint = render.ServiceEndpoint(&topo)
 	topo.Status.ObservedGeneration = topo.Generation
 
-	if helmReleaseReady == metav1.ConditionTrue {
+	blueprintReady, blueprintMessage, requeueForBlueprint := r.reconcileBlueprint(ctx, rc, &topo, hasBlueprint, helmReleaseReady, blueprintCM)
+	setCondition(&topo.Status.Conditions, topo.Generation, benchv1alpha1.ConditionBlueprintApplied, blueprintReady,
+		benchv1alpha1.ReasonReady, blueprintMessage)
+
+	ready := helmReleaseReady == metav1.ConditionTrue && blueprintReady == metav1.ConditionTrue
+	if ready {
 		setCondition(&topo.Status.Conditions, topo.Generation, benchv1alpha1.ConditionReady, metav1.ConditionTrue,
 			benchv1alpha1.ReasonReady, "authentik chart installed and ready")
 	} else {
+		msg := helmReleaseMessage
+		if helmReleaseReady == metav1.ConditionTrue {
+			msg = blueprintMessage
+		}
 		setCondition(&topo.Status.Conditions, topo.Generation, benchv1alpha1.ConditionReady, metav1.ConditionFalse,
-			benchv1alpha1.ReasonReconciling, helmReleaseMessage)
+			benchv1alpha1.ReasonReconciling, msg)
 	}
 
 	if err := r.Status().Update(ctx, &topo); err != nil {
 		return ctrl.Result{}, err
 	}
-	log.Info("reconciled AuthentikTopology", "ready", helmReleaseReady)
+	log.Info("reconciled AuthentikTopology", "ready", ready)
+	if requeueForBlueprint {
+		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+	}
 	return ctrl.Result{}, nil
 }
 
@@ -447,6 +568,32 @@ func (r *AuthentikTopologyReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&benchv1alpha1.AuthentikTopology{}).
 		Owns(&helmv2.HelmRelease{}).
+		// Without this, a topology whose extraValuesRef/fixtures blueprint
+		// ConfigMap didn't exist yet only notices it was created on its own
+		// next unrelated reconcile - the same staleness TestCaseReconciler's
+		// AuthentikTopology watch fixes, just one hop earlier: fixturesCM's
+		// creation (`make fixtures`, run any time after the topology
+		// already exists) doesn't touch the topology at all on its own.
+		Watches(&corev1.ConfigMap{}, handler.EnqueueRequestsFromMapFunc(r.topologiesForConfigMap)).
 		Named("authentiktopology").
 		Complete(r)
+}
+
+// topologiesForConfigMap maps a changed ConfigMap to every AuthentikTopology
+// in the same namespace that references it - by name, for the fixtures
+// blueprint (a fixed name every topology in a namespace shares), or via
+// spec.authentik.extraValuesRef for a topology-specific one.
+func (r *AuthentikTopologyReconciler) topologiesForConfigMap(ctx context.Context, cm client.Object) []reconcile.Request {
+	var list benchv1alpha1.AuthentikTopologyList
+	if err := r.List(ctx, &list, client.InNamespace(cm.GetNamespace())); err != nil {
+		return nil
+	}
+	var reqs []reconcile.Request
+	for _, topo := range list.Items {
+		ref := topo.Spec.Authentik.ExtraValuesRef
+		if cm.GetName() == fixturesBlueprintConfigMapName || (ref != nil && ref.Name == cm.GetName()) {
+			reqs = append(reqs, reconcile.Request{NamespacedName: types.NamespacedName{Name: topo.Name, Namespace: topo.Namespace}})
+		}
+	}
+	return reqs
 }

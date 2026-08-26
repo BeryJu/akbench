@@ -32,7 +32,7 @@ func decodeValues(t *testing.T, raw json.RawMessage) AuthentikTopologyHelmValues
 
 func TestHelmValuesEmbedded(t *testing.T) {
 	topo := exampleTopology()
-	raw, err := HelmValues(topo, "the-secret-key", &PostgresConnection{Password: "pw"}, "http://pyroscope.example:4040", "http://tempo.example:4318")
+	raw, err := HelmValues(topo, "the-secret-key", &PostgresConnection{Password: "pw"}, "http://pyroscope.example:4040", "http://tempo.example:4318", false)
 	if err != nil {
 		t.Fatalf("HelmValues: %v", err)
 	}
@@ -72,7 +72,7 @@ func TestHelmValuesEmbedded(t *testing.T) {
 func TestHelmValuesPlacementUsesGlobalAffinityPreset(t *testing.T) {
 	topo := exampleTopology()
 	topo.Spec.Placement = benchv1alpha1.PlacementSpec{Mode: benchv1alpha1.PlacementDedicated}
-	raw, err := HelmValues(topo, "secret", &PostgresConnection{Password: "pw"}, "http://pyroscope.example:4040", "http://tempo.example:4318")
+	raw, err := HelmValues(topo, "secret", &PostgresConnection{Password: "pw"}, "http://pyroscope.example:4040", "http://tempo.example:4318", false)
 	if err != nil {
 		t.Fatalf("HelmValues: %v", err)
 	}
@@ -98,7 +98,7 @@ func TestHelmValuesPlacementUsesGlobalAffinityPreset(t *testing.T) {
 func TestHelmValuesPacked(t *testing.T) {
 	topo := exampleTopology()
 	topo.Spec.Placement = benchv1alpha1.PlacementSpec{Mode: benchv1alpha1.PlacementPacked}
-	raw, err := HelmValues(topo, "secret", &PostgresConnection{Password: "pw"}, "http://pyroscope.example:4040", "http://tempo.example:4318")
+	raw, err := HelmValues(topo, "secret", &PostgresConnection{Password: "pw"}, "http://pyroscope.example:4040", "http://tempo.example:4318", false)
 	if err != nil {
 		t.Fatalf("HelmValues: %v", err)
 	}
@@ -135,7 +135,7 @@ func TestHelmValuesExternalDisablesBundledPostgres(t *testing.T) {
 	}
 	raw, err := HelmValues(topo, "secret", &PostgresConnection{
 		Host: "pg.example.com", Port: 5432, Database: "authentik", User: "authentik", Password: "s3cret",
-	}, "http://pyroscope.example:4040", "http://tempo.example:4318")
+	}, "http://pyroscope.example:4040", "http://tempo.example:4318", false)
 	if err != nil {
 		t.Fatalf("HelmValues: %v", err)
 	}
@@ -155,7 +155,7 @@ func TestHelmValuesExternalDisablesBundledPostgres(t *testing.T) {
 
 func TestHelmReleaseUsesExplicitReleaseName(t *testing.T) {
 	topo := exampleTopology()
-	raw, err := HelmValues(topo, "secret", nil, "http://pyroscope.example:4040", "http://tempo.example:4318")
+	raw, err := HelmValues(topo, "secret", nil, "http://pyroscope.example:4040", "http://tempo.example:4318", false)
 	if err != nil {
 		t.Fatalf("HelmValues: %v", err)
 	}
@@ -198,7 +198,7 @@ func envValue(t *testing.T, w map[string]any, name string) (string, bool) {
 // matching the Ansible harness this project replaces).
 func TestHelmValuesPyroscopeAlwaysSet(t *testing.T) {
 	topo := exampleTopology()
-	raw, err := HelmValues(topo, "secret", &PostgresConnection{Password: "pw"}, "http://pyroscope.example:4040", "http://tempo.example:4318")
+	raw, err := HelmValues(topo, "secret", &PostgresConnection{Password: "pw"}, "http://pyroscope.example:4040", "http://tempo.example:4318", false)
 	if err != nil {
 		t.Fatalf("HelmValues: %v", err)
 	}
@@ -246,7 +246,7 @@ func TestHelmValuesTracingOnlyWhenErrorReportingEnabled(t *testing.T) {
 
 func mustValues(t *testing.T, topo *benchv1alpha1.AuthentikTopology) AuthentikTopologyHelmValues {
 	t.Helper()
-	raw, err := HelmValues(topo, "secret", &PostgresConnection{Password: "pw"}, "http://pyroscope.example:4040", "http://tempo.example:4318")
+	raw, err := HelmValues(topo, "secret", &PostgresConnection{Password: "pw"}, "http://pyroscope.example:4040", "http://tempo.example:4318", false)
 	if err != nil {
 		t.Fatalf("HelmValues: %v", err)
 	}

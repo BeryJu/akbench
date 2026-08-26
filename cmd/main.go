@@ -199,9 +199,10 @@ func main() {
 	}
 
 	if err := (&controller.AuthentikTopologyReconciler{
-		Client:  mgr.GetClient(),
-		Scheme:  mgr.GetScheme(),
-		Tracker: tracker,
+		Client:     mgr.GetClient(),
+		Scheme:     mgr.GetScheme(),
+		RESTConfig: mgr.GetConfig(),
+		Tracker:    tracker,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "authentiktopology")
 		os.Exit(1)
