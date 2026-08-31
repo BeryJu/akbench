@@ -64,24 +64,33 @@ Implemented so far:
 - **Fixtures**: `fixtures/gen-blueprint.py` ported unchanged.
 - **Web UI**: `internal/api` is a REST/JSON backend (chi router, bearer-token
   auth) that CRUDs all four CRDs as unstructured objects (the CRD schema
-  stays the single source of truth), proxies PromQL for the compare view,
-  and builds allowlisted Grafana embed URLs - deployed in-cluster
-  (`make deploy-apiserver`, `hack/dev-apiserver.yaml`). The UI itself is
-  [Headlamp](https://headlamp.dev) (`make headlamp`,
-  `hack/dev-headlamp-values.yaml`) plus `web/headlamp-plugin`, a custom
-  plugin for exactly what Headlamp has no native concept of - running a
-  TestCase and charting `/metrics/range`/`/metrics/compare` - reached
-  through Headlamp's own `ApiProxy` (a Kubernetes API Service-proxy call,
-  not a browser-direct one). Everything else (listing/creating/editing every
-  CRD, pod logs, events, multi-cluster switching across every
-  CAPI-provisioned `WorkloadCluster`) is Headlamp's own generic Kubernetes
-  UI - see `HeadlampKubeconfigReconciler` for how every `WorkloadCluster`
-  becomes a switchable cluster automatically.
+  stays the single source of truth), proxies PromQL for the compare view
+  (resolved per-testid against whichever cluster's own Prometheus actually
+  has that data - see `prometheusURLForTestID`), and builds allowlisted
+  Grafana embed URLs - deployed in-cluster (`make deploy-apiserver`,
+  `hack/dev-apiserver.yaml`). The UI itself is [Headlamp](https://headlamp.dev)
+  (`make headlamp`, `hack/dev-headlamp-values.yaml`) plus
+  `web/headlamp-plugin`, a custom plugin (guided create/edit forms for all
+  four CRDs, a Compare page, a TestRuns history page, and metrics charting)
+  for what Headlamp has no native concept of, reached through Headlamp's own
+  `ApiProxy` (a Kubernetes API Service-proxy call, not a browser-direct one).
+  `make headlamp-plugin` copies a fresh build straight into the running pod
+  for fast dev-loop iteration (wiped on a Headlamp pod restart);
+  `make deploy-headlamp-plugin` bakes it into an image installed as a
+  Headlamp initContainer instead, so it survives one. Everything else
+  (listing/creating/editing every CRD as raw YAML, pod logs, events,
+  multi-cluster switching across every CAPI-provisioned `WorkloadCluster`) is
+  Headlamp's own generic Kubernetes UI - see `HeadlampKubeconfigReconciler`
+  for how every `WorkloadCluster` becomes a switchable cluster automatically.
 
-Not yet implemented (see the plan's milestones): the mTLS central metrics
-receiver, and Flux-managed GitOps for the metrics stack itself (dashboard
-JSON already lives in `gitops/dashboards/`, not yet wired to a Flux
-Kustomization).
+Not yet implemented (see the plan's milestones): a central,
+mTLS-secured metrics receiver. Each workload cluster instead runs its own
+Prometheus/Pyroscope/Tempo (`WorkloadClusterReconciler`'s `ensurePrometheus`/
+`ensurePyroscope`/`ensureTempo`), reachable from the management cluster
+directly (a management-cluster pod can reach a workload cluster's node IP;
+the reverse can't) rather than through a shared central pipeline. Also not
+yet wired up: Flux-managed GitOps for this stack (dashboard JSON already
+lives in `gitops/dashboards/`, not yet wired to a Flux Kustomization).
 
 ### Running the tests
 

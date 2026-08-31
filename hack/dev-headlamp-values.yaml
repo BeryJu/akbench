@@ -16,11 +16,23 @@ config:
   inCluster: false
   pluginsDir: /headlamp/plugins
 
-# Populated by `make headlamp-plugin` (web/headlamp-plugin's own build,
-# copied into ./dist locally) via an initContainer that copies the built
-# plugin (and, once added, the Cluster API plugin) into the shared
-# pluginsDir emptyDir - wired up once web/headlamp-plugin exists.
-initContainers: []
+# Copies the plugin (baked into an image by web/headlamp-plugin/Dockerfile)
+# into the shared pluginsDir emptyDir on every pod start, so it survives a
+# Headlamp pod restart - unlike `make headlamp-plugin`
+# (hack/build-headlamp-plugin.sh), which kubectl cp's straight into a
+# running pod's emptyDir for fast dev-loop iteration but is wiped the
+# moment that pod restarts. Deployed by `make deploy-headlamp-plugin`
+# (hack/deploy-headlamp-plugin.sh), which builds+loads the image and
+# substitutes its unique tag in place of the "dev" placeholder below (see
+# hack/deploy-apiserver.sh for why a unique tag rather than a fixed one -
+# minikube's own image cache doesn't reliably replace same-tag content).
+initContainers:
+  - name: authentik-bench-plugin
+    image: authentik-bench-headlamp-plugin:dev
+    imagePullPolicy: IfNotPresent
+    volumeMounts:
+      - name: plugins
+        mountPath: /headlamp/plugins
 volumes:
   - name: plugins
     emptyDir: {}
