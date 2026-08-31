@@ -69,9 +69,10 @@ import { ClusterCreatePage, ClusterEditPage, ClustersPage } from './ClustersPage
 import { ComparePage } from './ComparePage';
 import { DashboardPage } from './DashboardPage';
 import { TestCaseSection, TopologySection } from './DetailSections';
-import { TestCaseCreatePage, TestCaseEditPage, TestCasesPage } from './TestCasesPage';
-import { TopologiesPage,TopologyCreatePage, TopologyEditPage } from './TopologiesPage';
 import { registerAuthentikIcon } from "./icon";
+import { TestCaseCreatePage, TestCaseEditPage, TestCasesPage } from './TestCasesPage';
+import { TestRunsPage } from './TestRunsPage';
+import { TopologiesPage,TopologyCreatePage, TopologyEditPage } from './TopologiesPage';
 
 const HOME_SIDEBAR = 'HOME';
 
@@ -195,6 +196,22 @@ registerRoute({
   useClusterURL: false,
   noAuthRequired: true,
   component: () => <ClusterEditPage />,
+});
+
+registerSidebarEntry({
+  parent: 'authentik-bench',
+  name: 'authentik-bench-testruns',
+  label: 'Test runs',
+  url: '/authentik-bench/testruns',
+});
+registerRoute({
+  path: '/authentik-bench/testruns',
+  sidebar: { item: 'authentik-bench-testruns', sidebar: HOME_SIDEBAR },
+  name: 'authentik-bench-testruns',
+  exact: true,
+  useClusterURL: false,
+  noAuthRequired: true,
+  component: () => <TestRunsPage />,
 });
 
 registerSidebarEntry({
