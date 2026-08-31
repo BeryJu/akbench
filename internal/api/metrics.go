@@ -27,6 +27,10 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"k8s.io/apimachinery/pkg/types"
+
+	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
 )
 
 // CompareMetric is one column of the test-comparison table. The queries are
@@ -110,10 +114,56 @@ const queryParam = "query"
 // through to its own error message).
 const promStatusSuccess = "success"
 
-// proxyQuery forwards a PromQL query to the central Prometheus. Only the
-// parameters below are passed through, and only the two query endpoints are
-// reachable, so this stays a query proxy rather than a general-purpose hole
-// through to Prometheus' admin API.
+// prometheusURLForTestID resolves which Prometheus actually has a given
+// testid's data: a TestCase's object name *is* its k6 testid, and every
+// TestCase drives a Topology that (via its own or the TestCase's
+// runnerClusterRef override) runs on either the management cluster
+// (s.cfg.PrometheusURL, unchanged from before) or a WorkloadCluster - which,
+// since WorkloadClusterReconciler's ensurePrometheus runs, has its own
+// Prometheus reachable at status.prometheusURL. A management-cluster pod
+// can reach a workload cluster's node IP directly (confirmed live - the
+// reverse can't), which is what makes that URL usable from here at all.
+//
+// Falls back to s.cfg.PrometheusURL on any resolution failure (the TestCase/
+// Topology/WorkloadCluster was deleted, or the WorkloadCluster hasn't
+// reconciled a PrometheusURL yet) rather than erroring outright - historical
+// data for a since-deleted test is still worth trying to show, and an
+// empty fallback surfaces the same "no Prometheus configured" 502 a caller
+// already knows how to read.
+func (s *Server) prometheusURLForTestID(ctx context.Context, testid string) string {
+	var tc benchv1alpha1.TestCase
+	if err := s.client.Get(ctx, types.NamespacedName{Name: testid, Namespace: s.cfg.Namespace}, &tc); err != nil {
+		return s.cfg.PrometheusURL
+	}
+
+	clusterRef := tc.Spec.RunnerClusterRef
+	if clusterRef == nil {
+		var topo benchv1alpha1.AuthentikTopology
+		key := types.NamespacedName{Name: tc.Spec.TopologyRef.Name, Namespace: s.cfg.Namespace}
+		if err := s.client.Get(ctx, key, &topo); err != nil {
+			return s.cfg.PrometheusURL
+		}
+		clusterRef = &topo.Spec.ClusterRef
+	}
+	if clusterRef.Name == "" {
+		return s.cfg.PrometheusURL
+	}
+
+	var wc benchv1alpha1.WorkloadCluster
+	key := types.NamespacedName{Name: clusterRef.Name, Namespace: s.cfg.Namespace}
+	if err := s.client.Get(ctx, key, &wc); err != nil || wc.Status.PrometheusURL == "" {
+		return s.cfg.PrometheusURL
+	}
+	return wc.Status.PrometheusURL
+}
+
+// proxyQuery forwards a PromQL query to the management cluster's own
+// Prometheus. Only the parameters below are passed through, and only the
+// two query endpoints are reachable, so this stays a query proxy rather
+// than a general-purpose hole through to Prometheus' admin API. Unlike
+// compare/metricsRange, this endpoint takes no testids to resolve a
+// per-workload-cluster Prometheus from, so it can only ever reach the one
+// central to the management cluster.
 func (s *Server) proxyQuery(w http.ResponseWriter, r *http.Request) {
 	if s.cfg.PrometheusURL == "" {
 		writeError(w, r, http.StatusServiceUnavailable, "no Prometheus configured")
@@ -141,7 +191,7 @@ func (s *Server) proxyQuery(w http.ResponseWriter, r *http.Request) {
 		params.Set("time", ts)
 	}
 
-	resp, err := s.promGet(r.Context(), path, params)
+	resp, err := s.promGet(r.Context(), s.cfg.PrometheusURL, path, params)
 	if err != nil {
 		writeError(w, r, http.StatusBadGateway, err.Error())
 		return
@@ -183,10 +233,6 @@ type compareResponse struct {
 // the numeric half of the compare view (the other half being an embedded
 // Grafana dashboard).
 func (s *Server) compare(w http.ResponseWriter, r *http.Request) {
-	if s.cfg.PrometheusURL == "" {
-		writeError(w, r, http.StatusServiceUnavailable, "no Prometheus configured")
-		return
-	}
 	raw := r.URL.Query().Get("testids")
 	if raw == "" {
 		writeError(w, r, http.StatusBadRequest, "testids is required")
@@ -221,6 +267,7 @@ func (s *Server) compare(w http.ResponseWriter, r *http.Request) {
 
 	resp := compareResponse{Window: window, Metrics: compareMetrics}
 	for _, id := range testids {
+		baseURL := s.prometheusURLForTestID(r.Context(), id)
 		row := CompareResult{TestID: id, Values: map[string]float64{}}
 		selector := fmt.Sprintf("testid=%q", id)
 		for _, m := range compareMetrics {
@@ -230,7 +277,7 @@ func (s *Server) compare(w http.ResponseWriter, r *http.Request) {
 			} else {
 				query = fmt.Sprintf(query, selector)
 			}
-			value, ok, err := s.promInstant(r.Context(), query, at)
+			value, ok, err := s.promInstant(r.Context(), baseURL, query, at)
 			if err != nil {
 				writeError(w, r, http.StatusBadGateway, err.Error())
 				return
@@ -269,10 +316,6 @@ type rangeResponse struct {
 // runs as a self-healing Deployment rather than a one-shot Job, so its only
 // record of what happened is whatever Prometheus still retains.
 func (s *Server) metricsRange(w http.ResponseWriter, r *http.Request) {
-	if s.cfg.PrometheusURL == "" {
-		writeError(w, r, http.StatusServiceUnavailable, "no Prometheus configured")
-		return
-	}
 	q := r.URL.Query()
 
 	raw := q.Get("testids")
@@ -334,6 +377,7 @@ func (s *Server) metricsRange(w http.ResponseWriter, r *http.Request) {
 
 	resp := rangeResponse{Metric: *metric}
 	for _, id := range testids {
+		baseURL := s.prometheusURLForTestID(r.Context(), id)
 		selector := fmt.Sprintf("testid=%q", id)
 		query := metric.Query
 		if strings.Count(query, "%s") == 2 {
@@ -341,7 +385,7 @@ func (s *Server) metricsRange(w http.ResponseWriter, r *http.Request) {
 		} else {
 			query = fmt.Sprintf(query, selector)
 		}
-		points, err := s.promRange(r.Context(), query, start, end, step)
+		points, err := s.promRange(r.Context(), baseURL, query, start, end, step)
 		if err != nil {
 			writeError(w, r, http.StatusBadGateway, err.Error())
 			return
@@ -368,9 +412,9 @@ type promMatrixResponse struct {
 
 // promRange runs a range query and returns its single series, dropping
 // non-finite samples the same way promInstant drops a NaN quantile.
-func (s *Server) promRange(ctx context.Context, query, start, end, step string) ([]RangePoint, error) {
+func (s *Server) promRange(ctx context.Context, baseURL, query, start, end, step string) ([]RangePoint, error) {
 	params := url.Values{queryParam: {query}, "start": {start}, "end": {end}, "step": {step}}
-	resp, err := s.promGet(ctx, "/api/v1/query_range", params)
+	resp, err := s.promGet(ctx, baseURL, "/api/v1/query_range", params)
 	if err != nil {
 		return nil, err
 	}
@@ -412,9 +456,12 @@ func (s *Server) promRange(ctx context.Context, query, start, end, step string) 
 	return points, nil
 }
 
-func (s *Server) promGet(ctx context.Context, path string, params url.Values) (*http.Response, error) {
+func (s *Server) promGet(ctx context.Context, baseURL, path string, params url.Values) (*http.Response, error) {
+	if baseURL == "" {
+		return nil, fmt.Errorf("no Prometheus configured")
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
-		strings.TrimSuffix(s.cfg.PrometheusURL, "/")+path+"?"+params.Encode(), nil)
+		strings.TrimSuffix(baseURL, "/")+path+"?"+params.Encode(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -436,12 +483,12 @@ type promVectorResponse struct {
 
 // promInstant runs an instant query and returns its single value, reporting
 // ok=false for an empty result (a test that reported nothing in the window).
-func (s *Server) promInstant(ctx context.Context, query, at string) (float64, bool, error) {
+func (s *Server) promInstant(ctx context.Context, baseURL, query, at string) (float64, bool, error) {
 	params := url.Values{queryParam: {query}}
 	if at != "" {
 		params.Set("time", at)
 	}
-	resp, err := s.promGet(ctx, "/api/v1/query", params)
+	resp, err := s.promGet(ctx, baseURL, "/api/v1/query", params)
 	if err != nil {
 		return 0, false, err
 	}

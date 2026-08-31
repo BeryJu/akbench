@@ -22,6 +22,11 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
 )
 
 func TestProxyQueryInstant(t *testing.T) {
@@ -123,6 +128,65 @@ func TestCompare(t *testing.T) {
 	wantP95 := `histogram_quantile(0.95, sum(rate(k6_http_req_duration_seconds{testid="login-a"}[5m])))`
 	if !seen[wantP95] {
 		t.Fatalf("p95 query was not %q; queries seen: %v", wantP95, seen)
+	}
+}
+
+// TestMetricsResolvesPerClusterPrometheus: a testid whose Topology has a
+// clusterRef must be queried against that WorkloadCluster's own
+// status.prometheusURL, not the management cluster's Config.PrometheusURL -
+// and a testid with no clusterRef (the management cluster) must still use
+// Config.PrometheusURL. Two separate fake Prometheus servers stand in for
+// "two different clusters' Prometheus instances" - if a query for the wrong
+// testid lands on the wrong server, the response reports no data for it and
+// the assertions below catch that.
+func TestMetricsResolvesPerClusterPrometheus(t *testing.T) {
+	mgmtProm := fakePrometheus(t, func(query string) (string, bool) {
+		if strings.Contains(query, `testid="login-mgmt"`) {
+			return "42", true
+		}
+		return "", false
+	})
+	wcProm := fakePrometheus(t, func(query string) (string, bool) {
+		if strings.Contains(query, `testid="login-wc"`) {
+			return "7", true
+		}
+		return "", false
+	})
+
+	wc := &benchv1alpha1.WorkloadCluster{
+		ObjectMeta: metav1.ObjectMeta{Name: "wc1", Namespace: testNamespace},
+		Status:     benchv1alpha1.WorkloadClusterStatus{PrometheusURL: wcProm.URL},
+	}
+	topoMgmt := sampleTopology("topo-mgmt")
+	topoWC := sampleTopology("topo-wc")
+	topoWC.Spec.ClusterRef = corev1.LocalObjectReference{Name: "wc1"}
+	tcMgmt := sampleTestCase("login-mgmt", "topo-mgmt", benchv1alpha1.ProfileBurn)
+	tcWC := sampleTestCase("login-wc", "topo-wc", benchv1alpha1.ProfileBurn)
+
+	s, _ := newServer(t, Config{PrometheusURL: mgmtProm.URL}, wc, topoMgmt, topoWC, tcMgmt, tcWC)
+	rec := do(t, s, http.MethodGet, "/api/v1/metrics/compare?testids=login-mgmt,login-wc", nil)
+	requireStatus(t, rec, http.StatusOK)
+
+	body := decodeBody[struct {
+		Results []struct {
+			TestID string             `json:"testid"`
+			Values map[string]float64 `json:"values"`
+		} `json:"results"`
+	}](t, rec)
+	if len(body.Results) != 2 {
+		t.Fatalf("got %d results, want 2", len(body.Results))
+	}
+	for _, row := range body.Results {
+		switch row.TestID {
+		case "login-mgmt":
+			if got := row.Values["http_reqs"]; got != 42 {
+				t.Errorf("login-mgmt http_reqs = %v, want 42 (queried the wrong Prometheus)", got)
+			}
+		case "login-wc":
+			if got := row.Values["http_reqs"]; got != 7 {
+				t.Errorf("login-wc http_reqs = %v, want 7 (queried the wrong Prometheus)", got)
+			}
+		}
 	}
 }
 
@@ -269,9 +333,18 @@ func TestMetricsRangeRejectsInjection(t *testing.T) {
 	requireStatus(t, rec, http.StatusBadRequest)
 }
 
+// TestMetricsRangeWithoutPrometheus: unlike proxyQuery, metricsRange has no
+// upfront "is Prometheus configured" check any more - which Prometheus to
+// query is resolved per testid (prometheusURLForTestID), since a testid on
+// a workload cluster and one on the management cluster can resolve to two
+// different Prometheus instances. An unresolvable testid (as here - no
+// TestCase named "login-a" exists) falls back to the empty
+// Config.PrometheusURL, which promGet now reports as a 502 the same way it
+// reports any other Prometheus-unreachable condition, rather than a
+// dedicated upfront 503.
 func TestMetricsRangeWithoutPrometheus(t *testing.T) {
 	s, _ := newServer(t, Config{})
 	rec := do(t, s, http.MethodGet,
 		"/api/v1/metrics/range?testids=login-a&metric=http_reqs&start=1700000000&end=1700000015", nil)
-	requireStatus(t, rec, http.StatusServiceUnavailable)
+	requireStatus(t, rec, http.StatusBadGateway)
 }

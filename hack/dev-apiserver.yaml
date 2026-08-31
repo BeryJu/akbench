@@ -73,23 +73,20 @@ spec:
             # session already hit once with the Next.js UI's own apiserver.
             - name: BENCH_NAMESPACE
               value: default
-            # Points at the workload cluster's own Prometheus (deployed via
-            # hack/dev-prometheus.yaml directly on default-dev-vm-incus, see
-            # hack/dev-workload-metrics.sh), not the management cluster's -
-            # confirmed via direct ping/wget testing that pods on the
-            # workload cluster's overlay network have zero route back into
-            # minikube's pod network (100% packet loss even to the node
-            # IP), so k6's remote-write can only ever reach a Prometheus
-            # local to whichever cluster it actually runs on. The reverse
-            # direction (a management-cluster pod reaching a workload
-            # cluster's node IP, e.g. 10.28.104.146) does work, so this
-            # NodePort address is what makes that data visible here. This
-            # is a single-workload-cluster dev workaround, not the planned
-            # M4 design (central mTLS receiver + per-cluster Alloy) - it
-            # stops working the moment a second workload cluster exists,
-            # since apiserver can only point at one Prometheus at a time.
+            # The management cluster's own Prometheus - reachable directly
+            # via in-cluster DNS since apiserver runs here too. This is only
+            # the fallback/management-cluster case now:
+            # internal/api/metrics.go resolves a workload cluster's own
+            # Prometheus per-testid (WorkloadCluster.status.prometheusURL,
+            # populated by WorkloadClusterReconciler's ensurePrometheus) -
+            # see prometheusURLForTestID. Confirmed via direct ping/wget
+            # testing that pods on a workload cluster's overlay network have
+            # zero route back into minikube's pod network (100% packet loss
+            # even to the node IP), so a workload cluster's own k6 pods could
+            # never have reached this address anyway - each cluster's
+            # Prometheus has always had to be local to itself.
             - name: BENCH_PROMETHEUS_URL
-              value: http://10.28.104.146:32035
+              value: http://prometheus-server.bench-system.svc.cluster.local
             - name: BENCH_API_TOKEN
               valueFrom:
                 secretKeyRef:
