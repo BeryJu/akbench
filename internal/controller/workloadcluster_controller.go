@@ -208,6 +208,14 @@ func (r *WorkloadClusterReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		if err := r.ensureStorage(ctx, &wc); err != nil {
 			log.Error(err, "failed to ensure default StorageClass on workload cluster")
 		}
+		// Best-effort/idempotent for the same reason as ensureCNI/
+		// ensureStorage: without it, there's no metrics.k8s.io API on this
+		// cluster at all (kubeadm doesn't install it any more than it
+		// installs a CNI), so `kubectl top` and Headlamp's own per-node/
+		// per-pod usage graphs have nothing to read from.
+		if err := r.ensureMetricsServer(ctx, &wc); err != nil {
+			log.Error(err, "failed to ensure metrics-server on workload cluster")
+		}
 	}
 
 	ready := metav1.ConditionFalse
@@ -231,7 +239,7 @@ func (r *WorkloadClusterReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 // remoteAddonClient builds a one-off client directly from the
 // "<name>-kubeconfig" Secret CAPI writes, rather than
 // internal/multicluster.Tracker: this controller only ever needs occasional
-// addon applies (ensureCNI, ensureStorage), not the long-lived
+// addon applies (ensureCNI, ensureStorage, ensureMetricsServer), not the long-lived
 // cached/watching connection Tracker exists for (that's what
 // AuthentikTopology/TestCase/TestRun use once they actually deploy onto this
 // cluster via clusterRef).
@@ -276,6 +284,20 @@ func (r *WorkloadClusterReconciler) ensureStorage(ctx context.Context, wc *bench
 	objs, err := render.StorageObjects()
 	if err != nil {
 		return fmt.Errorf("render storage manifests: %w", err)
+	}
+	return createAll(ctx, remoteClient, objs)
+}
+
+// ensureMetricsServer installs kubernetes-sigs/metrics-server onto the
+// workload cluster if it isn't there already.
+func (r *WorkloadClusterReconciler) ensureMetricsServer(ctx context.Context, wc *benchv1alpha1.WorkloadCluster) error {
+	remoteClient, err := r.remoteAddonClient(ctx, wc)
+	if err != nil {
+		return err
+	}
+	objs, err := render.MetricsServerObjects()
+	if err != nil {
+		return fmt.Errorf("render metrics-server manifests: %w", err)
 	}
 	return createAll(ctx, remoteClient, objs)
 }
