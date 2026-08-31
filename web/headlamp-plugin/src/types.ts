@@ -71,6 +71,8 @@ export interface TopologySpec {
     image?: string;
     tag?: string;
     logLevel?: string;
+    errorReporting?: { enabled?: boolean; tracingEndpoint?: string; sampleRate?: string };
+    pyroscopeHost?: string;
     extraValuesRef?: { name: string };
   };
 }

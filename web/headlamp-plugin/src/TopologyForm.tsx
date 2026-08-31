@@ -19,7 +19,7 @@
 import { Router } from '@kinvolk/headlamp-plugin/lib';
 import { SectionBox } from '@kinvolk/headlamp-plugin/lib/CommonComponents';
 import Editor from '@monaco-editor/react';
-import { Alert, Box, Button, Grid, MenuItem, TextField, Typography, useTheme } from '@mui/material';
+import { Alert, Box, Button, Checkbox, FormControlLabel, Grid, MenuItem, TextField, Typography, useTheme } from '@mui/material';
 import { useEffect, useState } from 'react';
 import { useHistory } from 'react-router-dom';
 import { api, ApiError } from './api';
@@ -236,9 +236,62 @@ export function TopologyForm({ existing }: { existing?: Topology }) {
         </Grid>
 
         <Typography variant="h6" gutterBottom>
-          Placement
+          Observability
         </Typography>
         <Grid container spacing={2} sx={{ mb: 3 }}>
+          <Grid item xs={12} md={6}>
+            <TextField
+              fullWidth
+              label="Pyroscope host"
+              value={spec.authentik?.pyroscopeHost ?? ''}
+              placeholder="http://pyroscope.bench-system.svc.cluster.local:4040"
+              helperText="Defaults to this cluster's own Pyroscope"
+              onChange={e => patch({ authentik: { ...spec.authentik, pyroscopeHost: e.target.value || undefined } })}
+            />
+          </Grid>
+          <Grid item xs={12} md={6} sx={{ display: 'flex', alignItems: 'center' }}>
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={spec.authentik?.errorReporting?.enabled ?? false}
+                  onChange={e =>
+                    patch({
+                      authentik: {
+                        ...spec.authentik,
+                        errorReporting: { ...spec.authentik?.errorReporting, enabled: e.target.checked },
+                      },
+                    })
+                  }
+                />
+              }
+              label="Send traces (error reporting / OTLP)"
+            />
+          </Grid>
+          {spec.authentik?.errorReporting?.enabled && (
+            <Grid item xs={12} md={6}>
+              <TextField
+                fullWidth
+                label="Tracing endpoint"
+                value={spec.authentik?.errorReporting?.tracingEndpoint ?? ''}
+                placeholder="http://tempo.bench-system.svc.cluster.local:4318"
+                helperText="Defaults to this cluster's own Tempo"
+                onChange={e =>
+                  patch({
+                    authentik: {
+                      ...spec.authentik,
+                      errorReporting: { ...spec.authentik?.errorReporting, tracingEndpoint: e.target.value || undefined },
+                    },
+                  })
+                }
+              />
+            </Grid>
+          )}
+        </Grid>
+
+        <Typography variant="h6" gutterBottom>
+          Placement
+        </Typography>
+        <Grid container spacing={2} sx={{ mb: 1 }}>
           <Grid item xs={12} md={6}>
             <TextField
               select
@@ -263,7 +316,31 @@ export function TopologyForm({ existing }: { existing?: Topology }) {
               />
             </Grid>
           )}
+          <Grid item xs={12} md={6}>
+            <TextField
+              fullWidth
+              label="Node selector (comma-separated key=value)"
+              value={Object.entries(spec.placement?.nodeSelector ?? {})
+                .map(([k, v]) => `${k}=${v}`)
+                .join(',')}
+              placeholder="disktype=ssd"
+              onChange={e => {
+                const nodeSelector: Record<string, string> = {};
+                for (const pair of e.target.value.split(',')) {
+                  const [k, v] = pair.split('=').map(s => s.trim());
+                  if (k) {
+                    nodeSelector[k] = v ?? '';
+                  }
+                }
+                patch({ placement: { ...spec.placement, nodeSelector } });
+              }}
+            />
+          </Grid>
         </Grid>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+          Tolerations aren&apos;t exposed here (a structured list, not a simple field) - set them by
+          editing this Topology&apos;s YAML directly from its own detail page once created.
+        </Typography>
 
         <Typography variant="h6" gutterBottom>
           Postgres
