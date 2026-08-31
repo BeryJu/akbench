@@ -36,6 +36,17 @@
 // calling into an externalized @mui/material's stripped-down runtime
 // object). Routing through Link gets the exact same side-panel behavior for
 // free, using only the public API.
+//
+// activeCluster, not params.cluster: Link's own side-panel codepath
+// (openDrawer in Link.js) resolves which cluster to open the resource on
+// from `props.activeCluster ?? getCluster() ?? ''` - it never looks at
+// params.cluster at all, so without this every popover opened whichever
+// cluster Headlamp currently has selected instead of the one this resource
+// actually runs on. activeCluster also feeds params.cluster for the
+// non-drawer navigation fallback (PureLink sets
+// `params.cluster = formatClusterPathParam(getSelectedClusters(), activeCluster)`
+// when activeCluster is set), so it covers both paths - passing cluster via
+// params directly is unnecessary once this is set.
 import { Link } from '@kinvolk/headlamp-plugin/lib/CommonComponents';
 
 export function ClusterResourceButton({
@@ -54,7 +65,8 @@ export function ClusterResourceButton({
   return (
     <Link
       routeName={kind}
-      params={{ namespace, name, cluster }}
+      params={{ namespace, name }}
+      activeCluster={cluster}
       sx={{
         display: 'inline-block',
         px: 1.5,
