@@ -18,7 +18,8 @@
 // Headlamp's own SectionBox instead of PatternFly/Next.js's router.
 import { Router } from '@kinvolk/headlamp-plugin/lib';
 import { SectionBox } from '@kinvolk/headlamp-plugin/lib/CommonComponents';
-import { Alert, Box, Button, Grid, MenuItem, TextField, Typography } from '@mui/material';
+import Editor from '@monaco-editor/react';
+import { Alert, Box, Button, Grid, MenuItem, TextField, Typography, useTheme } from '@mui/material';
 import { useEffect, useState } from 'react';
 import { useHistory } from 'react-router-dom';
 import { api, ApiError } from './api';
@@ -54,6 +55,7 @@ function slugify(value: string): string {
 
 export function TopologyForm({ existing }: { existing?: Topology }) {
   const history = useHistory();
+  const theme = useTheme();
   const clusters = useResource(() => api.clusters(), [], 0);
   const [name, setName] = useState(existing?.metadata.name ?? '');
   const [spec, setSpec] = useState<TopologySpec>(existing?.spec ?? emptySpec());
@@ -392,18 +394,23 @@ export function TopologyForm({ existing }: { existing?: Topology }) {
         <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
           Raw values.yaml for the authentik chart, merged over everything above last - the escape
           hatch for settings this form doesn&apos;t expose a field for. Deep-merged: a key you
-          don&apos;t set here is left alone.
+          don&apos;t set here is left alone. For example: <code>authentik.geoip.enabled: true</code>
         </Typography>
-        <TextField
-          fullWidth
-          multiline
-          minRows={10}
-          spellCheck={false}
-          placeholder={'authentik:\n  geoip:\n    enabled: true\n'}
-          value={extraValuesYAML}
-          onChange={e => setExtraValuesYAML(e.target.value)}
-          sx={{ mb: 3, '& textarea': { fontFamily: 'monospace' } }}
-        />
+        <Box sx={{ mb: 3, border: 1, borderColor: 'divider', borderRadius: 1, overflow: 'hidden' }}>
+          <Editor
+            height="300px"
+            language="yaml"
+            theme={theme.palette.mode === 'dark' ? 'vs-dark' : 'light'}
+            value={extraValuesYAML}
+            onChange={value => setExtraValuesYAML(value ?? '')}
+            options={{
+              minimap: { enabled: false },
+              scrollBeyondLastLine: false,
+              fontSize: 13,
+              wordWrap: 'on',
+            }}
+          />
+        </Box>
 
         <Box sx={{ display: 'flex', gap: 2 }}>
           <Button type="submit" variant="contained" disabled={saving}>
