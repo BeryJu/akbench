@@ -26,6 +26,7 @@ import { EmptyContent, SectionBox, SimpleTable } from '@kinvolk/headlamp-plugin/
 import { Alert, Box, Grid, Paper, Typography } from '@mui/material';
 import { api } from './api';
 import { MetricsChart } from './MetricsChart';
+import { NodePlacementChart } from './NodePlacementChart';
 import { useResource } from './useResource';
 
 // A small at-a-glance subset of what Compare and a TestCase's own detail
@@ -86,6 +87,10 @@ export function DashboardPage() {
         ) : (
           <EmptyContent>No Burn tests running - nothing to chart live.</EmptyContent>
         )}
+      </Box>
+
+      <Box sx={{ mb: 3 }}>
+        <NodePlacementChart />
       </Box>
 
       <Typography variant="h6" gutterBottom>
