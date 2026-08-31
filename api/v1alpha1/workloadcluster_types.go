@@ -165,6 +165,16 @@ type WorkloadClusterStatus struct {
 	// +optional
 	KubeconfigSecretRef *corev1.LocalObjectReference `json:"kubeconfigSecretRef,omitempty"`
 
+	// PrometheusURL is where this cluster's own Prometheus (installed by
+	// WorkloadClusterReconciler's ensurePrometheus) is reachable *from the
+	// management cluster* - a node's InternalIP plus the fixed NodePort
+	// render.PrometheusNodePort exposes, not the cluster-relative DNS name
+	// k6 workloads push metrics to (that only resolves from inside this
+	// same cluster). cmd/apiserver reads this to query per-testid metrics
+	// without a central receiver.
+	// +optional
+	PrometheusURL string `json:"prometheusURL,omitempty"`
+
 	// +optional
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 }

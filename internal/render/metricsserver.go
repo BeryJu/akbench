@@ -17,14 +17,9 @@ limitations under the License.
 package render
 
 import (
-	"bytes"
 	_ "embed"
-	"errors"
-	"fmt"
-	"io"
 
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	utilyaml "k8s.io/apimachinery/pkg/util/yaml"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 // metricsServerManifest is upstream's own components.yaml
@@ -47,21 +42,6 @@ var metricsServerManifest []byte
 // and memory figures (and Headlamp's own per-node/per-pod usage graphs) have
 // no metrics.k8s.io API to read from - kubeadm doesn't install this any more
 // than it installs a CNI.
-func MetricsServerObjects() ([]*unstructured.Unstructured, error) {
-	decoder := utilyaml.NewYAMLOrJSONDecoder(bytes.NewReader(metricsServerManifest), 4096)
-	var objs []*unstructured.Unstructured
-	for {
-		u := &unstructured.Unstructured{}
-		if err := decoder.Decode(u); err != nil {
-			if errors.Is(err, io.EOF) {
-				break
-			}
-			return nil, fmt.Errorf("decode metrics-server manifest: %w", err)
-		}
-		if len(u.Object) == 0 {
-			continue
-		}
-		objs = append(objs, u)
-	}
-	return objs, nil
+func MetricsServerObjects() ([]client.Object, error) {
+	return decodeManifest(metricsServerManifest)
 }

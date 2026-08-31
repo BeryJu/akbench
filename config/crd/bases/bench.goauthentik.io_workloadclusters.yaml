@@ -273,6 +273,16 @@ spec:
                   phase mirrors the CAPI Cluster's own status.phase (Provisioning,
                   Provisioned, Deleting...).
                 type: string
+              prometheusURL:
+                description: |-
+                  PrometheusURL is where this cluster's own Prometheus (installed by
+                  WorkloadClusterReconciler's ensurePrometheus) is reachable *from the
+                  management cluster* - a node's InternalIP plus the fixed NodePort
+                  render.PrometheusNodePort exposes, not the cluster-relative DNS name
+                  k6 workloads push metrics to (that only resolves from inside this
+                  same cluster). cmd/apiserver reads this to query per-testid metrics
+                  without a central receiver.
+                type: string
             type: object
         required:
         - spec

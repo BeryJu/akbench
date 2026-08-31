@@ -12,11 +12,12 @@ func TestCNIObjectsParsesFlannelManifest(t *testing.T) {
 		"ServiceAccount": false, "ConfigMap": false, "DaemonSet": false,
 	}
 	for _, obj := range objs {
+		kind := obj.GetObjectKind().GroupVersionKind().Kind
 		if obj.GetName() == "" {
-			t.Errorf("object of kind %q has no name", obj.GetKind())
+			t.Errorf("object of kind %q has no name", kind)
 		}
-		if _, ok := wantKinds[obj.GetKind()]; ok {
-			wantKinds[obj.GetKind()] = true
+		if _, ok := wantKinds[kind]; ok {
+			wantKinds[kind] = true
 		}
 	}
 	for kind, found := range wantKinds {

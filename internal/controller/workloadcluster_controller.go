@@ -26,7 +26,6 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/clientcmd"
@@ -216,6 +215,25 @@ func (r *WorkloadClusterReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		if err := r.ensureMetricsServer(ctx, &wc); err != nil {
 			log.Error(err, "failed to ensure metrics-server on workload cluster")
 		}
+		// Same best-effort/idempotent reasoning as the addons above. Unlike
+		// them, this one also resolves a URL cmd/apiserver (on the
+		// management cluster) can reach: a management-cluster pod can reach
+		// a workload cluster's node IPs directly (confirmed live - the
+		// reverse can't), which is what makes the NodePort ensurePrometheus
+		// creates actually useful cross-cluster.
+		if err := r.ensurePrometheus(ctx, &wc); err != nil {
+			log.Error(err, "failed to ensure Prometheus on workload cluster")
+		}
+		// Best-effort/idempotent for the same reason: without these,
+		// authentik's own AUTHENTIK_PYROSCOPE_HOST/
+		// AUTHENTIK_ERROR_REPORTING__OTEL_ENDPOINT env vars
+		// (internal/render/helmrelease.go) point at nothing.
+		if err := r.ensurePyroscope(ctx, &wc); err != nil {
+			log.Error(err, "failed to ensure Pyroscope on workload cluster")
+		}
+		if err := r.ensureTempo(ctx, &wc); err != nil {
+			log.Error(err, "failed to ensure Tempo on workload cluster")
+		}
 	}
 
 	ready := metav1.ConditionFalse
@@ -302,10 +320,94 @@ func (r *WorkloadClusterReconciler) ensureMetricsServer(ctx context.Context, wc 
 	return createAll(ctx, remoteClient, objs)
 }
 
-func createAll(ctx context.Context, c client.Client, objs []*unstructured.Unstructured) error {
+// controlPlaneNodeRoleLabel is kubeadm's own standard label, set on every
+// control-plane node regardless of whether its NoSchedule taint is still
+// present - a more stable selector for "find a node that will always
+// exist" than trying to key off any particular worker pool.
+const controlPlaneNodeRoleLabel = "node-role.kubernetes.io/control-plane"
+
+// reachableNodeIP returns an InternalIP a management-cluster pod can use to
+// reach this workload cluster directly - confirmed live this session that
+// this direction works even though the reverse (workload cluster pod to
+// management cluster pod) doesn't. Prefers a control-plane node (long-lived
+// by construction; worker pools can be resized/replaced), falling back to
+// whatever the first Node in the list reports.
+func reachableNodeIP(ctx context.Context, remoteClient client.Client) (string, error) {
+	var nodes corev1.NodeList
+	if err := remoteClient.List(ctx, &nodes, client.MatchingLabels{controlPlaneNodeRoleLabel: ""}); err != nil {
+		return "", fmt.Errorf("list control-plane nodes: %w", err)
+	}
+	if len(nodes.Items) == 0 {
+		if err := remoteClient.List(ctx, &nodes); err != nil {
+			return "", fmt.Errorf("list nodes: %w", err)
+		}
+	}
+	for _, node := range nodes.Items {
+		for _, addr := range node.Status.Addresses {
+			if addr.Type == corev1.NodeInternalIP {
+				return addr.Address, nil
+			}
+		}
+	}
+	return "", fmt.Errorf("no node with an InternalIP found")
+}
+
+// ensurePrometheus installs a single-replica Prometheus (remote-write
+// receiver) onto the workload cluster if it isn't there already, and
+// records a management-cluster-reachable URL for it in this object's own
+// status so cmd/apiserver can query it directly (see
+// internal/api/metrics.go's per-testid Prometheus resolution).
+func (r *WorkloadClusterReconciler) ensurePrometheus(ctx context.Context, wc *benchv1alpha1.WorkloadCluster) error {
+	remoteClient, err := r.remoteAddonClient(ctx, wc)
+	if err != nil {
+		return err
+	}
+	if err := createAll(ctx, remoteClient, render.PrometheusObjects()); err != nil {
+		return err
+	}
+	nodeIP, err := reachableNodeIP(ctx, remoteClient)
+	if err != nil {
+		return fmt.Errorf("resolve reachable node IP: %w", err)
+	}
+	wc.Status.PrometheusURL = fmt.Sprintf("http://%s:%d", nodeIP, render.PrometheusNodePort)
+	return nil
+}
+
+// ensurePyroscope installs a single-replica Grafana Pyroscope onto the
+// workload cluster if it isn't there already. No cross-cluster
+// reachability needed - authentik's own AUTHENTIK_PYROSCOPE_HOST already
+// points at this exact in-cluster DNS name (defaultPyroscopeHost in
+// authentiktopology_controller.go), and nothing outside this cluster reads
+// its data (yet).
+func (r *WorkloadClusterReconciler) ensurePyroscope(ctx context.Context, wc *benchv1alpha1.WorkloadCluster) error {
+	remoteClient, err := r.remoteAddonClient(ctx, wc)
+	if err != nil {
+		return err
+	}
+	return createAll(ctx, remoteClient, render.PyroscopeObjects())
+}
+
+// ensureTempo installs a single-replica Grafana Tempo onto the workload
+// cluster if it isn't there already - same reasoning as ensurePyroscope,
+// for AUTHENTIK_ERROR_REPORTING__OTEL_ENDPOINT (defaultTracingEndpoint).
+func (r *WorkloadClusterReconciler) ensureTempo(ctx context.Context, wc *benchv1alpha1.WorkloadCluster) error {
+	remoteClient, err := r.remoteAddonClient(ctx, wc)
+	if err != nil {
+		return err
+	}
+	return createAll(ctx, remoteClient, render.TempoObjects())
+}
+
+// createAll applies every object best-effort/idempotently, the same way for
+// vendored-YAML addons (decoded to unstructured.Unstructured: CNI, storage,
+// metrics-server) and project-authored ones (native typed structs like
+// *appsv1.Deployment: Prometheus/Pyroscope/Tempo) - client.Object is the one
+// interface both satisfy.
+func createAll(ctx context.Context, c client.Client, objs []client.Object) error {
 	for _, obj := range objs {
 		if err := c.Create(ctx, obj); err != nil && !apierrors.IsAlreadyExists(err) {
-			return fmt.Errorf("create %s %s/%s: %w", obj.GetKind(), obj.GetNamespace(), obj.GetName(), err)
+			gvk := obj.GetObjectKind().GroupVersionKind()
+			return fmt.Errorf("create %s %s/%s: %w", gvk.Kind, obj.GetNamespace(), obj.GetName(), err)
 		}
 	}
 	return nil

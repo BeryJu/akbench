@@ -17,14 +17,9 @@ limitations under the License.
 package render
 
 import (
-	"bytes"
 	_ "embed"
-	"errors"
-	"fmt"
-	"io"
 
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	utilyaml "k8s.io/apimachinery/pkg/util/yaml"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 // flannelManifest is upstream's own kube-flannel.yml
@@ -41,21 +36,6 @@ var flannelManifest []byte
 // plane is up: nothing schedules onto a kubeadm-bootstrapped cluster without
 // one, since kubeadm itself doesn't install a CNI (kubelet reports "cni
 // plugin not initialized" and every Node stays NotReady forever otherwise).
-func CNIObjects() ([]*unstructured.Unstructured, error) {
-	decoder := utilyaml.NewYAMLOrJSONDecoder(bytes.NewReader(flannelManifest), 4096)
-	var objs []*unstructured.Unstructured
-	for {
-		u := &unstructured.Unstructured{}
-		if err := decoder.Decode(u); err != nil {
-			if errors.Is(err, io.EOF) {
-				break
-			}
-			return nil, fmt.Errorf("decode CNI manifest: %w", err)
-		}
-		if len(u.Object) == 0 {
-			continue
-		}
-		objs = append(objs, u)
-	}
-	return objs, nil
+func CNIObjects() ([]client.Object, error) {
+	return decodeManifest(flannelManifest)
 }

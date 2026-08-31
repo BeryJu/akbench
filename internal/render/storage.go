@@ -17,14 +17,9 @@ limitations under the License.
 package render
 
 import (
-	"bytes"
 	_ "embed"
-	"errors"
-	"fmt"
-	"io"
 
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	utilyaml "k8s.io/apimachinery/pkg/util/yaml"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 // localPathStorageManifest is upstream's own deploy/local-path-storage.yaml
@@ -49,21 +44,6 @@ var localPathStorageManifest []byte
 // StorageClass, any PVC with no storageClassName (e.g. the authentik
 // chart's bundled postgresql) stays Pending forever with "unbound immediate
 // PersistentVolumeClaims", and any Helm install waiting on it times out.
-func StorageObjects() ([]*unstructured.Unstructured, error) {
-	decoder := utilyaml.NewYAMLOrJSONDecoder(bytes.NewReader(localPathStorageManifest), 4096)
-	var objs []*unstructured.Unstructured
-	for {
-		u := &unstructured.Unstructured{}
-		if err := decoder.Decode(u); err != nil {
-			if errors.Is(err, io.EOF) {
-				break
-			}
-			return nil, fmt.Errorf("decode storage manifest: %w", err)
-		}
-		if len(u.Object) == 0 {
-			continue
-		}
-		objs = append(objs, u)
-	}
-	return objs, nil
+func StorageObjects() ([]client.Object, error) {
+	return decodeManifest(localPathStorageManifest)
 }
