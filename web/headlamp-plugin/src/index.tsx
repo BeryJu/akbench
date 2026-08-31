@@ -27,40 +27,42 @@
 // offers raw-YAML editing, and the standalone UI this plugin replaces had
 // proper forms for all three (TopologyForm/TestCaseForm/ClusterForm).
 //
+// Top-level, cluster-independent by design: every route below sets
+// useClusterURL: false. This plugin's content genuinely doesn't depend on
+// which cluster is selected - api.ts pins { cluster: MANAGEMENT_CLUSTER } on
+// every call regardless - so it's registered into the HOME sidebar
+// container (alongside Notifications/Settings) rather than nested in the
+// per-cluster IN-CLUSTER navigation that changes with the selected cluster.
+// An earlier attempt at this (HOME container, but routes left at the
+// useClusterURL default of true) broke every route with a 404, since a link
+// reached from HOME carries no cluster segment. Read two more Headlamp
+// internals to get this right this time:
+// - lib/router/getRoutePath.js: a route's actual matched path only gets the
+//   /c/:cluster/ prefix when getRouteUseClusterURL(route) is true (the
+//   route's own useClusterURL, defaulting true) - set it false and the raw
+//   path (e.g. /authentik-bench/topologies) is both registered and what
+//   Router.createRouteURL returns, no cluster param involved anywhere.
+// - components/Sidebar/SidebarItem.js: a *sidebar entry's* own useClusterURL
+//   independently defaults to false (not true) - it already used our url
+//   field as-is, unprefixed, before this change. The mismatch was on the
+//   route side, not the sidebar side.
+//
 // Sidebar ordering note: Headlamp's sidebar (useSidebarItems.js in the
-// Headlamp core) always renders the IN-CLUSTER container's own built-in
-// categories (Cluster, Workloads, Storage, Network, Security, Config,
-// Custom Resources, ...) before any plugin-registered top-level entry, and
-// there is no `sidebarOrder`/priority field on registerSidebarEntry to
-// override that in this Headlamp version (0.14) - so "authentik Bench"
-// cannot be moved above them from a plugin. The one thing that is
-// controllable is the icon.
+// Headlamp core) always renders a container's own built-in entries
+// (Home/Notifications/Settings for HOME) before any plugin-registered
+// top-level entry, and there is no `sidebarOrder`/priority field on
+// registerSidebarEntry to override that in this Headlamp version (0.14) -
+// so "authentik Bench" cannot be moved above them from a plugin. The one
+// thing that is controllable is the icon.
 //
-// Registering into the HOME container instead (tried once) doesn't work
-// here: every route below is cluster-prefixed (useClusterURL defaults to
-// true), and routes reached from the HOME container's own navigation don't
-// carry a cluster segment, so they 404 - broke every route in the plugin
-// the moment it was tried. Staying on IN-CLUSTER despite this plugin's
-// content being cluster-independent (api.ts pins
-// { cluster: MANAGEMENT_CLUSTER } on every call, regardless of the
-// currently selected cluster) is the tradeoff that actually works without
-// also reworking every route to opt out of cluster-prefixing.
-//
-// Route.sidebar gotcha (cost a real "entire sidebar vanishes" bug): the
-// object form is { item, sidebar } where `item` is the sidebar entry to
-// highlight but `sidebar` is *which top-level sidebar container* to show -
-// one of Headlamp's own DefaultSidebars values ('HOME' or 'IN-CLUSTER'),
-// NOT the name of our own custom entry. Passing our entry's own name there
-// (as this file originally did, copying what looked like a reasonable
-// pattern) switches Headlamp's rendered sidebar to a container called
-// "authentik-bench" that was never actually populated (registerSidebarEntry
-// entries land in one of the two real containers, not a same-named one), so
-// Sidebar.js's useSidebarItems() looks it up, finds nothing, and renders an
-// empty sidebar the moment that route becomes active - confirmed by reading
-// Headlamp's own Sidebar.js (useSidebarItem) and useSidebarItems.js source.
-// DefaultSidebars is exported type-only from this SDK version, so the
-// literal string (IN_CLUSTER_SIDEBAR below) is used directly instead of
-// importing the enum.
+// Route.sidebar gotcha (cost a real "entire sidebar vanishes" bug, kept
+// here since it's easy to reintroduce): the object form is { item, sidebar }
+// where `item` is the sidebar entry to highlight but `sidebar` is *which
+// top-level sidebar container* to show - one of Headlamp's own
+// DefaultSidebars values ('HOME' or 'IN-CLUSTER'), NOT the name of our own
+// custom entry. DefaultSidebars is exported type-only from this SDK
+// version, so the literal string (HOME_SIDEBAR below) is used directly
+// instead of importing the enum.
 import { registerDetailsViewSection, registerRoute, registerSidebarEntry } from '@kinvolk/headlamp-plugin/lib';
 import { SectionBox } from '@kinvolk/headlamp-plugin/lib/CommonComponents';
 import { ClusterCreatePage, ClusterEditPage, ClustersPage } from './ClustersPage';
@@ -70,7 +72,7 @@ import { TestCaseSection, TopologySection } from './DetailSections';
 import { TestCaseCreatePage, TestCaseEditPage, TestCasesPage } from './TestCasesPage';
 import { TopologiesPage,TopologyCreatePage, TopologyEditPage } from './TopologiesPage';
 
-const IN_CLUSTER_SIDEBAR = 'IN-CLUSTER';
+const HOME_SIDEBAR = 'HOME';
 
 // simple-icons:authentik (the actual authentik brand mark) was tried first,
 // but @iconify/react resolves icon names via a runtime fetch to
@@ -87,13 +89,14 @@ registerSidebarEntry({
   label: 'authentik Bench',
   url: '/authentik-bench',
   icon: ICON,
-  sidebar: IN_CLUSTER_SIDEBAR,
+  sidebar: HOME_SIDEBAR,
 });
 registerRoute({
   path: '/authentik-bench',
-  sidebar: { item: 'authentik-bench', sidebar: IN_CLUSTER_SIDEBAR },
+  sidebar: { item: 'authentik-bench', sidebar: HOME_SIDEBAR },
   name: 'authentik-bench',
   exact: true,
+  useClusterURL: false,
   component: () => <DashboardPage />,
 });
 
@@ -105,23 +108,26 @@ registerSidebarEntry({
 });
 registerRoute({
   path: '/authentik-bench/topologies',
-  sidebar: { item: 'authentik-bench-topologies', sidebar: IN_CLUSTER_SIDEBAR },
+  sidebar: { item: 'authentik-bench-topologies', sidebar: HOME_SIDEBAR },
   name: 'authentik-bench-topologies',
   exact: true,
+  useClusterURL: false,
   component: () => <TopologiesPage />,
 });
 registerRoute({
   path: '/authentik-bench/topologies/new',
-  sidebar: { item: 'authentik-bench-topologies', sidebar: IN_CLUSTER_SIDEBAR },
+  sidebar: { item: 'authentik-bench-topologies', sidebar: HOME_SIDEBAR },
   name: 'authentik-bench-topologies-new',
   exact: true,
+  useClusterURL: false,
   component: () => <TopologyCreatePage />,
 });
 registerRoute({
   path: '/authentik-bench/topologies/:name/edit',
-  sidebar: { item: 'authentik-bench-topologies', sidebar: IN_CLUSTER_SIDEBAR },
+  sidebar: { item: 'authentik-bench-topologies', sidebar: HOME_SIDEBAR },
   name: 'authentik-bench-topologies-edit',
   exact: true,
+  useClusterURL: false,
   component: () => <TopologyEditPage />,
 });
 
@@ -133,23 +139,26 @@ registerSidebarEntry({
 });
 registerRoute({
   path: '/authentik-bench/testcases',
-  sidebar: { item: 'authentik-bench-testcases', sidebar: IN_CLUSTER_SIDEBAR },
+  sidebar: { item: 'authentik-bench-testcases', sidebar: HOME_SIDEBAR },
   name: 'authentik-bench-testcases',
   exact: true,
+  useClusterURL: false,
   component: () => <TestCasesPage />,
 });
 registerRoute({
   path: '/authentik-bench/testcases/new',
-  sidebar: { item: 'authentik-bench-testcases', sidebar: IN_CLUSTER_SIDEBAR },
+  sidebar: { item: 'authentik-bench-testcases', sidebar: HOME_SIDEBAR },
   name: 'authentik-bench-testcases-new',
   exact: true,
+  useClusterURL: false,
   component: () => <TestCaseCreatePage />,
 });
 registerRoute({
   path: '/authentik-bench/testcases/:name/edit',
-  sidebar: { item: 'authentik-bench-testcases', sidebar: IN_CLUSTER_SIDEBAR },
+  sidebar: { item: 'authentik-bench-testcases', sidebar: HOME_SIDEBAR },
   name: 'authentik-bench-testcases-edit',
   exact: true,
+  useClusterURL: false,
   component: () => <TestCaseEditPage />,
 });
 
@@ -161,23 +170,26 @@ registerSidebarEntry({
 });
 registerRoute({
   path: '/authentik-bench/clusters',
-  sidebar: { item: 'authentik-bench-clusters', sidebar: IN_CLUSTER_SIDEBAR },
+  sidebar: { item: 'authentik-bench-clusters', sidebar: HOME_SIDEBAR },
   name: 'authentik-bench-clusters',
   exact: true,
+  useClusterURL: false,
   component: () => <ClustersPage />,
 });
 registerRoute({
   path: '/authentik-bench/clusters/new',
-  sidebar: { item: 'authentik-bench-clusters', sidebar: IN_CLUSTER_SIDEBAR },
+  sidebar: { item: 'authentik-bench-clusters', sidebar: HOME_SIDEBAR },
   name: 'authentik-bench-clusters-new',
   exact: true,
+  useClusterURL: false,
   component: () => <ClusterCreatePage />,
 });
 registerRoute({
   path: '/authentik-bench/clusters/:name/edit',
-  sidebar: { item: 'authentik-bench-clusters', sidebar: IN_CLUSTER_SIDEBAR },
+  sidebar: { item: 'authentik-bench-clusters', sidebar: HOME_SIDEBAR },
   name: 'authentik-bench-clusters-edit',
   exact: true,
+  useClusterURL: false,
   component: () => <ClusterEditPage />,
 });
 
@@ -189,9 +201,10 @@ registerSidebarEntry({
 });
 registerRoute({
   path: '/authentik-bench/compare',
-  sidebar: { item: 'authentik-bench-compare', sidebar: IN_CLUSTER_SIDEBAR },
+  sidebar: { item: 'authentik-bench-compare', sidebar: HOME_SIDEBAR },
   name: 'authentik-bench-compare',
   exact: true,
+  useClusterURL: false,
   component: () => <ComparePage />,
 });
 
