@@ -116,9 +116,18 @@ export default function (): void {
     let res = http.get(url, params);
     let requests = 0;
     let completed = false;
+    // Tracks the previous iteration's stage so a stuck flow (the same stage
+    // submitted twice in a row - almost always a failed submission, e.g. a
+    // stale/wrong static token under concurrent load, being silently
+    // retried rather than surfaced) fails with a specific, actionable
+    // message instead of only the generic "made more than 10 queries" once
+    // the count cap below eventually trips. A normal login is ~3-4 requests
+    // (identification -> password -> optional MFA -> redirect), so any
+    // repeat here is already a real bug, not a slow-but-progressing flow.
+    let previousComponent: string | undefined;
     while (true) {
         if (requests > 10) {
-            fail("Test made more than 10 queries.");
+            fail(`Test made more than 10 queries without completing (last stage: ${previousComponent ?? "none"}).`);
         }
         check(res, {
             "status is 200": (r) => r.status === 200,
@@ -128,6 +137,13 @@ export default function (): void {
         }
 
         const component = res.json("component") as string | undefined;
+        if (component !== undefined && component === previousComponent) {
+            fail(
+                `Flow stage "${component}" was submitted but the flow did not advance - ` +
+                    "likely a failed submission (e.g. a stale or wrong static token) being retried instead of erroring."
+            );
+        }
+        previousComponent = component;
         const payload: Record<string, string> = {};
         if (component === "ak-stage-identification") {
             payload.uid_field = user.username;
