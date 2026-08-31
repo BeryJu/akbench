@@ -26,10 +26,26 @@ config:
 # substitutes its unique tag in place of the "dev" placeholder below (see
 # hack/deploy-apiserver.sh for why a unique tag rather than a fixed one -
 # minikube's own image cache doesn't reliably replace same-tag content).
+#
+# The official Flux plugin (github.com/headlamp-k8s/plugins/tree/main/flux)
+# is installed the same way, from its own prebuilt image rather than a
+# build step of ours - this project already runs Flux's helm-controller/
+# source-controller to reconcile every AuthentikTopology's HelmRelease, so
+# seeing their status natively in Headlamp's sidebar (Kustomizations, Helm
+# Releases, sources) is directly useful here. Confirmed against that
+# plugin's own README: its image ships the built plugin at /plugins/ (one
+# subdirectory per plugin, same layout ours has under dist/), so the same
+# recursive copy-on-start approach applies unchanged.
 initContainers:
   - name: authentik-bench-plugin
     image: authentik-bench-headlamp-plugin:dev
     imagePullPolicy: IfNotPresent
+    volumeMounts:
+      - name: plugins
+        mountPath: /headlamp/plugins
+  - name: flux-plugin
+    image: ghcr.io/headlamp-k8s/headlamp-plugin-flux:latest
+    command: ["sh", "-c", "cp -r /plugins/. /headlamp/plugins/"]
     volumeMounts:
       - name: plugins
         mountPath: /headlamp/plugins
