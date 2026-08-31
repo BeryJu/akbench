@@ -75,8 +75,8 @@ export function TopologiesPage() {
             getter: topology => {
               const cluster = headlampClusterName(topology.spec.clusterRef?.name);
               return <Link
-                  routeName="namespace"
-                  params={{namespace: topology.spec.namespace}}
+                  routeName="Namespace"
+                  params={{name: topology.spec.namespace}}
                   activeCluster={cluster}>
                     {topology.metadata.name}
                 </Link>
@@ -124,9 +124,9 @@ export function TopologiesPage() {
             getter: topology => (
               <>
                 <Link routeName="authentik-bench-topologies-edit" params={{ name: topology.metadata.name }}>
-                  {topology.metadata.name}
+                  Edit
                 </Link>
-                <Button size="small" color="error" onClick={() => void remove(topology.metadata.name)}>
+                <Button color="error" onClick={() => void remove(topology.metadata.name)}>
                   Delete
                 </Button>
               </>

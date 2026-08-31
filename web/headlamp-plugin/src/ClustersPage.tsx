@@ -21,7 +21,7 @@
 import { EmptyContent, Link, SectionBox, SimpleTable } from '@kinvolk/headlamp-plugin/lib/CommonComponents';
 import { Alert, Button, Chip } from '@mui/material';
 import { useParams } from 'react-router-dom';
-import { api, ApiError } from './api';
+import { api, ApiError, headlampClusterName } from './api';
 import { ClusterForm } from './ClusterForm';
 import { PrimaryLinkButton } from './PrimaryLinkButton';
 import { useResource } from './useResource';
@@ -61,7 +61,7 @@ export function ClustersPage() {
               cluster.management ? (
                 cluster.name
               ) : (
-                <Link routeName="authentik-bench-clusters-edit" params={{ name: cluster.name }}>
+                <Link to={`/c/${headlampClusterName(cluster.name)}`}>
                   {cluster.name}
                 </Link>
               ),
@@ -83,9 +83,14 @@ export function ClustersPage() {
             label: '',
             getter: cluster =>
               !cluster.management && (
-                <Button size="small" color="error" onClick={() => void remove(cluster.name)}>
-                  Deprovision
-                </Button>
+                <>
+                  <Link routeName="authentik-bench-clusters-edit" params={{ name: cluster.name }}>
+                    Edit
+                  </Link>
+                  <Button color="error" onClick={() => void remove(cluster.name)}>
+                    Deprovision
+                  </Button>
+                </>
               ),
           },
         ]}
