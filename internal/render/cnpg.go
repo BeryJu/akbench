@@ -1,8 +1,10 @@
 package render
 
 import (
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 
 	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
 )
@@ -66,6 +68,30 @@ func CNPGCluster(t *benchv1alpha1.AuthentikTopology) *unstructured.Unstructured 
 	_ = unstructured.SetNestedMap(u.Object, storage, "spec", "storage")
 	_ = unstructured.SetNestedField(u.Object, cnpgDatabase, "spec", "bootstrap", "initdb", "database")
 	_ = unstructured.SetNestedField(u.Object, cnpgOwner, "spec", "bootstrap", "initdb", "owner")
+	// inheritedMetadata.labels propagates onto every pod CNPG creates for
+	// this cluster (its real Go API, cluster_types.go's
+	// Cluster.Spec.InheritedMetadata *EmbeddedObjectMetadata - built as a
+	// plain map here to keep this file's existing no-typed-CNPG-API-import
+	// approach), which is what lets the cross-topology anti-affinity below
+	// find these pods from another topology's own affinity rule the same
+	// way it finds server/worker/embedded-postgres pods.
+	_ = unstructured.SetNestedStringMap(u.Object, TopologyLabels(t.Name), "spec", "inheritedMetadata", "labels")
+	// additionalPodAntiAffinity (Cluster.Spec.Affinity.AdditionalPodAntiAffinity)
+	// is additive - it doesn't disturb CNPG's own built-in same-cluster
+	// instance-spreading (EnablePodAntiAffinity/PodAntiAffinityType), unlike
+	// server.affinity/worker.affinity's mutually-exclusive-with-the-chart's-
+	// own-preset behavior. Built as a real corev1.PodAntiAffinity and
+	// converted, so the term itself comes from the one shared builder
+	// (isolation.go) rather than a second hand-written copy of its shape.
+	antiAffinity := &corev1.PodAntiAffinity{
+		RequiredDuringSchedulingIgnoredDuringExecution: []corev1.PodAffinityTerm{
+			crossTopologyAntiAffinityTerm(t.Name),
+		},
+	}
+	antiAffinityMap, err := runtime.DefaultUnstructuredConverter.ToUnstructured(antiAffinity)
+	if err == nil {
+		_ = unstructured.SetNestedMap(u.Object, antiAffinityMap, "spec", "affinity", "additionalPodAntiAffinity")
+	}
 	return u
 }
 

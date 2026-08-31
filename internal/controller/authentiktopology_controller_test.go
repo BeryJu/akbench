@@ -110,7 +110,7 @@ var _ = Describe("AuthentikTopology Controller", func() {
 			forceDelete(ctx, &benchv1alpha1.AuthentikTopology{ObjectMeta: metav1.ObjectMeta{Name: resourceName, Namespace: "default"}})
 		})
 
-		It("renders the chart's hard pod anti-affinity preset", func() {
+		It("renders a required pod anti-affinity directly on server/worker", func() {
 			r := &AuthentikTopologyReconciler{Client: k8sClient, Scheme: k8sClient.Scheme()}
 			_, err := r.Reconcile(context.Background(), reconcile.Request{NamespacedName: typeNamespacedName})
 			Expect(err).NotTo(HaveOccurred())
@@ -119,12 +119,20 @@ var _ = Describe("AuthentikTopology Controller", func() {
 			Expect(k8sClient.Get(context.Background(), typeNamespacedName, &hr)).To(Succeed())
 			var values render.AuthentikTopologyHelmValues
 			Expect(json.Unmarshal(hr.Spec.Values.Raw, &values)).To(Succeed())
-			// global.affinity.podAntiAffinity, not server.affinity/worker.affinity:
-			// those per-component fields are a raw corev1.Affinity override in
-			// this chart, not the preset mechanism - a string there fails to
-			// unmarshal (verified against a live install of this exact bug).
-			affinity, _ := values.Global["affinity"].(map[string]any)
-			Expect(affinity["podAntiAffinity"]).To(Equal("hard"))
+			// server.affinity/worker.affinity, not global.affinity.podAntiAffinity:
+			// the chart's own preset mechanism is no longer used at all -
+			// ServerWorkerAffinity renders the equivalent required
+			// anti-affinity directly, alongside the always-present
+			// cross-topology term (see its own doc comment for why the two
+			// can't be mixed: server.affinity/worker.affinity being set to
+			// anything makes the chart skip its preset entirely).
+			raw, err := json.Marshal(values.Server["affinity"])
+			Expect(err).NotTo(HaveOccurred())
+			var affinity map[string]any
+			Expect(json.Unmarshal(raw, &affinity)).To(Succeed())
+			podAntiAffinity, _ := affinity["podAntiAffinity"].(map[string]any)
+			terms, _ := podAntiAffinity["requiredDuringSchedulingIgnoredDuringExecution"].([]any)
+			Expect(terms).To(HaveLen(2), "want cross-topology + own-release required terms")
 		})
 	})
 

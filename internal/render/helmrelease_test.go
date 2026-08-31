@@ -69,7 +69,32 @@ func TestHelmValuesEmbedded(t *testing.T) {
 // live chart install that those fields are a raw corev1.Affinity override in
 // this chart (not the preset mechanism), so a preset string there fails with
 // "cannot unmarshal string into Go struct field ... PodAntiAffinity".
-func TestHelmValuesPlacementUsesGlobalAffinityPreset(t *testing.T) {
+// affinityOf decodes a server/worker values map's "affinity" key (always a
+// *corev1.Affinity now, for every PlacementMode - see ServerWorkerAffinity)
+// back into a plain map for assertions.
+func affinityOf(t *testing.T, w map[string]any) map[string]any {
+	t.Helper()
+	raw, err := json.Marshal(w["affinity"])
+	if err != nil {
+		t.Fatalf("affinity: marshal: %v", err)
+	}
+	if !json.Valid(raw) || string(raw) == "null" {
+		t.Fatalf("affinity was not set")
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("affinity: unmarshal: %v", err)
+	}
+	return decoded
+}
+
+// TestHelmValuesDedicatedSetsServerWorkerAffinity guards that Dedicated mode
+// now renders server.affinity/worker.affinity directly (a required
+// anti-affinity term for this release's own pods, plus the
+// always-present cross-topology term) instead of the chart's own
+// global.affinity.podAntiAffinity preset, which server.affinity/
+// worker.affinity being set at all makes the chart skip entirely.
+func TestHelmValuesDedicatedSetsServerWorkerAffinity(t *testing.T) {
 	topo := exampleTopology()
 	topo.Spec.Placement = benchv1alpha1.PlacementSpec{Mode: benchv1alpha1.PlacementDedicated}
 	raw, err := HelmValues(topo, "secret", &PostgresConnection{Password: "pw"}, "http://pyroscope.example:4040", "http://tempo.example:4318", false)
@@ -78,23 +103,30 @@ func TestHelmValuesPlacementUsesGlobalAffinityPreset(t *testing.T) {
 	}
 	values := decodeValues(t, raw.Raw)
 
-	if _, ok := values.Server["affinity"]; ok {
-		t.Error("server.affinity must not be set - it's a raw corev1.Affinity override in this chart, not the preset mechanism")
+	if _, ok := values.Global["affinity"]; ok {
+		t.Error("global.affinity must not be set any more - the chart's preset mechanism is no longer used")
 	}
-	if _, ok := values.Worker["affinity"]; ok {
-		t.Error("worker.affinity must not be set - it's a raw corev1.Affinity override in this chart, not the preset mechanism")
+	additionalLabels, _ := values.Global["additionalLabels"].(map[string]any)
+	if additionalLabels["bench.goauthentik.io/topology"] != topo.Name {
+		t.Errorf("global.additionalLabels[topology] = %v, want %q", additionalLabels, topo.Name)
 	}
-	affinity, _ := values.Global["affinity"].(map[string]any)
-	if affinity["podAntiAffinity"] != "hard" {
-		t.Errorf("global.affinity.podAntiAffinity = %v, want hard", affinity["podAntiAffinity"])
+	for _, name := range []string{"server", "worker"} {
+		w := values.Server
+		if name == "worker" {
+			w = values.Worker
+		}
+		decoded := affinityOf(t, w)
+		podAntiAffinity, _ := decoded["podAntiAffinity"].(map[string]any)
+		terms, _ := podAntiAffinity["requiredDuringSchedulingIgnoredDuringExecution"].([]any)
+		if len(terms) != 2 {
+			t.Errorf("%s.affinity: got %d required anti-affinity terms, want 2 (cross-topology + own-release)", name, len(terms))
+		}
 	}
 }
 
-// TestHelmValuesPacked guards the opposite case from
-// TestHelmValuesPlacementUsesGlobalAffinityPreset: Packed mode has no preset
-// to reuse, so it's the one mode that *must* set server.affinity/
-// worker.affinity, keyed on the pinned release name so it also reaches the
-// bundled postgres pod (see PackedAffinity's doc comment).
+// TestHelmValuesPacked guards that Packed mode's own pack-together
+// affinity coexists with the always-present cross-topology anti-affinity
+// term in the same server.affinity/worker.affinity value.
 func TestHelmValuesPacked(t *testing.T) {
 	topo := exampleTopology()
 	topo.Spec.Placement = benchv1alpha1.PlacementSpec{Mode: benchv1alpha1.PlacementPacked}
@@ -104,26 +136,43 @@ func TestHelmValuesPacked(t *testing.T) {
 	}
 	values := decodeValues(t, raw.Raw)
 
-	affinity, _ := values.Global["affinity"].(map[string]any)
-	if affinity["podAntiAffinity"] != "none" {
-		t.Errorf("global.affinity.podAntiAffinity = %v, want none", affinity["podAntiAffinity"])
-	}
 	for name, w := range map[string]map[string]any{"server": values.Server, "worker": values.Worker} {
-		raw, err := json.Marshal(w["affinity"])
-		if err != nil {
-			t.Fatalf("%s.affinity: marshal: %v", name, err)
-		}
-		if !json.Valid(raw) || string(raw) == "null" {
-			t.Fatalf("%s.affinity was not set", name)
-		}
-		var decoded map[string]any
-		if err := json.Unmarshal(raw, &decoded); err != nil {
-			t.Fatalf("%s.affinity: unmarshal: %v", name, err)
-		}
+		decoded := affinityOf(t, w)
 		podAffinity, _ := decoded["podAffinity"].(map[string]any)
 		if podAffinity == nil {
 			t.Fatalf("%s.affinity.podAffinity missing: %v", name, decoded)
 		}
+		podAntiAffinity, _ := decoded["podAntiAffinity"].(map[string]any)
+		terms, _ := podAntiAffinity["requiredDuringSchedulingIgnoredDuringExecution"].([]any)
+		if len(terms) != 1 {
+			t.Errorf("%s.affinity: got %d required anti-affinity terms, want 1 (cross-topology only)", name, len(terms))
+		}
+	}
+}
+
+// TestHelmValuesEmbeddedPostgresGetsCrossTopologyAffinity guards that the
+// bundled postgresql subchart also gets the topology label and
+// cross-topology anti-affinity - it's part of a topology's own footprint
+// just as much as server/worker, so it must never share a node with
+// another topology's pods either.
+func TestHelmValuesEmbeddedPostgresGetsCrossTopologyAffinity(t *testing.T) {
+	topo := exampleTopology()
+	raw, err := HelmValues(topo, "secret", &PostgresConnection{Password: "pw"}, "http://pyroscope.example:4040", "http://tempo.example:4318", false)
+	if err != nil {
+		t.Fatalf("HelmValues: %v", err)
+	}
+	values := decodeValues(t, raw.Raw)
+
+	commonLabels, _ := values.Postgres["commonLabels"].(map[string]any)
+	if commonLabels["bench.goauthentik.io/topology"] != topo.Name {
+		t.Errorf("postgresql.commonLabels[topology] = %v, want %q", commonLabels, topo.Name)
+	}
+	primary, _ := values.Postgres["primary"].(map[string]any)
+	decoded := affinityOf(t, primary)
+	podAntiAffinity, _ := decoded["podAntiAffinity"].(map[string]any)
+	terms, _ := podAntiAffinity["requiredDuringSchedulingIgnoredDuringExecution"].([]any)
+	if len(terms) != 1 {
+		t.Errorf("postgresql.primary.affinity: got %d required anti-affinity terms, want 1", len(terms))
 	}
 }
 

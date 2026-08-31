@@ -61,6 +61,34 @@ func TestCNPGClusterHonorsSpec(t *testing.T) {
 	}
 }
 
+func TestCNPGClusterCrossTopologyIsolation(t *testing.T) {
+	topo := &benchv1alpha1.AuthentikTopology{
+		ObjectMeta: metav1.ObjectMeta{Name: "authentik-1"},
+		Spec: benchv1alpha1.AuthentikTopologySpec{
+			Namespace: "authentik-1",
+			Postgres:  benchv1alpha1.PostgresSpec{Mode: benchv1alpha1.PostgresCNPG},
+		},
+	}
+	u := CNPGCluster(topo)
+
+	labels, _, _ := unstructured.NestedStringMap(u.Object, "spec", "inheritedMetadata", "labels")
+	if labels["bench.goauthentik.io/topology"] != "authentik-1" {
+		t.Errorf("spec.inheritedMetadata.labels = %v, want bench.goauthentik.io/topology=authentik-1", labels)
+	}
+
+	terms, _, _ := unstructured.NestedSlice(u.Object, "spec", "affinity", "additionalPodAntiAffinity", "requiredDuringSchedulingIgnoredDuringExecution")
+	if len(terms) != 1 {
+		t.Fatalf("spec.affinity.additionalPodAntiAffinity: got %d required terms, want 1", len(terms))
+	}
+	term, ok := terms[0].(map[string]any)
+	if !ok {
+		t.Fatalf("required term is not a map: %v", terms[0])
+	}
+	if term["topologyKey"] != "kubernetes.io/hostname" {
+		t.Errorf("required term topologyKey = %v, want kubernetes.io/hostname", term["topologyKey"])
+	}
+}
+
 func TestCNPGReady(t *testing.T) {
 	notReady := &unstructured.Unstructured{Object: map[string]any{}}
 	if CNPGReady(notReady) {

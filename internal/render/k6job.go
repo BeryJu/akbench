@@ -144,9 +144,16 @@ func (p K6WorkloadParams) volumes() ([]corev1.Volume, []corev1.VolumeMount) {
 // Burn Deployment.
 func (p K6WorkloadParams) PodTemplate() corev1.PodTemplateSpec {
 	volumes, mounts := p.volumes()
+	// The real AuthentikTopology object name (spec.topologyRef.name), not
+	// TargetName - TargetName is only the target/metric label and can be
+	// overridden to something else, but the topology's own pods are labeled
+	// by object name (TopologyLabels), so the runner's anti-affinity below
+	// has to match on that same value to find them.
+	topologyName := p.TestCase.Spec.TopologyRef.Name
 	labels := map[string]string{
 		benchv1alpha1.LabelTestCase: p.TestCase.Name,
 		benchv1alpha1.LabelProfile:  k6ProfileValue(p.TestCase.Spec.Profile),
+		benchv1alpha1.LabelTopology: topologyName,
 	}
 	return corev1.PodTemplateSpec{
 		ObjectMeta: metav1.ObjectMeta{Labels: labels},
@@ -162,6 +169,19 @@ func (p K6WorkloadParams) PodTemplate() corev1.PodTemplateSpec {
 				},
 			},
 			Volumes: volumes,
+			// The load generator must never land on the same node as the
+			// topology it's driving - otherwise it competes with the very
+			// system it's measuring for that node's CPU, skewing the
+			// numbers it produces. Required, not preferred: a soft
+			// preference could still be overridden by the scheduler under
+			// pressure.
+			Affinity: &corev1.Affinity{
+				PodAntiAffinity: &corev1.PodAntiAffinity{
+					RequiredDuringSchedulingIgnoredDuringExecution: []corev1.PodAffinityTerm{
+						sameTopologyAntiAffinityTerm(topologyName),
+					},
+				},
+			},
 		},
 	}
 }

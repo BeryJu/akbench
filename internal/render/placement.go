@@ -9,71 +9,65 @@ import (
 	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
 )
 
-// AffinityPreset returns the authentik chart's own affinity-preset value for
-// global.affinity.podAntiAffinity (one of "none", "soft", "hard" - see
-// charts.goauthentik.io/authentik's _helpers.tpl, "authentik.affinity") for
-// the given placement mode.
+// ServerWorkerAffinity returns the raw pod affinity/anti-affinity the
+// authentik chart's server.affinity/worker.affinity values render verbatim
+// as the Pod's real corev1.Affinity. Rendered directly (rather than through
+// the chart's own global.affinity.podAntiAffinity preset mechanism,
+// _helpers.tpl's "authentik.affinity") for every mode, not just Packed,
+// because setting server.affinity/worker.affinity to anything at all makes
+// the chart skip its own preset entirely (`{{- with .component.affinity -}}
+// ... {{- else -}} <preset> {{- end -}}` - confirmed against the chart's
+// actual template source) - once any mode needs a custom term here (the
+// cross-topology one below, needed unconditionally), every mode has to
+// render its own affinity fully rather than mixing the two mechanisms.
 //
-// This must go under global.affinity, not server.affinity/worker.affinity:
-// the per-component fields are a *different* knob that, if set to anything
-// non-empty at all, the chart uses verbatim as the Pod's real
-// corev1.Affinity - a preset string like "hard" there fails to unmarshal.
-// global.affinity is the only place the preset mechanism itself lives, and
-// it applies to both server and worker uniformly, which is fine since
-// Dedicated/Default both apply symmetrically to both.
+// Always includes a required anti-affinity term against any *other*
+// topology's pods (crossTopologyAntiAffinityTerm) so two topologies never
+// share a node regardless of mode - a guarantee PlacementMode itself never
+// provided, since it only ever governed scheduling within one topology.
+// Additionally, by mode:
+//   - Dedicated: a required anti-affinity term against this release's own
+//     other pods (one pod of this release per node - previously the
+//     chart's own "hard" preset; topologyKey fixed at kubernetes.io/hostname
+//     to match that preset's own behavior, since PlacementSpec.TopologyKey
+//     has no equivalent once we're not going through the chart's preset -
+//     use ExtraValuesRef for a custom key).
+//   - Packed: a required *affinity* term for this release's own pods (they
+//     must land together) - unchanged from this function's previous
+//     Packed-only form.
+//   - Default: no extra term - a topology's own pods may share nodes with
+//     each other (the noisy-neighbor case the benchmark compares against),
+//     just never with another topology's.
 //
-// Dedicated maps to "hard" (required pod anti-affinity, one pod per node -
-// the topology key the chart uses for "hard" is fixed at
-// kubernetes.io/hostname, matching PlacementSpec's own default;
-// PlacementSpec.TopologyKey has no effect here since the chart doesn't
-// expose it as a value - use ExtraValuesRef for a custom key). Default maps
-// to "none": the chart's own root default is "soft", which would already
-// bias pods apart, so Default must say "none" explicitly to let pods land on
-// the same node (the noisy-neighbor case the benchmark compares against).
-// affinityPresetHard/affinityPresetNone are the chart's preset strings this
-// package sets (never "soft" - see AffinityPreset's doc comment for why
-// Default has to say "none" explicitly rather than leave the chart's own
-// "soft" root default in place).
-const (
-	affinityPresetHard = "hard"
-	affinityPresetNone = "none"
-)
-
-func AffinityPreset(spec benchv1alpha1.PlacementSpec) string {
-	if spec.Mode == benchv1alpha1.PlacementDedicated {
-		return affinityPresetHard
+// The own-release terms match on app.kubernetes.io/instance, a label every
+// pod the authentik chart or its bundled postgresql subchart produces
+// carries (confirmed against both charts' own label helpers), so Dedicated/
+// Packed still reach the bundled postgres pod too, not just server/worker.
+func ServerWorkerAffinity(spec benchv1alpha1.PlacementSpec, releaseName, topologyName string) *corev1.Affinity {
+	ownReleaseSelector := &metav1.LabelSelector{
+		MatchLabels: map[string]string{"app.kubernetes.io/instance": releaseName},
 	}
-	return affinityPresetNone
-}
-
-// PackedAffinity returns the raw pod affinity Packed mode needs - the
-// chart's own preset mechanism (AffinityPreset/authentik.affinity) only ever
-// generates *anti*-affinity, there is no "pack together" preset to reuse, so
-// this goes through server.affinity/worker.affinity's verbatim-Affinity
-// escape hatch instead (see the doc comment on AffinityPreset).
-//
-// It requires scheduling onto a node that already has a pod carrying this
-// release's app.kubernetes.io/instance label - a label every pod the
-// authentik chart or its bundled postgresql subchart produces carries
-// (confirmed against both charts' own label helpers), so this reaches the
-// bundled postgres pod too, not just server/worker. Nil for every other
-// mode.
-func PackedAffinity(spec benchv1alpha1.PlacementSpec, releaseName string) *corev1.Affinity {
-	if spec.Mode != benchv1alpha1.PlacementPacked {
-		return nil
-	}
-	return &corev1.Affinity{
-		PodAffinity: &corev1.PodAffinity{
+	aff := &corev1.Affinity{
+		PodAntiAffinity: &corev1.PodAntiAffinity{
 			RequiredDuringSchedulingIgnoredDuringExecution: []corev1.PodAffinityTerm{
-				{
-					LabelSelector: &metav1.LabelSelector{
-						MatchLabels: map[string]string{"app.kubernetes.io/instance": releaseName},
-					},
-					TopologyKey: "kubernetes.io/hostname",
-				},
+				crossTopologyAntiAffinityTerm(topologyName),
 			},
 		},
 	}
+	switch spec.Mode {
+	case benchv1alpha1.PlacementDedicated:
+		aff.PodAntiAffinity.RequiredDuringSchedulingIgnoredDuringExecution = append(
+			aff.PodAntiAffinity.RequiredDuringSchedulingIgnoredDuringExecution,
+			corev1.PodAffinityTerm{LabelSelector: ownReleaseSelector, TopologyKey: "kubernetes.io/hostname"},
+		)
+	case benchv1alpha1.PlacementPacked:
+		aff.PodAffinity = &corev1.PodAffinity{
+			RequiredDuringSchedulingIgnoredDuringExecution: []corev1.PodAffinityTerm{
+				{LabelSelector: ownReleaseSelector, TopologyKey: "kubernetes.io/hostname"},
+			},
+		}
+	}
+	return aff
 }
 
 // Tolerations returns the tolerations to apply in Dedicated mode, letting

@@ -25,4 +25,11 @@ const (
 	LabelTestCase = "bench.goauthentik.io/testcase"
 	// LabelProfile records which profile (quick/burn) a k6 workload runs.
 	LabelProfile = "bench.goauthentik.io/profile"
+	// LabelTopology names the AuthentikTopology a pod belongs to: set on
+	// every one of a topology's own pods (server, worker,
+	// embedded/CNPG postgres) and on the k6 runner pod driving it, so
+	// cross-topology pod anti-affinity (internal/render/isolation.go) has a
+	// single label to match on regardless of which component or postgres
+	// mode is involved.
+	LabelTopology = "bench.goauthentik.io/topology"
 )

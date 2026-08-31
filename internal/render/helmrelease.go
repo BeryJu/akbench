@@ -128,17 +128,42 @@ func HelmValues(t *benchv1alpha1.AuthentikTopology, secretKey string, pgConn *Po
 			"enabled": embedded,
 		},
 	}
+	if embedded {
+		// The bundled postgresql subchart is Bitnami-style: commonLabels
+		// merges into its own pod labels the same way global.additionalLabels
+		// does for server/worker (templates/primary/statefulset.yaml's
+		// $podLabels), and primary.affinity is the same
+		// mutually-exclusive-with-its-own-preset raw override server.affinity/
+		// worker.affinity is - confirmed against that subchart's own
+		// templates. Only the cross-topology term is needed here: embedded
+		// mode is always a single instance, so there's no intra-postgres
+		// spreading/packing to replicate the way ServerWorkerAffinity does
+		// for Dedicated/Packed.
+		values.Postgres["commonLabels"] = TopologyLabels(t.Name)
+		values.Postgres["primary"] = map[string]any{
+			"affinity": &corev1.Affinity{
+				PodAntiAffinity: &corev1.PodAntiAffinity{
+					RequiredDuringSchedulingIgnoredDuringExecution: []corev1.PodAffinityTerm{
+						crossTopologyAntiAffinityTerm(t.Name),
+					},
+				},
+			},
+		}
+	}
 
 	values.Global = map[string]any{
-		// global.affinity.podAntiAffinity is the chart's *preset* mechanism
-		// (_helpers.tpl's "authentik.affinity"). server.affinity/
-		// worker.affinity are a different, raw-override knob: if set to
-		// anything non-empty at all, the chart uses that value verbatim as
-		// the Pod's real corev1.Affinity - a string like "hard" there fails
-		// to unmarshal. The preset only has one, chart-wide value, which is
-		// fine here since Dedicated/Default both apply symmetrically to
-		// server and worker.
-		"affinity": map[string]any{"podAntiAffinity": AffinityPreset(t.Spec.Placement)},
+		// additionalLabels reaches the actual pod template labels
+		// (authentik.labels, used at server/worker's
+		// template.metadata.labels - confirmed against the chart's own
+		// templates/{server,worker}/deployment.yaml), which is what lets
+		// ServerWorkerAffinity's cross-topology anti-affinity term
+		// (applyPlacement below) find these pods from another topology's own
+		// affinity rule. Replaces this value's former use for
+		// global.affinity.podAntiAffinity (the chart's own preset
+		// mechanism) - applyPlacement now renders server.affinity/
+		// worker.affinity directly for every mode instead (see
+		// ServerWorkerAffinity's doc comment for why the two can't be mixed).
+		"additionalLabels": TopologyLabels(t.Name),
 	}
 	if img := t.Spec.Authentik.Image; img != "" {
 		values.Global["image"] = map[string]any{
@@ -210,9 +235,10 @@ func HelmValues(t *benchv1alpha1.AuthentikTopology, secretKey string, pgConn *Po
 		if tol := Tolerations(t.Spec.Placement); len(tol) > 0 {
 			w["tolerations"] = tol
 		}
-		if aff := PackedAffinity(t.Spec.Placement, HelmReleaseName(t)); aff != nil {
-			w["affinity"] = aff
-		}
+		// Always set, not just in Packed mode: ServerWorkerAffinity now
+		// always includes the cross-topology anti-affinity term, on top of
+		// whatever (if anything) the placement mode itself adds.
+		w["affinity"] = ServerWorkerAffinity(t.Spec.Placement, HelmReleaseName(t), t.Name)
 	}
 	applyPlacement(values.Server)
 	applyPlacement(values.Worker)
