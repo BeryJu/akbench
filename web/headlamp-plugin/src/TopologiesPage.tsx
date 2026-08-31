@@ -72,11 +72,15 @@ export function TopologiesPage() {
         columns={[
           {
             label: 'Name',
-            getter: topology => (
-              <Link routeName="authentik-bench-topologies-edit" params={{ name: topology.metadata.name }}>
-                {topology.metadata.name}
-              </Link>
-            ),
+            getter: topology => {
+              const cluster = headlampClusterName(topology.spec.clusterRef?.name);
+              return <Link
+                  routeName="namespace"
+                  params={{namespace: topology.spec.namespace}}
+                  activeCluster={cluster}>
+                    {topology.metadata.name}
+                </Link>
+            },
           },
           { label: 'Target', getter: topology => topology.spec.targetName || topology.metadata.name },
           { label: 'Cluster', getter: topology => topology.spec.clusterRef?.name ?? 'management' },
@@ -118,9 +122,14 @@ export function TopologiesPage() {
           {
             label: '',
             getter: topology => (
-              <Button size="small" color="error" onClick={() => void remove(topology.metadata.name)}>
-                Delete
-              </Button>
+              <>
+                <Link routeName="authentik-bench-topologies-edit" params={{ name: topology.metadata.name }}>
+                  {topology.metadata.name}
+                </Link>
+                <Button size="small" color="error" onClick={() => void remove(topology.metadata.name)}>
+                  Delete
+                </Button>
+              </>
             ),
           },
         ]}
