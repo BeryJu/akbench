@@ -22,7 +22,7 @@ import { Router } from '@kinvolk/headlamp-plugin/lib';
 import { EmptyContent, Link, SectionBox, SimpleTable } from '@kinvolk/headlamp-plugin/lib/CommonComponents';
 import { Alert, Button, Chip, Stack } from '@mui/material';
 import { useHistory, useParams } from 'react-router-dom';
-import { api, ApiError, MANAGEMENT_CLUSTER } from './api';
+import { api, ApiError, headlampClusterName } from './api';
 import { ClusterResourceButton } from './ClusterResourceButton';
 import { TopologyForm } from './TopologyForm';
 import { readyCondition } from './types';
@@ -94,7 +94,7 @@ export function TopologiesPage() {
           {
             label: 'Resources',
             getter: topology => {
-              const cluster = topology.spec.clusterRef?.name ?? MANAGEMENT_CLUSTER;
+              const cluster = headlampClusterName(topology.spec.clusterRef?.name);
               return (
                 <Stack direction="row" spacing={1} flexWrap="wrap">
                   <ClusterResourceButton

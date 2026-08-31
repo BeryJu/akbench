@@ -53,6 +53,20 @@ import {
 // (internal/render/headlampkubeconfig.go).
 export const MANAGEMENT_CLUSTER = 'management';
 
+// headlampClusterName maps a WorkloadCluster's own object name (what
+// AuthentikTopology.spec.clusterRef/TestCase.spec.runnerClusterRef actually
+// store) to the cluster identifier Headlamp shows in its own switcher and
+// expects in a route's `cluster` param. These differ: CAPI's generated
+// kubeconfig (internal/render/headlampkubeconfig.go merges it in verbatim,
+// no renaming) names the cluster entry after the WorkloadCluster
+// (`<name>`), but its context is `<name>-admin@<name>` - and Headlamp
+// derives the cluster name it shows from the context, not the raw cluster
+// entry, so every workload cluster is reachable as `<name>-admin`, not
+// `<name>`, confirmed against a live merged kubeconfig.
+export function headlampClusterName(clusterRefName: string | undefined): string {
+  return clusterRefName ? `${clusterRefName}-admin@${clusterRefName}` : MANAGEMENT_CLUSTER;
+}
+
 // Must match hack/dev-apiserver.yaml's namespace/Service name/port.
 const APISERVER_PROXY_PATH =
   '/api/v1/namespaces/authentik-bench/services/apiserver:8080/proxy';

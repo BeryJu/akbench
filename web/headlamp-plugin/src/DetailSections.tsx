@@ -21,7 +21,7 @@
 import { EmptyContent } from '@kinvolk/headlamp-plugin/lib/CommonComponents';
 import { Alert, Box, Button, Stack } from '@mui/material';
 import { useState } from 'react';
-import { api, MANAGEMENT_CLUSTER } from './api';
+import { api, headlampClusterName } from './api';
 import { ClusterResourceButton } from './ClusterResourceButton';
 import { MetricsChart } from './MetricsChart';
 import { useResource } from './useResource';
@@ -45,8 +45,9 @@ export function TestCaseSection({ name, profile }: { name: string; profile?: str
     [topologyName],
     0
   );
-  const cluster =
-    testCase.data?.spec.runnerClusterRef?.name ?? topology.data?.spec.clusterRef?.name ?? MANAGEMENT_CLUSTER;
+  const cluster = headlampClusterName(
+    testCase.data?.spec.runnerClusterRef?.name ?? topology.data?.spec.clusterRef?.name
+  );
   const namespace = testCase.data?.metadata.namespace;
   const burnDeployment = testCase.data?.status?.burnWorkloadRef?.name;
 
@@ -116,7 +117,7 @@ export function TopologySection({ topologyName }: { topologyName: string }) {
     .filter(tc => tc.spec.topologyRef.name === topologyName)
     .map(tc => tc.metadata.name);
 
-  const cluster = topology.data?.spec.clusterRef?.name ?? MANAGEMENT_CLUSTER;
+  const cluster = headlampClusterName(topology.data?.spec.clusterRef?.name);
   const namespace = topology.data?.spec.namespace;
 
   return (

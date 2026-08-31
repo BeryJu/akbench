@@ -20,7 +20,7 @@ import { Router } from '@kinvolk/headlamp-plugin/lib';
 import { EmptyContent, Link, SectionBox, SimpleTable } from '@kinvolk/headlamp-plugin/lib/CommonComponents';
 import { Alert, Button, Chip, Stack } from '@mui/material';
 import { useHistory, useParams } from 'react-router-dom';
-import { api, ApiError, MANAGEMENT_CLUSTER } from './api';
+import { api, ApiError, headlampClusterName } from './api';
 import { ClusterResourceButton } from './ClusterResourceButton';
 import { TestCaseForm } from './TestCaseForm';
 import { useResource } from './useResource';
@@ -102,10 +102,9 @@ export function TestCasesPage() {
               if (!burnDeployment || !testCase.metadata.namespace) {
                 return null;
               }
-              const cluster =
-                testCase.spec.runnerClusterRef?.name ??
-                clusterByTopology.get(testCase.spec.topologyRef.name) ??
-                MANAGEMENT_CLUSTER;
+              const cluster = headlampClusterName(
+                testCase.spec.runnerClusterRef?.name ?? clusterByTopology.get(testCase.spec.topologyRef.name)
+              );
               return (
                 <ClusterResourceButton
                   kind="Deployment"
