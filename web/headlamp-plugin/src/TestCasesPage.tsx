@@ -16,17 +16,16 @@
 
 // List + create/edit views for TestCase, mirroring the deleted
 // web/frontend's /testcases pages.
-import { Router } from '@kinvolk/headlamp-plugin/lib';
 import { EmptyContent, Link, SectionBox, SimpleTable } from '@kinvolk/headlamp-plugin/lib/CommonComponents';
 import { Alert, Button, Chip, Stack } from '@mui/material';
-import { useHistory, useParams } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
 import { api, ApiError, headlampClusterName } from './api';
 import { ClusterResourceButton } from './ClusterResourceButton';
+import { PrimaryLinkButton } from './PrimaryLinkButton';
 import { TestCaseForm } from './TestCaseForm';
 import { useResource } from './useResource';
 
 export function TestCasesPage() {
-  const history = useHistory();
   const testCases = useResource(() => api.testCases());
   // Only needed to resolve which cluster a Burn test case's k6 Deployment
   // runs on - TestCaseSpec has no clusterRef of its own, it inherits the
@@ -61,15 +60,7 @@ export function TestCasesPage() {
     <SectionBox
       title="Test cases"
       headerProps={{
-        actions: [
-          <Button
-            key="new"
-            variant="contained"
-            onClick={() => history.push(Router.createRouteURL('authentik-bench-testcases-new'))}
-          >
-            New test case
-          </Button>,
-        ],
+        actions: [<PrimaryLinkButton key="new" routeName="authentik-bench-testcases-new" label="New test case" />],
       }}
     >
       {testCases.error && (

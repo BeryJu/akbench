@@ -18,12 +18,12 @@
 // web/frontend's /topologies pages. Headlamp's own generic CRD browser can
 // list/edit these too (as raw YAML), but this page is what actually exposes
 // the guided form (TopologyForm) the standalone UI had.
-import { Router } from '@kinvolk/headlamp-plugin/lib';
 import { EmptyContent, Link, SectionBox, SimpleTable } from '@kinvolk/headlamp-plugin/lib/CommonComponents';
 import { Alert, Button, Chip, Stack } from '@mui/material';
-import { useHistory, useParams } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
 import { api, ApiError, headlampClusterName } from './api';
 import { ClusterResourceButton } from './ClusterResourceButton';
+import { PrimaryLinkButton } from './PrimaryLinkButton';
 import { TopologyForm } from './TopologyForm';
 import { readyCondition } from './types';
 import { useResource } from './useResource';
@@ -42,7 +42,6 @@ function ReadyChip({ status }: { status?: string }) {
 }
 
 export function TopologiesPage() {
-  const history = useHistory();
   const topologies = useResource(() => api.topologies());
 
   async function remove(name: string) {
@@ -61,15 +60,7 @@ export function TopologiesPage() {
     <SectionBox
       title="Topologies"
       headerProps={{
-        actions: [
-          <Button
-            key="new"
-            variant="contained"
-            onClick={() => history.push(Router.createRouteURL('authentik-bench-topologies-new'))}
-          >
-            New topology
-          </Button>,
-        ],
+        actions: [<PrimaryLinkButton key="new" routeName="authentik-bench-topologies-new" label="New topology" />],
       }}
     >
       {topologies.error && (
