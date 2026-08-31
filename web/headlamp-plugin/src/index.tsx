@@ -97,6 +97,7 @@ registerRoute({
   name: 'authentik-bench',
   exact: true,
   useClusterURL: false,
+  noAuthRequired: true,
   component: () => <DashboardPage />,
 });
 
@@ -112,6 +113,7 @@ registerRoute({
   name: 'authentik-bench-topologies',
   exact: true,
   useClusterURL: false,
+  noAuthRequired: true,
   component: () => <TopologiesPage />,
 });
 registerRoute({
@@ -120,6 +122,7 @@ registerRoute({
   name: 'authentik-bench-topologies-new',
   exact: true,
   useClusterURL: false,
+  noAuthRequired: true,
   component: () => <TopologyCreatePage />,
 });
 registerRoute({
@@ -128,6 +131,7 @@ registerRoute({
   name: 'authentik-bench-topologies-edit',
   exact: true,
   useClusterURL: false,
+  noAuthRequired: true,
   component: () => <TopologyEditPage />,
 });
 
@@ -143,6 +147,7 @@ registerRoute({
   name: 'authentik-bench-testcases',
   exact: true,
   useClusterURL: false,
+  noAuthRequired: true,
   component: () => <TestCasesPage />,
 });
 registerRoute({
@@ -151,6 +156,7 @@ registerRoute({
   name: 'authentik-bench-testcases-new',
   exact: true,
   useClusterURL: false,
+  noAuthRequired: true,
   component: () => <TestCaseCreatePage />,
 });
 registerRoute({
@@ -159,6 +165,7 @@ registerRoute({
   name: 'authentik-bench-testcases-edit',
   exact: true,
   useClusterURL: false,
+  noAuthRequired: true,
   component: () => <TestCaseEditPage />,
 });
 
@@ -174,6 +181,7 @@ registerRoute({
   name: 'authentik-bench-clusters',
   exact: true,
   useClusterURL: false,
+  noAuthRequired: true,
   component: () => <ClustersPage />,
 });
 registerRoute({
@@ -182,6 +190,7 @@ registerRoute({
   name: 'authentik-bench-clusters-new',
   exact: true,
   useClusterURL: false,
+  noAuthRequired: true,
   component: () => <ClusterCreatePage />,
 });
 registerRoute({
@@ -190,6 +199,7 @@ registerRoute({
   name: 'authentik-bench-clusters-edit',
   exact: true,
   useClusterURL: false,
+  noAuthRequired: true,
   component: () => <ClusterEditPage />,
 });
 
@@ -205,6 +215,7 @@ registerRoute({
   name: 'authentik-bench-compare',
   exact: true,
   useClusterURL: false,
+  noAuthRequired: true,
   component: () => <ComparePage />,
 });
 
