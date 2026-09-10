@@ -202,23 +202,20 @@ func (r *WorkloadClusterReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		// PVC left without an explicit storageClassName (the authentik
 		// chart's bundled postgresql, notably) stays Pending forever with
 		// "unbound immediate PersistentVolumeClaims", so any Helm install
-		// waiting on it times out. Best-effort/idempotent for the same
-		// reason ensureCNI is.
-		if err := r.ensureStorage(ctx, &wc); err != nil {
-			log.Error(err, "failed to ensure default StorageClass on workload cluster")
-		}
-		// Installs csi-incus (github.com/BeryJu/csi-incus) and makes its
-		// StorageClass the cluster default (see CSIIncusStorageClass) - real
-		// Incus-backed, resizable, snapshot-capable volumes instead of
-		// local-path-provisioner's node-local disk. Best-effort/idempotent
-		// for the same reason as the addons above; Incus-specific, so a
-		// no-op when spec.incus isn't set (guarded inside ensureCSIIncus
-		// itself, same as the provider check earlier in this function).
+		// waiting on it times out. Installs csi-incus (github.com/BeryJu/
+		// csi-incus) and makes its StorageClass the cluster default (see
+		// CSIIncusStorageClass) - real Incus-backed, resizable,
+		// snapshot-capable volumes, the only StorageClass a workload cluster
+		// gets now (local-path-provisioner was dropped once this became
+		// available). Best-effort/idempotent for the same reason as the
+		// other addons; Incus-specific, so a no-op when spec.incus isn't set
+		// (guarded inside ensureCSIIncus itself, same as the provider check
+		// earlier in this function).
 		if err := r.ensureCSIIncus(ctx, &wc); err != nil {
 			log.Error(err, "failed to ensure csi-incus on workload cluster")
 		}
 		// Best-effort/idempotent for the same reason as ensureCNI/
-		// ensureStorage: without it, there's no metrics.k8s.io API on this
+		// ensureCSIIncus: without it, there's no metrics.k8s.io API on this
 		// cluster at all (kubeadm doesn't install it any more than it
 		// installs a CNI), so `kubectl top` and Headlamp's own per-node/
 		// per-pod usage graphs have nothing to read from.
@@ -267,7 +264,7 @@ func (r *WorkloadClusterReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 // remoteAddonClient builds a one-off client directly from the
 // "<name>-kubeconfig" Secret CAPI writes, rather than
 // internal/multicluster.Tracker: this controller only ever needs occasional
-// addon applies (ensureCNI, ensureStorage, ensureMetricsServer), not the long-lived
+// addon applies (ensureCNI, ensureCSIIncus, ensureMetricsServer), not the long-lived
 // cached/watching connection Tracker exists for (that's what
 // AuthentikTopology/TestCase/TestRun use once they actually deploy onto this
 // cluster via clusterRef).
@@ -301,29 +298,15 @@ func (r *WorkloadClusterReconciler) ensureCNI(ctx context.Context, wc *benchv1al
 	return createAll(ctx, remoteClient, objs)
 }
 
-// ensureStorage installs Rancher's local-path-provisioner, plus a default
-// StorageClass backed by it, onto the workload cluster if it isn't there
-// already.
-func (r *WorkloadClusterReconciler) ensureStorage(ctx context.Context, wc *benchv1alpha1.WorkloadCluster) error {
-	remoteClient, err := r.remoteAddonClient(ctx, wc)
-	if err != nil {
-		return err
-	}
-	objs, err := render.StorageObjects()
-	if err != nil {
-		return fmt.Errorf("render storage manifests: %w", err)
-	}
-	return createAll(ctx, remoteClient, objs)
-}
-
 // ensureCSIIncus installs csi-incus (github.com/BeryJu/csi-incus) onto the
 // workload cluster if it isn't there already, including a Secret built by
 // remapping this WorkloadCluster's own Incus/LXC connection Secret
 // (spec.incus.lxcSecretRef) into the shape csi-incus's controller expects
 // (see render.CSIIncusCredentialsSecret) - reusing the existing CAPI
-// provisioning credentials rather than requiring a second certificate. A
-// no-op when spec.incus isn't set: csi-incus is Incus-specific, unlike
-// ensureCNI/ensureStorage/ensureMetricsServer.
+// provisioning credentials rather than requiring a second certificate. This
+// is the only StorageClass a workload cluster gets - no more
+// local-path-provisioner fallback. A no-op when spec.incus isn't set:
+// csi-incus is Incus-specific, unlike ensureCNI/ensureMetricsServer.
 func (r *WorkloadClusterReconciler) ensureCSIIncus(ctx context.Context, wc *benchv1alpha1.WorkloadCluster) error {
 	if wc.Spec.Incus == nil {
 		return nil

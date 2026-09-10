@@ -60,15 +60,17 @@ const CSIIncusStoragePool = "vms"
 // workload cluster, replacing local-path-provisioner's.
 const CSIIncusStorageClassName = "incus-block"
 
-// CSIIncusStorageClass renders the default StorageClass backed by csi-incus:
-// block content type (the driver's default, and the only content type that
-// needs deciding here since every workload-cluster machine is an Incus VM -
-// see render.ControlPlaneLXCMachineTemplate/WorkerLXCMachineTemplate, both
-// instanceType "virtual-machine" - block volumes can't attach to
-// containers). Not vendored from deploy/storageclass-example.yaml: the pool
-// name is this project's own config, not upstream boilerplate, so a small
-// hand-authored object matches this package's convention for project-owned
-// pieces (see PrometheusObjects/PyroscopeObjects/TempoObjects).
+// CSIIncusStorageClass renders the sole StorageClass on every workload
+// cluster (marked default - there's no local-path-provisioner fallback
+// anymore): block content type (the driver's default, and the only content
+// type that needs deciding here since every workload-cluster machine is an
+// Incus VM - see render.ControlPlaneLXCMachineTemplate/
+// WorkerLXCMachineTemplate, both instanceType "virtual-machine" - block
+// volumes can't attach to containers). Not vendored from
+// deploy/storageclass-example.yaml: the pool name is this project's own
+// config, not upstream boilerplate, so a small hand-authored object matches
+// this package's convention for project-owned pieces (see
+// PrometheusObjects/PyroscopeObjects/TempoObjects).
 func CSIIncusStorageClass() *storagev1.StorageClass {
 	return &storagev1.StorageClass{
 		TypeMeta: metav1.TypeMeta{Kind: "StorageClass", APIVersion: "storage.k8s.io/v1"},

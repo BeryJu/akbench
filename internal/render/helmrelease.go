@@ -222,8 +222,8 @@ func HelmValues(t *benchv1alpha1.AuthentikTopology, secretKey string, pgConn *Po
 			// the content coming from a mounted ConfigMap - a benchmark-scale
 			// fixture set (thousands of synthetic users) can exceed a
 			// ConfigMap/Secret's ~1MiB etcd-backed size limit, which a PVC
-			// (backed by real disk via the local-path-provisioner every
-			// workload cluster gets) has no equivalent of.
+			// (backed by real Incus-attached storage via csi-incus - see
+			// CSIIncusStorageClass) has no equivalent of.
 			{valuesKeyName: volumeName, "mountPath": BlueprintMountPath},
 		}
 	}

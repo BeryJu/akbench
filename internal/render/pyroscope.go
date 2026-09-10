@@ -46,7 +46,7 @@ func pyroscopeLabels() map[string]string {
 // ("monolithic mode"), which is Pyroscope's own supported single-binary
 // deployment shape and matches this project's existing no-HA,
 // dev/benchmark-scale posture for the rest of its addons (Prometheus,
-// local-path-provisioner). Local filesystem storage (the image's own
+// csi-incus). Local filesystem storage (the image's own
 // default), so profiles don't survive a pod restart - acceptable here since
 // nothing yet reads this data back out; it exists so authentik's own
 // continuous-profiling push has somewhere real to land instead of failing
