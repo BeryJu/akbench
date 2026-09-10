@@ -47,8 +47,11 @@ const (
 	// csiIncusChartVersion is pinned rather than "*" (as AuthentikTopology's
 	// chart version defaults to) since this project doesn't yet expose a
 	// per-WorkloadCluster override for it - bump deliberately when
-	// csi-incus cuts a new chart release.
-	csiIncusChartVersion = "0.1.0"
+	// csi-incus cuts a new chart release. 0.1.1 fixes a live bug hit on
+	// 0.1.0: ControllerPublishVolume/AttachVolume failed with "Instance
+	// %q not found" for every node, since the reported CSI NodeID didn't
+	// match the underlying Incus instance name.
+	csiIncusChartVersion = "0.1.1"
 
 	CSIIncusHelmReleaseName = "csi-incus"
 
