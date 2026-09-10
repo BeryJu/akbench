@@ -93,7 +93,14 @@ func CSIIncusHelmRepository(namespace string) *sourcev1.HelmRepository {
 // Secret from these values directly (see its secret-incus-tls.yaml
 // template), so no Secret needs to be built or applied here. Overrides the
 // chart's single default StorageClass to provision from the "vms" Incus
-// pool and become the cluster's default.
+// pool and become the cluster's default. Disables the chart's default
+// VolumeSnapshotClass: this project doesn't install the
+// snapshot.storage.k8s.io CRDs/external-snapshotter controller on any
+// workload cluster, so leaving it on fails the whole Helm install
+// ("resource mapping not found for name: incus-block ... no matches for
+// kind VolumeSnapshotClass") rather than just sitting inert - a pure
+// scope cut, not a capability regression from the earlier vendored-YAML
+// approach (which never applied a VolumeSnapshotClass either).
 func CSIIncusHelmValues(source *corev1.Secret) (*apiextensionsv1.JSON, error) {
 	values := map[string]any{
 		"incus": map[string]any{
@@ -114,6 +121,9 @@ func CSIIncusHelmValues(source *corev1.Secret) (*apiextensionsv1.JSON, error) {
 				"allowVolumeExpansion": true,
 				"isDefaultClass":       true,
 			},
+		},
+		"volumeSnapshotClass": map[string]any{
+			"create": false,
 		},
 	}
 	raw, err := json.Marshal(values)

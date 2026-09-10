@@ -87,6 +87,14 @@ func TestCSIIncusHelmValuesRemapsKeys(t *testing.T) {
 	if class["isDefaultClass"] != true {
 		t.Errorf("storageClasses[0].isDefaultClass = %v, want true", class["isDefaultClass"])
 	}
+
+	snapClass, ok := values["volumeSnapshotClass"].(map[string]any)
+	if !ok {
+		t.Fatalf("values.volumeSnapshotClass missing or wrong type: %v", values["volumeSnapshotClass"])
+	}
+	if snapClass["create"] != false {
+		t.Errorf("volumeSnapshotClass.create = %v, want false", snapClass["create"])
+	}
 }
 
 func TestCSIIncusHelmRelease(t *testing.T) {
