@@ -299,34 +299,38 @@ func (r *WorkloadClusterReconciler) ensureCNI(ctx context.Context, wc *benchv1al
 }
 
 // ensureCSIIncus installs csi-incus (github.com/BeryJu/csi-incus) onto the
-// workload cluster if it isn't there already, including a Secret built by
-// remapping this WorkloadCluster's own Incus/LXC connection Secret
-// (spec.incus.lxcSecretRef) into the shape csi-incus's controller expects
-// (see render.CSIIncusCredentialsSecret) - reusing the existing CAPI
-// provisioning credentials rather than requiring a second certificate. This
-// is the only StorageClass a workload cluster gets - no more
-// local-path-provisioner fallback. A no-op when spec.incus isn't set:
-// csi-incus is Incus-specific, unlike ensureCNI/ensureMetricsServer.
+// workload cluster via its own published Helm chart - a Flux
+// HelmRepository + HelmRelease applied here on the management cluster with
+// spec.kubeConfig pointing helm-controller at the workload cluster,
+// mirroring exactly how AuthentikTopologyReconciler installs the authentik
+// chart remotely (internal/render/helmrelease.go). Chart values are built
+// by remapping this WorkloadCluster's own Incus/LXC connection Secret
+// (spec.incus.lxcSecretRef) into the shape the chart expects (see
+// render.CSIIncusHelmValues) - reusing the existing CAPI provisioning
+// credentials rather than requiring a second certificate. This is the only
+// StorageClass a workload cluster gets - no more local-path-provisioner
+// fallback. A no-op when spec.incus isn't set: csi-incus is Incus-specific,
+// unlike ensureCNI/ensureMetricsServer.
 func (r *WorkloadClusterReconciler) ensureCSIIncus(ctx context.Context, wc *benchv1alpha1.WorkloadCluster) error {
 	if wc.Spec.Incus == nil {
 		return nil
-	}
-	remoteClient, err := r.remoteAddonClient(ctx, wc)
-	if err != nil {
-		return err
 	}
 	var source corev1.Secret
 	if err := r.Get(ctx, types.NamespacedName{Name: wc.Spec.Incus.LXCSecretRef.Name, Namespace: wc.Namespace}, &source); err != nil {
 		return fmt.Errorf("get incus credentials secret: %w", err)
 	}
-	if err := remoteClient.Create(ctx, render.CSIIncusCredentialsSecret(&source)); err != nil && !apierrors.IsAlreadyExists(err) {
-		return fmt.Errorf("create incus-credentials secret: %w", err)
-	}
-	objs, err := render.CSIIncusServiceObjects()
+	values, err := render.CSIIncusHelmValues(&source)
 	if err != nil {
-		return fmt.Errorf("render csi-incus manifests: %w", err)
+		return err
 	}
-	return createAll(ctx, remoteClient, objs)
+	if err := applyOwned(ctx, r.Client, r.Scheme, wc, render.CSIIncusHelmRepository(wc.Namespace)); err != nil {
+		return fmt.Errorf("apply csi-incus HelmRepository: %w", err)
+	}
+	hr := render.CSIIncusHelmRelease(wc.Namespace, render.KubeconfigSecretName(wc), values)
+	if err := applyOwned(ctx, r.Client, r.Scheme, wc, hr); err != nil {
+		return fmt.Errorf("apply csi-incus HelmRelease: %w", err)
+	}
+	return nil
 }
 
 // ensureMetricsServer installs kubernetes-sigs/metrics-server onto the

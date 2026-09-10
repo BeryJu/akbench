@@ -17,121 +17,141 @@ limitations under the License.
 package render
 
 import (
-	_ "embed"
+	"encoding/json"
 	"fmt"
 
+	helmv2 "github.com/fluxcd/helm-controller/api/v2"
+	fluxmeta "github.com/fluxcd/pkg/apis/meta"
+	sourcev1 "github.com/fluxcd/source-controller/api/v1"
 	corev1 "k8s.io/api/core/v1"
-	storagev1 "k8s.io/api/storage/v1"
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/utils/ptr"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-// The csi-incus manifests below are vendored verbatim from
-// ~/t/csi-incus/deploy/ (github.com/BeryJu/csi-incus) - upstream boilerplate
-// (CSIDriver object, RBAC, the controller Deployment with its
-// registry.k8s.io/sig-storage sidecars, the node DaemonSet), already wired to
-// expect a "incus-credentials" Secret in kube-system with keys
-// addr/client-cert/client-key/server-cert. Nothing here is templated per
-// workload cluster.
-var (
-	//go:embed manifests/csi-incus/csidriver.yaml
-	csiIncusDriverManifest []byte
-	//go:embed manifests/csi-incus/rbac.yaml
-	csiIncusRBACManifest []byte
-	//go:embed manifests/csi-incus/controller.yaml
-	csiIncusControllerManifest []byte
-	//go:embed manifests/csi-incus/node.yaml
-	csiIncusNodeManifest []byte
-)
-
-// CSIIncusCredentialsNamespace/Name must match what the vendored
-// controller.yaml expects (see its own header comment).
+// csi-incus (github.com/BeryJu/csi-incus) publishes its own Helm chart to
+// GHCR as an OCI artifact on every vX.Y.Z release tag - installed the same
+// way AuthentikTopology's own chart is (internal/render/helmrelease.go): a
+// Flux HelmRepository + HelmRelease applied on the management cluster, with
+// spec.kubeConfig.secretRef pointing helm-controller at the workload
+// cluster to install onto remotely. This replaced an earlier
+// vendored-raw-YAML approach (go:embed'd deploy/*.yaml) once the chart
+// existed - Flux/helm-controller already handles upgrades, rollback, and
+// drift the hand-rolled createAll() helper never did.
 const (
-	CSIIncusCredentialsNamespace = "kube-system"
-	CSIIncusCredentialsName      = "incus-credentials"
+	// CSIIncusHelmRepositoryName/csiIncusChartName/csiIncusOCIRepoURL locate
+	// the chart itself.
+	CSIIncusHelmRepositoryName = "csi-incus"
+	csiIncusChartName          = "csi-incus"
+	csiIncusOCIRepoURL         = "oci://ghcr.io/beryju/charts"
+
+	// csiIncusChartVersion is pinned rather than "*" (as AuthentikTopology's
+	// chart version defaults to) since this project doesn't yet expose a
+	// per-WorkloadCluster override for it - bump deliberately when
+	// csi-incus cuts a new chart release.
+	csiIncusChartVersion = "0.1.0"
+
+	CSIIncusHelmReleaseName = "csi-incus"
+
+	// CSIIncusNamespace matches the chart's own convention (and the
+	// original hand-vendored manifests' hardcoded namespace) for where a
+	// CSI driver's controller/node components live.
+	CSIIncusNamespace = "kube-system"
+
+	// CSIIncusStoragePool is the Incus storage pool the chart's
+	// StorageClass provisions volumes from on every workload cluster.
+	CSIIncusStoragePool = "vms"
+
+	// CSIIncusStorageClassName is the sole StorageClass on every workload
+	// cluster (marked default - there's no local-path-provisioner fallback
+	// any more).
+	CSIIncusStorageClassName = "incus-block"
 )
 
-// CSIIncusStoragePool is the Incus storage pool csi-incus provisions volumes
-// from on every workload cluster.
-const CSIIncusStoragePool = "vms"
-
-// CSIIncusStorageClassName is the sole default StorageClass on every
-// workload cluster, replacing local-path-provisioner's.
-const CSIIncusStorageClassName = "incus-block"
-
-// CSIIncusStorageClass renders the sole StorageClass on every workload
-// cluster (marked default - there's no local-path-provisioner fallback
-// anymore): block content type (the driver's default, and the only content
-// type that needs deciding here since every workload-cluster machine is an
-// Incus VM - see render.ControlPlaneLXCMachineTemplate/
-// WorkerLXCMachineTemplate, both instanceType "virtual-machine" - block
-// volumes can't attach to containers). Not vendored from
-// deploy/storageclass-example.yaml: the pool name is this project's own
-// config, not upstream boilerplate, so a small hand-authored object matches
-// this package's convention for project-owned pieces (see
-// PrometheusObjects/PyroscopeObjects/TempoObjects).
-func CSIIncusStorageClass() *storagev1.StorageClass {
-	return &storagev1.StorageClass{
-		TypeMeta: metav1.TypeMeta{Kind: "StorageClass", APIVersion: "storage.k8s.io/v1"},
+// CSIIncusHelmRepository is the (singleton, per-namespace) OCI HelmRepository
+// pointing at csi-incus's published chart.
+func CSIIncusHelmRepository(namespace string) *sourcev1.HelmRepository {
+	return &sourcev1.HelmRepository{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:        CSIIncusStorageClassName,
-			Annotations: map[string]string{"storageclass.kubernetes.io/is-default-class": "true"},
+			Name:      CSIIncusHelmRepositoryName,
+			Namespace: namespace,
 		},
-		Provisioner:          "incus.csi.linuxcontainers.org",
-		Parameters:           map[string]string{"pool": CSIIncusStoragePool, "contentType": "block"},
-		ReclaimPolicy:        ptr.To(corev1.PersistentVolumeReclaimDelete),
-		VolumeBindingMode:    ptr.To(storagev1.VolumeBindingWaitForFirstConsumer),
-		AllowVolumeExpansion: ptr.To(true),
+		Spec: sourcev1.HelmRepositorySpec{
+			Type:     sourcev1.HelmRepositoryTypeOCI,
+			URL:      csiIncusOCIRepoURL,
+			Interval: metav1.Duration{Duration: helmRepoInterval},
+		},
 	}
 }
 
-// CSIIncusServiceObjects returns the CSIDriver, RBAC, controller Deployment,
-// node DaemonSet, and default StorageClass WorkloadClusterReconciler applies
-// to every workload cluster. VolumeSnapshotClass support is deliberately
-// left out for now: this project doesn't install the
-// snapshot.storage.k8s.io CRDs/external-snapshotter controller anywhere, so
-// applying one would either fail outright or sit inert - the controller's
-// own csi-snapshotter sidecar (in the vendored controller.yaml) stays as a
-// harmless idle process in the meantime.
-func CSIIncusServiceObjects() ([]client.Object, error) {
-	var objs []client.Object
-	for _, manifest := range [][]byte{csiIncusDriverManifest, csiIncusRBACManifest, csiIncusControllerManifest, csiIncusNodeManifest} {
-		decoded, err := decodeManifest(manifest)
-		if err != nil {
-			return nil, fmt.Errorf("decode csi-incus manifest: %w", err)
-		}
-		objs = append(objs, decoded...)
+// CSIIncusHelmValues builds spec.values for the csi-incus chart install,
+// remapping this WorkloadCluster's own Incus/LXC connection Secret
+// (spec.incus.lxcSecretRef - keys server/client-crt/client-key/server-crt,
+// see that field's own doc comment) into the chart's
+// incus.addr/incus.tls.* values. Reuses the existing CAPI provisioning
+// credentials instead of requiring a second certificate to be generated and
+// registered per the chart's own README - the chart creates its own TLS
+// Secret from these values directly (see its secret-incus-tls.yaml
+// template), so no Secret needs to be built or applied here. Overrides the
+// chart's single default StorageClass to provision from the "vms" Incus
+// pool and become the cluster's default.
+func CSIIncusHelmValues(source *corev1.Secret) (*apiextensionsv1.JSON, error) {
+	values := map[string]any{
+		"incus": map[string]any{
+			"addr": string(source.Data["server"]),
+			"tls": map[string]any{
+				"clientCert": string(source.Data["client-crt"]),
+				"clientKey":  string(source.Data["client-key"]),
+				"serverCert": string(source.Data["server-crt"]),
+			},
+		},
+		"storageClasses": []map[string]any{
+			{
+				"name":                 CSIIncusStorageClassName,
+				"pool":                 CSIIncusStoragePool,
+				"contentType":          "block",
+				"reclaimPolicy":        "Delete",
+				"volumeBindingMode":    "WaitForFirstConsumer",
+				"allowVolumeExpansion": true,
+				"isDefaultClass":       true,
+			},
+		},
 	}
-	objs = append(objs, CSIIncusStorageClass())
-	return objs, nil
+	raw, err := json.Marshal(values)
+	if err != nil {
+		return nil, fmt.Errorf("marshal csi-incus helm values: %w", err)
+	}
+	return &apiextensionsv1.JSON{Raw: raw}, nil
 }
 
-// CSIIncusCredentialsSecret builds the "incus-credentials" Secret the
-// vendored controller.yaml expects, by remapping keys from the same
-// Incus/LXC connection Secret this project already uses for CAPI
-// provisioning (WorkloadClusterSpec.Incus.LXCSecretRef - see its own doc
-// comment for its key names: server/project/client-crt/client-key, plus
-// server-crt seen live on this project's own lxc-secret). Reuses the
-// existing trust relationship instead of requiring a second client
-// certificate to be generated and registered per csi-incus's own README.
-// "project" has no equivalent in csi-incus's controller (no such flag/env
-// var in its README) and is intentionally dropped.
-func CSIIncusCredentialsSecret(source *corev1.Secret) *corev1.Secret {
-	data := map[string][]byte{
-		"addr":        source.Data["server"],
-		"client-cert": source.Data["client-crt"],
-		"client-key":  source.Data["client-key"],
-	}
-	if serverCert, ok := source.Data["server-crt"]; ok {
-		data["server-cert"] = serverCert
-	}
-	return &corev1.Secret{
-		TypeMeta: metav1.TypeMeta{Kind: "Secret", APIVersion: "v1"},
+// CSIIncusHelmRelease builds the Flux HelmRelease that installs csi-incus
+// onto a workload cluster remotely - kubeConfigSecretName is the
+// "<cluster>-kubeconfig" Secret CAPI writes (see render.KubeconfigSecretName).
+func CSIIncusHelmRelease(namespace, kubeConfigSecretName string, values *apiextensionsv1.JSON) *helmv2.HelmRelease {
+	return &helmv2.HelmRelease{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      CSIIncusCredentialsName,
-			Namespace: CSIIncusCredentialsNamespace,
+			Name:      CSIIncusHelmReleaseName,
+			Namespace: namespace,
 		},
-		Data: data,
+		Spec: helmv2.HelmReleaseSpec{
+			Interval:    metav1.Duration{Duration: helmRepoInterval},
+			Timeout:     &metav1.Duration{Duration: helmInstallTimeout},
+			ReleaseName: CSIIncusHelmReleaseName,
+			Chart: &helmv2.HelmChartTemplate{
+				Spec: helmv2.HelmChartTemplateSpec{
+					Chart:   csiIncusChartName,
+					Version: csiIncusChartVersion,
+					SourceRef: helmv2.CrossNamespaceObjectReference{
+						Kind:      sourcev1.HelmRepositoryKind,
+						Name:      CSIIncusHelmRepositoryName,
+						Namespace: namespace,
+					},
+				},
+			},
+			TargetNamespace: CSIIncusNamespace,
+			Values:          values,
+			KubeConfig: &fluxmeta.KubeConfigReference{
+				SecretRef: &fluxmeta.SecretKeyReference{Name: kubeConfigSecretName},
+			},
+		},
 	}
 }

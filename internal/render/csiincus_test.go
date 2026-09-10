@@ -1,64 +1,32 @@
 package render
 
 import (
+	"encoding/json"
 	"testing"
 
+	sourcev1 "github.com/fluxcd/source-controller/api/v1"
 	corev1 "k8s.io/api/core/v1"
-	storagev1 "k8s.io/api/storage/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-func TestCSIIncusServiceObjects(t *testing.T) {
-	objs, err := CSIIncusServiceObjects()
-	if err != nil {
-		t.Fatalf("CSIIncusServiceObjects: %v", err)
-	}
+func TestCSIIncusHelmRepositoryIsOCI(t *testing.T) {
+	repo := CSIIncusHelmRepository("default")
 
-	found := map[string]bool{
-		"CSIDriver":          false,
-		"ServiceAccount":     false,
-		"ClusterRole":        false,
-		"ClusterRoleBinding": false,
-		"Deployment":         false,
-		"DaemonSet":          false,
-		"StorageClass":       false,
+	if repo.Name != CSIIncusHelmRepositoryName {
+		t.Errorf("name = %q, want %q", repo.Name, CSIIncusHelmRepositoryName)
 	}
-	var sc *storagev1.StorageClass
-	for _, obj := range objs {
-		if obj.GetName() == "" {
-			t.Errorf("object of kind %s has no name", obj.GetObjectKind().GroupVersionKind().Kind)
-		}
-		found[obj.GetObjectKind().GroupVersionKind().Kind] = true
-		if s, ok := obj.(*storagev1.StorageClass); ok {
-			sc = s
-		}
+	if repo.Namespace != "default" {
+		t.Errorf("namespace = %q, want default", repo.Namespace)
 	}
-	for kind, ok := range found {
-		if !ok {
-			t.Errorf("expected a %s object in CSIIncusServiceObjects, found none", kind)
-		}
+	if repo.Spec.Type != sourcev1.HelmRepositoryTypeOCI {
+		t.Errorf("type = %q, want %q", repo.Spec.Type, sourcev1.HelmRepositoryTypeOCI)
 	}
-
-	if sc == nil {
-		t.Fatal("no StorageClass found in CSIIncusServiceObjects")
-	}
-	if sc.Name != CSIIncusStorageClassName {
-		t.Errorf("StorageClass name = %q, want %q", sc.Name, CSIIncusStorageClassName)
-	}
-	if sc.Annotations["storageclass.kubernetes.io/is-default-class"] != "true" {
-		t.Errorf("StorageClass is-default-class annotation = %q, want %q", sc.Annotations["storageclass.kubernetes.io/is-default-class"], "true")
-	}
-	if sc.Parameters["pool"] != CSIIncusStoragePool {
-		t.Errorf("StorageClass pool parameter = %q, want %q", sc.Parameters["pool"], CSIIncusStoragePool)
-	}
-	if sc.Parameters["contentType"] != "block" {
-		t.Errorf("StorageClass contentType parameter = %q, want %q", sc.Parameters["contentType"], "block")
+	if repo.Spec.URL != csiIncusOCIRepoURL {
+		t.Errorf("url = %q, want %q", repo.Spec.URL, csiIncusOCIRepoURL)
 	}
 }
 
-func TestCSIIncusCredentialsSecretRemapsKeys(t *testing.T) {
+func TestCSIIncusHelmValuesRemapsKeys(t *testing.T) {
 	source := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: "lxc-secret", Namespace: "default"},
 		Data: map[string][]byte{
 			"server":     []byte("https://incus.example.com:8443"),
 			"client-crt": []byte("client-cert-bytes"),
@@ -68,42 +36,83 @@ func TestCSIIncusCredentialsSecretRemapsKeys(t *testing.T) {
 		},
 	}
 
-	secret := CSIIncusCredentialsSecret(source)
-
-	if secret.Name != CSIIncusCredentialsName {
-		t.Errorf("name = %q, want %q", secret.Name, CSIIncusCredentialsName)
-	}
-	if secret.Namespace != CSIIncusCredentialsNamespace {
-		t.Errorf("namespace = %q, want %q", secret.Namespace, CSIIncusCredentialsNamespace)
+	raw, err := CSIIncusHelmValues(source)
+	if err != nil {
+		t.Fatalf("CSIIncusHelmValues: %v", err)
 	}
 
-	want := map[string]string{
-		"addr":        "https://incus.example.com:8443",
-		"client-cert": "client-cert-bytes",
-		"client-key":  "client-key-bytes",
-		"server-cert": "server-cert-bytes",
+	var values map[string]any
+	if err := json.Unmarshal(raw.Raw, &values); err != nil {
+		t.Fatalf("unmarshal values: %v", err)
 	}
-	for k, v := range want {
-		if got := string(secret.Data[k]); got != v {
-			t.Errorf("secret.Data[%q] = %q, want %q", k, got, v)
-		}
+
+	incus, ok := values["incus"].(map[string]any)
+	if !ok {
+		t.Fatalf("values.incus missing or wrong type: %v", values["incus"])
 	}
-	if _, ok := secret.Data["project"]; ok {
-		t.Errorf("secret.Data should not carry a project key, got %q", secret.Data["project"])
+	if incus["addr"] != "https://incus.example.com:8443" {
+		t.Errorf("incus.addr = %v, want https://incus.example.com:8443", incus["addr"])
+	}
+	tls, ok := incus["tls"].(map[string]any)
+	if !ok {
+		t.Fatalf("values.incus.tls missing or wrong type: %v", incus["tls"])
+	}
+	if tls["clientCert"] != "client-cert-bytes" {
+		t.Errorf("incus.tls.clientCert = %v, want client-cert-bytes", tls["clientCert"])
+	}
+	if tls["clientKey"] != "client-key-bytes" {
+		t.Errorf("incus.tls.clientKey = %v, want client-key-bytes", tls["clientKey"])
+	}
+	if tls["serverCert"] != "server-cert-bytes" {
+		t.Errorf("incus.tls.serverCert = %v, want server-cert-bytes", tls["serverCert"])
+	}
+
+	classes, ok := values["storageClasses"].([]any)
+	if !ok || len(classes) != 1 {
+		t.Fatalf("values.storageClasses = %v, want a single-element list", values["storageClasses"])
+	}
+	class, ok := classes[0].(map[string]any)
+	if !ok {
+		t.Fatalf("storageClasses[0] is not a map: %v", classes[0])
+	}
+	if class["name"] != CSIIncusStorageClassName {
+		t.Errorf("storageClasses[0].name = %v, want %q", class["name"], CSIIncusStorageClassName)
+	}
+	if class["pool"] != CSIIncusStoragePool {
+		t.Errorf("storageClasses[0].pool = %v, want %q", class["pool"], CSIIncusStoragePool)
+	}
+	if class["contentType"] != "block" {
+		t.Errorf("storageClasses[0].contentType = %v, want block", class["contentType"])
+	}
+	if class["isDefaultClass"] != true {
+		t.Errorf("storageClasses[0].isDefaultClass = %v, want true", class["isDefaultClass"])
 	}
 }
 
-func TestCSIIncusCredentialsSecretMissingServerCert(t *testing.T) {
-	source := &corev1.Secret{
-		Data: map[string][]byte{
-			"server":     []byte("https://incus.example.com:8443"),
-			"client-crt": []byte("client-cert-bytes"),
-			"client-key": []byte("client-key-bytes"),
-		},
+func TestCSIIncusHelmRelease(t *testing.T) {
+	values, err := CSIIncusHelmValues(&corev1.Secret{Data: map[string][]byte{}})
+	if err != nil {
+		t.Fatalf("CSIIncusHelmValues: %v", err)
 	}
 
-	secret := CSIIncusCredentialsSecret(source)
-	if _, ok := secret.Data["server-cert"]; ok {
-		t.Error("secret.Data should not carry a server-cert key when the source has none")
+	hr := CSIIncusHelmRelease("default", "my-cluster-kubeconfig", values)
+
+	if hr.Name != CSIIncusHelmReleaseName {
+		t.Errorf("name = %q, want %q", hr.Name, CSIIncusHelmReleaseName)
+	}
+	if hr.Namespace != "default" {
+		t.Errorf("namespace = %q, want default", hr.Namespace)
+	}
+	if hr.Spec.Chart.Spec.Chart != csiIncusChartName {
+		t.Errorf("chart = %q, want %q", hr.Spec.Chart.Spec.Chart, csiIncusChartName)
+	}
+	if hr.Spec.Chart.Spec.SourceRef.Name != CSIIncusHelmRepositoryName {
+		t.Errorf("sourceRef.name = %q, want %q", hr.Spec.Chart.Spec.SourceRef.Name, CSIIncusHelmRepositoryName)
+	}
+	if hr.Spec.TargetNamespace != CSIIncusNamespace {
+		t.Errorf("targetNamespace = %q, want %q", hr.Spec.TargetNamespace, CSIIncusNamespace)
+	}
+	if hr.Spec.KubeConfig == nil || hr.Spec.KubeConfig.SecretRef.Name != "my-cluster-kubeconfig" {
+		t.Errorf("kubeConfig.secretRef.name = %v, want my-cluster-kubeconfig", hr.Spec.KubeConfig)
 	}
 }
