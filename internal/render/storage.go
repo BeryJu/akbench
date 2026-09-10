@@ -24,26 +24,20 @@ import (
 
 // localPathStorageManifest is upstream's own deploy/local-path-storage.yaml
 // (https://github.com/rancher/local-path-provisioner, pinned at v0.0.37),
-// vendored verbatim except for one addition: the "local-path" StorageClass
-// it defines is annotated storageclass.kubernetes.io/is-default-class so
-// PVCs render.HelmValues leaves without an explicit storageClassName (the
-// authentik chart's bundled postgresql subchart, notably) bind automatically
-// instead of sitting Pending forever.
+// vendored verbatim.
 //
 //go:embed manifests/local-path-storage.yaml
 var localPathStorageManifest []byte
 
-// StorageObjects returns the dynamic-provisioner objects
-// WorkloadClusterReconciler applies to a workload cluster once its control
-// plane is up: there's no Incus-native CSI driver worth depending on (the
-// only Incus/LXD-adjacent option, canonical/lxd-csi-driver, is LXD-only,
-// explicitly early-stage with no backwards-compatibility guarantee, and
-// requires devLXD volume management plus a bearer-token auth setup per
-// cluster) - so every workload cluster gets Rancher's local-path-provisioner
-// instead, backed by each node's own local disk. Without a default
-// StorageClass, any PVC with no storageClassName (e.g. the authentik
-// chart's bundled postgresql) stays Pending forever with "unbound immediate
-// PersistentVolumeClaims", and any Helm install waiting on it times out.
+// StorageObjects returns Rancher's local-path-provisioner objects
+// WorkloadClusterReconciler applies to every workload cluster, backed by
+// each node's own local disk - a second, non-default StorageClass for
+// anything that doesn't need real persistence/resize/snapshot semantics.
+// The default StorageClass is csi-incus's (see CSIIncusStorageClass) - this
+// manifest's own "local-path" StorageClass deliberately carries no
+// is-default-class annotation, so exactly one StorageClass in the cluster
+// is ever marked default (two would make PVCs with no storageClassName pick
+// unpredictably between them).
 func StorageObjects() ([]client.Object, error) {
 	return decodeManifest(localPathStorageManifest)
 }

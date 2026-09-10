@@ -207,6 +207,16 @@ func (r *WorkloadClusterReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		if err := r.ensureStorage(ctx, &wc); err != nil {
 			log.Error(err, "failed to ensure default StorageClass on workload cluster")
 		}
+		// Installs csi-incus (github.com/BeryJu/csi-incus) and makes its
+		// StorageClass the cluster default (see CSIIncusStorageClass) - real
+		// Incus-backed, resizable, snapshot-capable volumes instead of
+		// local-path-provisioner's node-local disk. Best-effort/idempotent
+		// for the same reason as the addons above; Incus-specific, so a
+		// no-op when spec.incus isn't set (guarded inside ensureCSIIncus
+		// itself, same as the provider check earlier in this function).
+		if err := r.ensureCSIIncus(ctx, &wc); err != nil {
+			log.Error(err, "failed to ensure csi-incus on workload cluster")
+		}
 		// Best-effort/idempotent for the same reason as ensureCNI/
 		// ensureStorage: without it, there's no metrics.k8s.io API on this
 		// cluster at all (kubeadm doesn't install it any more than it
@@ -302,6 +312,36 @@ func (r *WorkloadClusterReconciler) ensureStorage(ctx context.Context, wc *bench
 	objs, err := render.StorageObjects()
 	if err != nil {
 		return fmt.Errorf("render storage manifests: %w", err)
+	}
+	return createAll(ctx, remoteClient, objs)
+}
+
+// ensureCSIIncus installs csi-incus (github.com/BeryJu/csi-incus) onto the
+// workload cluster if it isn't there already, including a Secret built by
+// remapping this WorkloadCluster's own Incus/LXC connection Secret
+// (spec.incus.lxcSecretRef) into the shape csi-incus's controller expects
+// (see render.CSIIncusCredentialsSecret) - reusing the existing CAPI
+// provisioning credentials rather than requiring a second certificate. A
+// no-op when spec.incus isn't set: csi-incus is Incus-specific, unlike
+// ensureCNI/ensureStorage/ensureMetricsServer.
+func (r *WorkloadClusterReconciler) ensureCSIIncus(ctx context.Context, wc *benchv1alpha1.WorkloadCluster) error {
+	if wc.Spec.Incus == nil {
+		return nil
+	}
+	remoteClient, err := r.remoteAddonClient(ctx, wc)
+	if err != nil {
+		return err
+	}
+	var source corev1.Secret
+	if err := r.Get(ctx, types.NamespacedName{Name: wc.Spec.Incus.LXCSecretRef.Name, Namespace: wc.Namespace}, &source); err != nil {
+		return fmt.Errorf("get incus credentials secret: %w", err)
+	}
+	if err := remoteClient.Create(ctx, render.CSIIncusCredentialsSecret(&source)); err != nil && !apierrors.IsAlreadyExists(err) {
+		return fmt.Errorf("create incus-credentials secret: %w", err)
+	}
+	objs, err := render.CSIIncusServiceObjects()
+	if err != nil {
+		return fmt.Errorf("render csi-incus manifests: %w", err)
 	}
 	return createAll(ctx, remoteClient, objs)
 }
