@@ -1,66 +1,59 @@
 package render
 
 import (
+	"encoding/json"
 	"testing"
-
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
-func TestMetricsServerObjectsParsesManifest(t *testing.T) {
-	objs, err := MetricsServerObjects()
+func TestMetricsServerHelmRepository(t *testing.T) {
+	repo := MetricsServerHelmRepository("default")
+
+	if repo.Name != MetricsServerHelmRepositoryName {
+		t.Errorf("name = %q, want %q", repo.Name, MetricsServerHelmRepositoryName)
+	}
+	if repo.Namespace != "default" {
+		t.Errorf("namespace = %q, want default", repo.Namespace)
+	}
+	if repo.Spec.URL != metricsServerChartRepoURL {
+		t.Errorf("url = %q, want %q", repo.Spec.URL, metricsServerChartRepoURL)
+	}
+}
+
+func TestMetricsServerHelmValuesSetsInsecureTLS(t *testing.T) {
+	raw, err := MetricsServerHelmValues()
 	if err != nil {
-		t.Fatalf("MetricsServerObjects: %v", err)
-	}
-	wantKinds := map[string]bool{
-		"ServiceAccount": false, "ClusterRole": false, "ClusterRoleBinding": false,
-		"RoleBinding": false, "Service": false, "Deployment": false, "APIService": false,
-	}
-	var deployment *unstructured.Unstructured
-	for _, obj := range objs {
-		kind := obj.GetObjectKind().GroupVersionKind().Kind
-		if obj.GetName() == "" {
-			t.Errorf("object of kind %q has no name", kind)
-		}
-		if _, ok := wantKinds[kind]; ok {
-			wantKinds[kind] = true
-		}
-		if kind == "Deployment" {
-			if u, ok := obj.(*unstructured.Unstructured); ok {
-				deployment = u
-			}
-		}
-	}
-	for kind, found := range wantKinds {
-		if !found {
-			t.Errorf("expected a %s object in the metrics-server manifest, found none", kind)
-		}
+		t.Fatalf("MetricsServerHelmValues: %v", err)
 	}
 
-	// kubeadm clusters don't wire up a kubelet serving certificate signed by
-	// a CA metrics-server trusts by default - without this flag every
-	// scrape fails and `kubectl top` never returns data. Guards against a
-	// future re-vendor of components.yaml silently dropping the patch.
-	if deployment == nil {
-		t.Fatal("no Deployment found in the metrics-server manifest")
+	var values map[string]any
+	if err := json.Unmarshal(raw.Raw, &values); err != nil {
+		t.Fatalf("unmarshal values: %v", err)
 	}
-	containers, _, err := unstructured.NestedSlice(deployment.Object, "spec", "template", "spec", "containers")
+
+	args, ok := values["args"].([]any)
+	if !ok || len(args) != 1 || args[0] != "--kubelet-insecure-tls" {
+		t.Errorf("values.args = %v, want [--kubelet-insecure-tls]", values["args"])
+	}
+}
+
+func TestMetricsServerHelmRelease(t *testing.T) {
+	values, err := MetricsServerHelmValues()
 	if err != nil {
-		t.Fatalf("read Deployment containers: %v", err)
+		t.Fatalf("MetricsServerHelmValues: %v", err)
 	}
-	found := false
-	for _, c := range containers {
-		container, ok := c.(map[string]any)
-		if !ok {
-			continue
-		}
-		args, _, _ := unstructured.NestedSlice(container, "args")
-		for _, a := range args {
-			if a == "--kubelet-insecure-tls" {
-				found = true
-			}
-		}
+
+	hr := MetricsServerHelmRelease("default", "my-cluster-kubeconfig", values)
+
+	if hr.Name != MetricsServerHelmReleaseName {
+		t.Errorf("name = %q, want %q", hr.Name, MetricsServerHelmReleaseName)
 	}
-	if !found {
-		t.Error("expected --kubelet-insecure-tls in the metrics-server container args")
+	if hr.Spec.Chart.Spec.Chart != metricsServerChartName {
+		t.Errorf("chart = %q, want %q", hr.Spec.Chart.Spec.Chart, metricsServerChartName)
+	}
+	if hr.Spec.TargetNamespace != MetricsServerNamespace {
+		t.Errorf("targetNamespace = %q, want %q", hr.Spec.TargetNamespace, MetricsServerNamespace)
+	}
+	if hr.Spec.KubeConfig == nil || hr.Spec.KubeConfig.SecretRef.Name != "my-cluster-kubeconfig" {
+		t.Errorf("kubeConfig.secretRef.name = %v, want my-cluster-kubeconfig", hr.Spec.KubeConfig)
 	}
 }

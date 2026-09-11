@@ -264,10 +264,13 @@ func (r *WorkloadClusterReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 // remoteAddonClient builds a one-off client directly from the
 // "<name>-kubeconfig" Secret CAPI writes, rather than
 // internal/multicluster.Tracker: this controller only ever needs occasional
-// addon applies (ensureCNI, ensureCSIIncus, ensureMetricsServer), not the long-lived
-// cached/watching connection Tracker exists for (that's what
-// AuthentikTopology/TestCase/TestRun use once they actually deploy onto this
-// cluster via clusterRef).
+// addon applies (ensurePrometheus, ensurePyroscope, ensureTempo - the
+// project-authored addons with no upstream Helm chart worth depending on),
+// not the long-lived cached/watching connection Tracker exists for (that's
+// what AuthentikTopology/TestCase/TestRun use once they actually deploy onto
+// this cluster via clusterRef). ensureCNI/ensureCSIIncus/ensureMetricsServer
+// install via their own official Helm charts instead (Flux HelmRelease
+// applied locally with spec.kubeConfig), so they never need this.
 func (r *WorkloadClusterReconciler) remoteAddonClient(ctx context.Context, wc *benchv1alpha1.WorkloadCluster) (client.Client, error) {
 	kubeconfigBytes, err := capikubeconfig.FromSecret(ctx, r.Client, client.ObjectKey{Name: wc.Name, Namespace: wc.Namespace})
 	if err != nil {
@@ -284,18 +287,19 @@ func (r *WorkloadClusterReconciler) remoteAddonClient(ctx context.Context, wc *b
 	return remoteClient, nil
 }
 
-// ensureCNI installs Flannel onto the workload cluster if it isn't there
-// already.
+// ensureCNI installs Flannel onto the workload cluster via its own official
+// Helm chart - a Flux HelmRepository + HelmRelease applied here on the
+// management cluster with spec.kubeConfig pointing helm-controller at the
+// workload cluster, the same mechanism ensureCSIIncus uses.
 func (r *WorkloadClusterReconciler) ensureCNI(ctx context.Context, wc *benchv1alpha1.WorkloadCluster) error {
-	remoteClient, err := r.remoteAddonClient(ctx, wc)
-	if err != nil {
-		return err
+	if err := applyOwned(ctx, r.Client, r.Scheme, wc, render.CNIHelmRepository(wc.Namespace)); err != nil {
+		return fmt.Errorf("apply CNI HelmRepository: %w", err)
 	}
-	objs, err := render.CNIObjects()
-	if err != nil {
-		return fmt.Errorf("render CNI manifests: %w", err)
+	hr := render.CNIHelmRelease(wc.Namespace, render.KubeconfigSecretName(wc))
+	if err := applyOwned(ctx, r.Client, r.Scheme, wc, hr); err != nil {
+		return fmt.Errorf("apply CNI HelmRelease: %w", err)
 	}
-	return createAll(ctx, remoteClient, objs)
+	return nil
 }
 
 // ensureCSIIncus installs csi-incus (github.com/BeryJu/csi-incus) onto the
@@ -334,17 +338,21 @@ func (r *WorkloadClusterReconciler) ensureCSIIncus(ctx context.Context, wc *benc
 }
 
 // ensureMetricsServer installs kubernetes-sigs/metrics-server onto the
-// workload cluster if it isn't there already.
+// workload cluster via its own official Helm chart - same Flux
+// HelmRepository + HelmRelease mechanism as ensureCNI/ensureCSIIncus.
 func (r *WorkloadClusterReconciler) ensureMetricsServer(ctx context.Context, wc *benchv1alpha1.WorkloadCluster) error {
-	remoteClient, err := r.remoteAddonClient(ctx, wc)
+	values, err := render.MetricsServerHelmValues()
 	if err != nil {
 		return err
 	}
-	objs, err := render.MetricsServerObjects()
-	if err != nil {
-		return fmt.Errorf("render metrics-server manifests: %w", err)
+	if err := applyOwned(ctx, r.Client, r.Scheme, wc, render.MetricsServerHelmRepository(wc.Namespace)); err != nil {
+		return fmt.Errorf("apply metrics-server HelmRepository: %w", err)
 	}
-	return createAll(ctx, remoteClient, objs)
+	hr := render.MetricsServerHelmRelease(wc.Namespace, render.KubeconfigSecretName(wc), values)
+	if err := applyOwned(ctx, r.Client, r.Scheme, wc, hr); err != nil {
+		return fmt.Errorf("apply metrics-server HelmRelease: %w", err)
+	}
+	return nil
 }
 
 // controlPlaneNodeRoleLabel is kubeadm's own standard label, set on every

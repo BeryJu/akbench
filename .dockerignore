@@ -12,7 +12,3 @@
 
 # Re-include k6 scripts embedded via go:embed (see k6/scripts/embed.go)
 !k6/scripts/*.ts
-
-# Re-include CNI/metrics-server manifests embedded via go:embed (see
-# internal/render/cni.go, metrics_server.go)
-!internal/render/manifests/*.yaml
