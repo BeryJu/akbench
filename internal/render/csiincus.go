@@ -47,11 +47,17 @@ const (
 	// csiIncusChartVersion is pinned rather than "*" (as AuthentikTopology's
 	// chart version defaults to) since this project doesn't yet expose a
 	// per-WorkloadCluster override for it - bump deliberately when
-	// csi-incus cuts a new chart release. 0.1.1 fixes a live bug hit on
-	// 0.1.0: ControllerPublishVolume/AttachVolume failed with "Instance
-	// %q not found" for every node, since the reported CSI NodeID didn't
-	// match the underlying Incus instance name.
-	csiIncusChartVersion = "0.1.1"
+	// csi-incus cuts a new chart release.
+	// 0.1.1 fixed ControllerPublishVolume/AttachVolume failing with
+	// "Instance %q not found" for every node (the reported CSI NodeID
+	// didn't match the underlying Incus instance name).
+	// 0.1.2 fixed NodeStageVolume/MountDevice failing with "no
+	// /dev/disk/by-id entry for serial %q after waiting" - the node
+	// plugin's by-id lookup didn't account for the extra dash QEMU's own
+	// scsi-id naming inserts before a serial that already starts with a
+	// dash-adjacent segment (device name/serial vs. the on-disk
+	// "scsi-0QEMU_QEMU_HARDDISK_incus_csi--<id>" symlink actually created).
+	csiIncusChartVersion = "0.1.2"
 
 	CSIIncusHelmReleaseName = "csi-incus"
 
