@@ -33,8 +33,17 @@ import (
 // Tempo must answer at this exact name. 4318 is the OTLP HTTP receiver's
 // own standard default port.
 const (
-	TempoServiceName   = "tempo"
-	TempoOTLPHTTPPort  = 4318
+	TempoServiceName  = "tempo"
+	TempoOTLPHTTPPort = 4318
+	// TempoQueryPort is Tempo's own HTTP API (server.http_listen_port in
+	// tempoConfig below) - what Grafana's Tempo datasource actually queries
+	// against. Confirmed missing from this file's own Service/container
+	// ports by reading the reference harness's compose.yml, whose own
+	// comment says exactly this: Tempo's port 3200 is used internally by
+	// Grafana/Prometheus, never exposed for ingestion - only 4318 (OTLP
+	// ingest) was ever exposed here, so nothing could query traces back out
+	// before this.
+	TempoQueryPort     = 3200
 	tempoConfigMapName = TempoServiceName + "-config"
 )
 
@@ -98,6 +107,7 @@ func TempoObjects() []client.Object {
 								Args:  []string{"-config.file=/etc/tempo/tempo.yaml"},
 								Ports: []corev1.ContainerPort{
 									{Name: "otlp-http", ContainerPort: TempoOTLPHTTPPort},
+									{Name: "tempo-query", ContainerPort: TempoQueryPort},
 								},
 								VolumeMounts: []corev1.VolumeMount{
 									{Name: "config", MountPath: "/etc/tempo"},
@@ -130,6 +140,7 @@ func TempoObjects() []client.Object {
 				Selector: labels,
 				Ports: []corev1.ServicePort{
 					{Name: "otlp-http", Port: TempoOTLPHTTPPort, TargetPort: intstr.FromInt32(TempoOTLPHTTPPort)},
+					{Name: "tempo-query", Port: TempoQueryPort, TargetPort: intstr.FromInt32(TempoQueryPort)},
 				},
 			},
 		},

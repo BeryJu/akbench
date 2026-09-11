@@ -249,6 +249,13 @@ func (r *WorkloadClusterReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 			log.Error(err, "failed to ensure Tempo on workload cluster")
 			r.Recorder.Eventf(&wc, corev1.EventTypeWarning, "AddonFailed", "failed to ensure Tempo: %v", err)
 		}
+		// Best-effort/idempotent for the same reason as the other addons -
+		// pre-wired with datasources for all three above, so it's useful the
+		// moment it comes up.
+		if err := r.ensureGrafana(ctx, &wc); err != nil {
+			log.Error(err, "failed to ensure Grafana on workload cluster")
+			r.Recorder.Eventf(&wc, corev1.EventTypeWarning, "AddonFailed", "failed to ensure Grafana: %v", err)
+		}
 	}
 
 	ready := metav1.ConditionFalse
@@ -439,6 +446,20 @@ func (r *WorkloadClusterReconciler) ensureTempo(ctx context.Context, wc *benchv1
 		return err
 	}
 	return createAll(ctx, remoteClient, render.TempoObjects())
+}
+
+// ensureGrafana installs a single-replica Grafana onto the workload cluster
+// if it isn't there already, pre-wired with Prometheus/Pyroscope/Tempo
+// datasources and this project's own 5 dashboards (see
+// render.GrafanaObjects) - reached from Headlamp's Grafana tab via the k8s
+// API server's own service-proxy subresource, not a cross-cluster URL this
+// status needs to record.
+func (r *WorkloadClusterReconciler) ensureGrafana(ctx context.Context, wc *benchv1alpha1.WorkloadCluster) error {
+	remoteClient, err := r.remoteAddonClient(ctx, wc)
+	if err != nil {
+		return err
+	}
+	return createAll(ctx, remoteClient, render.GrafanaObjects(wc))
 }
 
 // createAll applies every object best-effort/idempotently, the same way for

@@ -1,6 +1,10 @@
 package render
 
-import "testing"
+import (
+	"testing"
+
+	corev1 "k8s.io/api/core/v1"
+)
 
 func TestTempoObjectsMatchesDefaultTracingEndpoint(t *testing.T) {
 	objs := TempoObjects()
@@ -26,5 +30,29 @@ func TestTempoObjectsMatchesDefaultTracingEndpoint(t *testing.T) {
 	}
 	if TempoOTLPHTTPPort != 4318 {
 		t.Errorf("TempoOTLPHTTPPort = %d, want 4318", TempoOTLPHTTPPort)
+	}
+}
+
+// TestTempoObjectsExposesQueryPort guards against a real gap: only the OTLP
+// ingest port (4318) was ever exposed here, so nothing - including a future
+// Grafana Tempo datasource - could ever query traces back out.
+func TestTempoObjectsExposesQueryPort(t *testing.T) {
+	if TempoQueryPort != 3200 {
+		t.Errorf("TempoQueryPort = %d, want 3200", TempoQueryPort)
+	}
+	for _, obj := range TempoObjects() {
+		svc, ok := obj.(*corev1.Service)
+		if !ok {
+			continue
+		}
+		found := false
+		for _, p := range svc.Spec.Ports {
+			if p.Port == TempoQueryPort {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("Tempo Service has no port %d (query API)", TempoQueryPort)
+		}
 	}
 }
