@@ -64,8 +64,12 @@ func TestGrafanaObjects(t *testing.T) {
 	if env["GF_SERVER_ROOT_URL"] != wantRootURL {
 		t.Errorf("GF_SERVER_ROOT_URL = %q, want %q", env["GF_SERVER_ROOT_URL"], wantRootURL)
 	}
-	if env["GF_SERVER_SERVE_FROM_SUB_PATH"] != "true" {
-		t.Errorf("GF_SERVER_SERVE_FROM_SUB_PATH = %q, want true", env["GF_SERVER_SERVE_FROM_SUB_PATH"])
+	// Deliberately NOT "true" - see the doc comment on this env var in
+	// grafana.go for why (the k8s API proxy strips its own mount prefix
+	// before forwarding, so Grafana must treat every request as mounted at
+	// "/", not expect the sub-path prefix to still be present).
+	if v, set := env["GF_SERVER_SERVE_FROM_SUB_PATH"]; set && v != "false" {
+		t.Errorf("GF_SERVER_SERVE_FROM_SUB_PATH = %q, want unset or false", v)
 	}
 
 	for _, name := range []string{"compare-tests.json", "k6.json", "authentik.json", "postgres.json", "nodes.json"} {

@@ -202,7 +202,20 @@ func GrafanaObjects(wc *benchv1alpha1.WorkloadCluster) []client.Object {
 									{Name: "GF_AUTH_ANONYMOUS_ENABLED", Value: "true"},
 									{Name: "GF_AUTH_ANONYMOUS_ORG_ROLE", Value: "Admin"},
 									{Name: "GF_SERVER_ROOT_URL", Value: rootURL},
-									{Name: "GF_SERVER_SERVE_FROM_SUB_PATH", Value: "true"},
+									// Deliberately NOT "true": per Grafana's own docs,
+									// serve_from_sub_path=true means Grafana expects
+									// incoming requests to still carry the root_url's
+									// path prefix, and 301-redirects to add it back
+									// when they don't - confirmed live, this produced
+									// an infinite redirect loop. The k8s API server's
+									// own service-proxy subresource already strips its
+									// mount prefix before forwarding (the same thing
+									// Grafana's docs describe as "sub-path stripping...
+									// done by the reverse proxy"), so Grafana must be
+									// left at its default (false): treat every incoming
+									// request as mounted at "/", while root_url alone
+									// still makes it emit correct absolute links for
+									// the browser.
 								},
 								Ports: []corev1.ContainerPort{{Name: "http", ContainerPort: GrafanaPort}},
 								VolumeMounts: []corev1.VolumeMount{
