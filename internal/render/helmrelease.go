@@ -226,6 +226,17 @@ func HelmValues(t *benchv1alpha1.AuthentikTopology, secretKey string, pgConn *Po
 			// CSIIncusStorageClass) has no equivalent of.
 			{valuesKeyName: volumeName, "mountPath": BlueprintMountPath},
 		}
+		// A freshly provisioned csi-incus block volume is a bare
+		// root:root-owned filesystem (standard mkfs default) - the
+		// authentik container's non-root user (uid/gid 1000) can't write
+		// into it without this, so ApplyBlueprint's "cat > ... && ak
+		// apply_blueprint" exec fails with "Permission denied" (caught
+		// live once local-path-provisioner's more permissive volumes were
+		// replaced with real Incus-backed ones). fsGroup makes kubelet
+		// recursively chown the volume's files to this group at mount time
+		// - only works because csi-incus's CSIDriver advertises
+		// fsGroupPolicy: File (see its own deploy/csidriver.yaml).
+		values.Server["securityContext"] = map[string]any{"fsGroup": 1000}
 	}
 
 	applyPlacement := func(w map[string]any) {

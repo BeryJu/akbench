@@ -301,3 +301,26 @@ func mustValues(t *testing.T, topo *benchv1alpha1.AuthentikTopology) AuthentikTo
 	}
 	return decodeValues(t, raw.Raw)
 }
+
+// TestHelmValuesBlueprintVolumeSetsFsGroup guards against a real bug caught
+// live: a freshly provisioned csi-incus block volume is root:root-owned
+// (standard mkfs default), so the authentik container's non-root user
+// (uid/gid 1000) can't write into it without an explicit fsGroup - without
+// this, AuthentikTopologyReconciler.ApplyBlueprint's exec fails with
+// "Permission denied" writing the fixtures blueprint.
+func TestHelmValuesBlueprintVolumeSetsFsGroup(t *testing.T) {
+	topo := exampleTopology()
+	raw, err := HelmValues(topo, "secret", &PostgresConnection{Password: "pw"}, "http://pyroscope.example:4040", "http://tempo.example:4318", true)
+	if err != nil {
+		t.Fatalf("HelmValues: %v", err)
+	}
+	values := decodeValues(t, raw.Raw)
+
+	sc, ok := values.Server["securityContext"].(map[string]any)
+	if !ok {
+		t.Fatalf("server.securityContext missing or wrong type: %v", values.Server["securityContext"])
+	}
+	if sc["fsGroup"] != float64(1000) {
+		t.Errorf("server.securityContext.fsGroup = %v, want 1000", sc["fsGroup"])
+	}
+}
