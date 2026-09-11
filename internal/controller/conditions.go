@@ -26,6 +26,8 @@ import (
 	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
 )
 
+// +kubebuilder:rbac:groups=core,resources=events,verbs=create;patch
+
 // setCondition is a small wrapper around meta.SetStatusCondition so every
 // controller records conditions the same way - it also emits a matching
 // Kubernetes Event on obj, so anyone looking at the object in `kubectl
