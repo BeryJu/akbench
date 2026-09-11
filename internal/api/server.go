@@ -98,6 +98,11 @@ func (s *Server) Router() http.Handler {
 	r.Get("/healthz", probeOK)
 	r.Get("/readyz", probeOK)
 
+	// Unauthenticated by design - an <iframe src=> can't carry the
+	// X-Bench-Api-Token header s.requireToken demands. See
+	// grafana_proxy.go's own doc comment for the full rationale.
+	r.HandleFunc("/grafana-proxy/{cluster}/*", s.grafanaProxy)
+
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Use(s.requireToken)
 

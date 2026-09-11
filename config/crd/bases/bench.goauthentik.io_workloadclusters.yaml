@@ -246,6 +246,15 @@ spec:
                 x-kubernetes-list-type: map
               controlPlaneReady:
                 type: boolean
+              grafanaURL:
+                description: |-
+                  GrafanaURL is where this cluster's own Grafana (installed by
+                  WorkloadClusterReconciler's ensureGrafana) is reachable *from the
+                  management cluster* - a node's InternalIP plus the fixed NodePort
+                  render.GrafanaNodePort exposes. cmd/apiserver's own reverse proxy
+                  (internal/api/grafana_proxy.go) connects to this to embed a
+                  dashboard in Headlamp's Grafana tab.
+                type: string
               infrastructureReady:
                 type: boolean
               kubeconfigSecretRef:

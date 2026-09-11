@@ -15,34 +15,34 @@
  */
 
 // Embeds a workload cluster's own Grafana (internal/render/grafana.go) in
-// an iframe, proxied - not a direct browser->Grafana connection. The iframe
-// src points straight at the k8s API server's own service-proxy
-// subresource for the selected cluster, reusing Headlamp's own
-// already-authenticated session:
-//   /clusters/<context>/api/v1/namespaces/<ns>/services/<svc>:<port>/proxy/...
-// This is the same CLUSTERS_PREFIX convention the installed Headlamp SDK's
-// own k8s/api/v1/constants.js uses for every other cluster-scoped request -
-// confirmed directly against that file rather than assumed. It's built as a
-// plain relative URL (not through ApiProxy.request(), which returns parsed
-// JSON and can't back an <iframe src=): the plugin is served same-origin by
-// Headlamp itself, so a relative path resolves correctly without needing
-// Headlamp's own getAppUrl() helper.
+// an iframe, proxied through cmd/apiserver's own reverse proxy
+// (internal/api/grafana_proxy.go) - NOT through the k8s API server's own
+// service-proxy subresource (Headlamp's usual /clusters/<name>/... path).
+// That was the original design, and it's confirmed broken: the k8s
+// apiserver's proxy subresource content-rewrites absolute HTML paths in a
+// way that has zero awareness of Headlamp's own outer /clusters/<name>/
+// routing layer sitting in front of it, so a page as richly-linked as
+// Grafana comes out with a doubled, broken <base href> no matter how
+// Grafana's own root_url/serve_from_sub_path is configured.
 //
-// Grafana's own GF_SERVER_ROOT_URL is set (at render time, per cluster) to
-// exactly this same path prefix, and anonymous Admin auth is enabled - both
-// required for the embed to actually render a dashboard instead of a broken
-// asset tree or a login page. See grafana.go's own doc comment for why.
+// Instead, the iframe src points straight at cmd/apiserver's own NodePort
+// (bypassing the k8s apiserver's proxy subresource entirely) at
+// /grafana-proxy/<workloadClusterName>/d/<uid>/-?orgId=1&kiosk - a single,
+// fully project-controlled reverse-proxy hop that preserves the request
+// path, matching Grafana's own GF_SERVER_SERVE_FROM_SUB_PATH=true. See
+// grafana_proxy.go's doc comment for the full story.
+//
+// The node IP + apiserver NodePort come from api.clusters()'s management
+// cluster entry (Cluster.nodeIP, only ever populated there) - the browser
+// needs a real routable address, not a cluster-relative DNS name.
 import { SectionBox } from '@kinvolk/headlamp-plugin/lib/CommonComponents';
 import { Alert, MenuItem, TextField } from '@mui/material';
 import { useState } from 'react';
-import { api, headlampClusterName } from './api';
+import { api, MANAGEMENT_CLUSTER } from './api';
 import { useResource } from './useResource';
 
-// Matches internal/render/grafana.go's GrafanaObjects/GrafanaServiceName/
-// GrafanaPort and gitops/dashboards/*.json's own uid fields exactly.
-const GRAFANA_NAMESPACE = 'bench-system';
-const GRAFANA_SERVICE = 'grafana';
-const GRAFANA_PORT = 3000;
+// Matches hack/dev-apiserver.yaml's apiserver-nodeport Service.
+const APISERVER_NODEPORT = 30911;
 
 const DASHBOARDS = [
   { uid: 'akbench-compare', label: 'Compare tests' },
@@ -52,17 +52,14 @@ const DASHBOARDS = [
   { uid: 'akbench-nodes', label: 'Nodes' },
 ];
 
-function grafanaProxyURL(clusterRefName: string, dashboardUID: string): string {
-  const cluster = headlampClusterName(clusterRefName);
-  return (
-    `/clusters/${cluster}/api/v1/namespaces/${GRAFANA_NAMESPACE}/services/${GRAFANA_SERVICE}:${GRAFANA_PORT}/proxy` +
-    `/d/${dashboardUID}/-?orgId=1&kiosk`
-  );
+function grafanaProxyURL(nodeIP: string, workloadClusterName: string, dashboardUID: string): string {
+  return `http://${nodeIP}:${APISERVER_NODEPORT}/grafana-proxy/${workloadClusterName}/d/${dashboardUID}/-?orgId=1&kiosk`;
 }
 
 export function GrafanaPage() {
   const clusters = useResource(() => api.clusters(), [], 0);
   const workloadClusters = (clusters.data ?? []).filter(c => !c.management);
+  const nodeIP = (clusters.data ?? []).find(c => c.name === MANAGEMENT_CLUSTER)?.nodeIP;
 
   const [selectedCluster, setSelectedCluster] = useState('');
   const [selectedDashboard, setSelectedDashboard] = useState(DASHBOARDS[0].uid);
@@ -82,7 +79,14 @@ export function GrafanaPage() {
           WorkloadClusterReconciler's ensureGrafana), not centrally. Register one first.
         </Alert>
       )}
-      {workloadClusters.length > 0 && (
+      {!clusters.loading && workloadClusters.length > 0 && !nodeIP && (
+        <Alert severity="warning" sx={{ mb: 2 }}>
+          Could not resolve a reachable IP for the management cluster - cmd/apiserver's
+          Grafana proxy needs this to build the iframe's address. Check that its nodes
+          report an InternalIP.
+        </Alert>
+      )}
+      {workloadClusters.length > 0 && nodeIP && (
         <>
           <TextField
             select
@@ -115,7 +119,7 @@ export function GrafanaPage() {
           <iframe
             key={`${cluster}/${selectedDashboard}`}
             title="Grafana"
-            src={grafanaProxyURL(cluster, selectedDashboard)}
+            src={grafanaProxyURL(nodeIP, cluster, selectedDashboard)}
             style={{ width: '100%', height: '80vh', border: 'none' }}
           />
         </>

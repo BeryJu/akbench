@@ -31,16 +31,34 @@ import (
 )
 
 // Grafana is installed per workload cluster (same as Prometheus/Pyroscope/
-// Tempo), reached from Headlamp's own Grafana tab via the k8s API server's
-// service-proxy subresource directly (CLUSTERS_PREFIX in the installed
-// Headlamp SDK, confirmed against its own k8s/api/v1/constants.js) - not a
-// new cmd/apiserver reverse-proxy, and not the separate, unrelated
-// Config.GrafanaURL/BENCH_GRAFANA_URL mechanisms (internal/api/grafana.go,
-// internal/grafana/annotate.go), both of which assume one directly
-// browser-reachable Grafana and are left alone.
+// Tempo), reached from Headlamp's own Grafana tab through cmd/apiserver's
+// own reverse proxy (internal/api/grafana_proxy.go), not the k8s API
+// server's service-proxy subresource directly - that first design was
+// tried and confirmed broken live: the k8s apiserver's own /proxy
+// subresource content-rewrites absolute paths in text/html responses,
+// unconditionally prepending its own mount prefix, which has no awareness
+// of Headlamp's own outer /clusters/<name>/ layer sitting in front of it -
+// any already-correct two-layer absolute path gets a third, wrong prefix
+// stacked on top (verified by curling the exact iframe URL three ways:
+// direct to Grafana, via the raw k8s proxy subresource, and via Headlamp
+// itself - only the direct one came back correct). cmd/apiserver's own
+// reverse proxy is a single hop the browser reaches directly via a
+// NodePort (GrafanaNodePort below), sidestepping that entirely. Not the
+// separate, unrelated Config.GrafanaURL/BENCH_GRAFANA_URL mechanisms
+// (internal/api/grafana.go, internal/grafana/annotate.go), both of which
+// assume one central, directly browser-reachable Grafana and are left
+// alone.
 const (
 	GrafanaServiceName = "grafana"
 	GrafanaPort        = 3000
+
+	// GrafanaNodePortServiceName/GrafanaNodePort expose Grafana outside its
+	// own cluster the same way Prometheus's own NodePort does
+	// (PrometheusNodePortServiceName/PrometheusNodePort) - what
+	// cmd/apiserver's reverse proxy (internal/api/grafana_proxy.go)
+	// connects to, resolved via WorkloadClusterStatus.GrafanaURL.
+	GrafanaNodePortServiceName = "grafana-nodeport"
+	GrafanaNodePort            = 30910
 
 	grafanaDatasourcesConfigMapName = GrafanaServiceName + "-datasources"
 	grafanaDashboardsConfigMapName  = GrafanaServiceName + "-dashboards"
@@ -51,17 +69,15 @@ func grafanaLabels() map[string]string {
 	return map[string]string{"app": GrafanaServiceName}
 }
 
-// grafanaProxyPathPrefix is where this workload cluster's Grafana is
-// reachable through Headlamp's own per-cluster k8s-API proxy - deterministic
-// from wc.Name alone (matching headlampClusterName()'s own
-// "<name>-admin@<name>" kubeconfig-context convention in
-// web/headlamp-plugin/src/api.ts, confirmed live against a real context
-// name), so the operator can bake it into Grafana's own GF_SERVER_ROOT_URL
-// at render time without any out-of-band coordination.
+// grafanaProxyPathPrefix is cmd/apiserver's own fixed mount for this
+// workload cluster's Grafana (internal/api/grafana_proxy.go's
+// /grafana-proxy/{cluster}/ route) - deterministic from wc.Name alone, so
+// the operator can bake it into Grafana's own GF_SERVER_ROOT_URL at render
+// time without any out-of-band coordination. A single proxy hop, unlike
+// the abandoned k8s-API-proxy design this replaced - see this file's own
+// package-level doc comment for why that mattered.
 func grafanaProxyPathPrefix(wc *benchv1alpha1.WorkloadCluster) string {
-	cluster := fmt.Sprintf("%s-admin@%s", wc.Name, wc.Name)
-	return fmt.Sprintf("/clusters/%s/api/v1/namespaces/%s/services/%s:%d/proxy/",
-		cluster, ObservabilityNamespace, GrafanaServiceName, GrafanaPort)
+	return fmt.Sprintf("/grafana-proxy/%s/", wc.Name)
 }
 
 // grafanaDatasources is adapted directly from the reference harness's own
@@ -202,20 +218,19 @@ func GrafanaObjects(wc *benchv1alpha1.WorkloadCluster) []client.Object {
 									{Name: "GF_AUTH_ANONYMOUS_ENABLED", Value: "true"},
 									{Name: "GF_AUTH_ANONYMOUS_ORG_ROLE", Value: "Admin"},
 									{Name: "GF_SERVER_ROOT_URL", Value: rootURL},
-									// Deliberately NOT "true": per Grafana's own docs,
-									// serve_from_sub_path=true means Grafana expects
-									// incoming requests to still carry the root_url's
-									// path prefix, and 301-redirects to add it back
-									// when they don't - confirmed live, this produced
-									// an infinite redirect loop. The k8s API server's
-									// own service-proxy subresource already strips its
-									// mount prefix before forwarding (the same thing
-									// Grafana's docs describe as "sub-path stripping...
-									// done by the reverse proxy"), so Grafana must be
-									// left at its default (false): treat every incoming
-									// request as mounted at "/", while root_url alone
-									// still makes it emit correct absolute links for
-									// the browser.
+									// "true" is correct here: per Grafana's own docs,
+									// serve_from_sub_path=true means the reverse proxy
+									// does NOT strip root_url's own path prefix before
+									// forwarding to Grafana - exactly what
+									// internal/api/grafana_proxy.go's reverse proxy
+									// does (it deliberately preserves the full request
+									// path). This was "false" in an earlier version of
+									// this file when Grafana was reached through the
+									// k8s API server's own service-proxy subresource
+									// instead, which *does* strip its own mount prefix
+									// - a materially different proxy, not just a config
+									// tweak; see this file's own package doc comment.
+									{Name: "GF_SERVER_SERVE_FROM_SUB_PATH", Value: "true"},
 								},
 								Ports: []corev1.ContainerPort{{Name: "http", ContainerPort: GrafanaPort}},
 								VolumeMounts: []corev1.VolumeMount{
@@ -261,6 +276,17 @@ func GrafanaObjects(wc *benchv1alpha1.WorkloadCluster) []client.Object {
 			Spec: corev1.ServiceSpec{
 				Selector: labels,
 				Ports:    []corev1.ServicePort{{Name: "http", Port: GrafanaPort, TargetPort: intstr.FromInt32(GrafanaPort)}},
+			},
+		},
+		&corev1.Service{
+			TypeMeta:   metav1.TypeMeta{Kind: "Service", APIVersion: "v1"},
+			ObjectMeta: metav1.ObjectMeta{Name: GrafanaNodePortServiceName, Namespace: ObservabilityNamespace},
+			Spec: corev1.ServiceSpec{
+				Type:     corev1.ServiceTypeNodePort,
+				Selector: labels,
+				Ports: []corev1.ServicePort{
+					{Name: "http", Port: GrafanaPort, TargetPort: intstr.FromInt32(GrafanaPort), NodePort: int32(GrafanaNodePort)},
+				},
 			},
 		},
 	}

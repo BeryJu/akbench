@@ -13,7 +13,7 @@ import (
 func TestGrafanaProxyPathPrefix(t *testing.T) {
 	wc := &benchv1alpha1.WorkloadCluster{ObjectMeta: metav1.ObjectMeta{Name: "default-dev-vm-incus"}}
 	got := grafanaProxyPathPrefix(wc)
-	want := "/clusters/default-dev-vm-incus-admin@default-dev-vm-incus/api/v1/namespaces/bench-system/services/grafana:3000/proxy/"
+	want := "/grafana-proxy/default-dev-vm-incus/"
 	if got != want {
 		t.Errorf("grafanaProxyPathPrefix = %q, want %q", got, want)
 	}
@@ -25,7 +25,7 @@ func TestGrafanaObjects(t *testing.T) {
 
 	found := map[string]int{}
 	var deployment *appsv1.Deployment
-	var svc *corev1.Service
+	var svc, nodePortSvc *corev1.Service
 	var dashboardsCM *corev1.ConfigMap
 	for _, obj := range objs {
 		found[obj.GetObjectKind().GroupVersionKind().Kind]++
@@ -36,18 +36,28 @@ func TestGrafanaObjects(t *testing.T) {
 			deployment = d
 		}
 		if s, ok := obj.(*corev1.Service); ok {
-			svc = s
+			if s.Name == GrafanaNodePortServiceName {
+				nodePortSvc = s
+			} else {
+				svc = s
+			}
 		}
 		if cm, ok := obj.(*corev1.ConfigMap); ok && cm.Name == grafanaDashboardsConfigMapName {
 			dashboardsCM = cm
 		}
 	}
-	if found["Namespace"] != 1 || found["ConfigMap"] != 3 || found["Deployment"] != 1 || found["Service"] != 1 {
+	if found["Namespace"] != 1 || found["ConfigMap"] != 3 || found["Deployment"] != 1 || found["Service"] != 2 {
 		t.Fatalf("unexpected object counts: %v", found)
 	}
 
 	if svc.Spec.Ports[0].Port != GrafanaPort {
 		t.Errorf("service port = %d, want %d", svc.Spec.Ports[0].Port, GrafanaPort)
+	}
+	if nodePortSvc.Spec.Type != corev1.ServiceTypeNodePort {
+		t.Errorf("nodeport service type = %q, want NodePort", nodePortSvc.Spec.Type)
+	}
+	if nodePortSvc.Spec.Ports[0].NodePort != int32(GrafanaNodePort) {
+		t.Errorf("nodeport = %d, want %d", nodePortSvc.Spec.Ports[0].NodePort, GrafanaNodePort)
 	}
 
 	env := map[string]string{}
@@ -60,16 +70,16 @@ func TestGrafanaObjects(t *testing.T) {
 	if env["GF_AUTH_ANONYMOUS_ORG_ROLE"] != "Admin" {
 		t.Errorf("GF_AUTH_ANONYMOUS_ORG_ROLE = %q, want Admin", env["GF_AUTH_ANONYMOUS_ORG_ROLE"])
 	}
-	wantRootURL := "/clusters/test-cluster-admin@test-cluster/api/v1/namespaces/bench-system/services/grafana:3000/proxy/"
+	wantRootURL := "/grafana-proxy/test-cluster/"
 	if env["GF_SERVER_ROOT_URL"] != wantRootURL {
 		t.Errorf("GF_SERVER_ROOT_URL = %q, want %q", env["GF_SERVER_ROOT_URL"], wantRootURL)
 	}
-	// Deliberately NOT "true" - see the doc comment on this env var in
-	// grafana.go for why (the k8s API proxy strips its own mount prefix
-	// before forwarding, so Grafana must treat every request as mounted at
-	// "/", not expect the sub-path prefix to still be present).
-	if v, set := env["GF_SERVER_SERVE_FROM_SUB_PATH"]; set && v != "false" {
-		t.Errorf("GF_SERVER_SERVE_FROM_SUB_PATH = %q, want unset or false", v)
+	// "true" is correct here: cmd/apiserver's own reverse proxy
+	// (internal/api/grafana_proxy.go) deliberately preserves the request
+	// path rather than stripping it - see the doc comment on this env var
+	// in grafana.go.
+	if env["GF_SERVER_SERVE_FROM_SUB_PATH"] != "true" {
+		t.Errorf("GF_SERVER_SERVE_FROM_SUB_PATH = %q, want true", env["GF_SERVER_SERVE_FROM_SUB_PATH"])
 	}
 
 	for _, name := range []string{"compare-tests.json", "k6.json", "authentik.json", "postgres.json", "nodes.json"} {

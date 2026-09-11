@@ -17,12 +17,16 @@ limitations under the License.
 package api
 
 import (
+	"context"
+	"fmt"
 	"net/http"
 
-	"github.com/go-chi/chi/v5"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+
+	"github.com/go-chi/chi/v5"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -47,23 +51,64 @@ type Cluster struct {
 	Phase               string `json:"phase,omitempty"`
 	ControlPlaneReady   bool   `json:"controlPlaneReady"`
 	InfrastructureReady bool   `json:"infrastructureReady"`
+	// NodeIP is a reachable InternalIP of one of this cluster's own nodes -
+	// only ever populated for the management cluster, and only so the
+	// Headlamp plugin's Grafana tab can reach cmd/apiserver's own NodePort
+	// (see internal/api/grafana_proxy.go) directly from the browser,
+	// bypassing the k8s API server's own service-proxy subresource
+	// entirely (see grafana.go's doc comment for why that's necessary).
+	NodeIP string `json:"nodeIP,omitempty"`
 }
 
-func managementCluster() Cluster {
-	return Cluster{
+func (s *Server) managementCluster(ctx context.Context) Cluster {
+	c := Cluster{
 		Name:                ManagementClusterName,
 		Management:          true,
 		Phase:               "Provisioned",
 		ControlPlaneReady:   true,
 		InfrastructureReady: true,
 	}
+	if nodeIP, err := reachableNodeIP(ctx, s.client); err == nil {
+		c.NodeIP = nodeIP
+	}
+	return c
+}
+
+// controlPlaneNodeRoleLabel is kubeadm's own standard label, set on every
+// control-plane node - preferred over a worker node so the returned IP is
+// stable across worker scaling.
+const controlPlaneNodeRoleLabel = "node-role.kubernetes.io/control-plane"
+
+// reachableNodeIP finds a node's InternalIP, preferring a control-plane
+// node. Duplicated from internal/controller/workloadcluster_controller.go's
+// own reachableNodeIP rather than shared/exported: it's a handful of lines,
+// and internal/api importing internal/controller would be the wrong
+// dependency direction.
+func reachableNodeIP(ctx context.Context, c client.Client) (string, error) {
+	var nodes corev1.NodeList
+	if err := c.List(ctx, &nodes, client.MatchingLabels{controlPlaneNodeRoleLabel: ""}); err != nil {
+		return "", fmt.Errorf("list control-plane nodes: %w", err)
+	}
+	if len(nodes.Items) == 0 {
+		if err := c.List(ctx, &nodes); err != nil {
+			return "", fmt.Errorf("list nodes: %w", err)
+		}
+	}
+	for _, node := range nodes.Items {
+		for _, addr := range node.Status.Addresses {
+			if addr.Type == corev1.NodeInternalIP {
+				return addr.Address, nil
+			}
+		}
+	}
+	return "", fmt.Errorf("no node with an InternalIP found")
 }
 
 // listClusters returns every place a topology can be deployed. Until the
 // multi-cluster milestone installs Cluster API, that is exactly one entry:
 // the management cluster itself.
 func (s *Server) listClusters(w http.ResponseWriter, r *http.Request) {
-	clusters := []Cluster{managementCluster()}
+	clusters := []Cluster{s.managementCluster(r.Context())}
 	if s.cfg.CAPIAvailable {
 		list := &unstructured.UnstructuredList{}
 		list.SetGroupVersionKind(capiClusterGVK.GroupVersion().WithKind("ClusterList"))
@@ -81,7 +126,7 @@ func (s *Server) listClusters(w http.ResponseWriter, r *http.Request) {
 func (s *Server) getCluster(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
 	if name == ManagementClusterName {
-		writeJSON(w, r, http.StatusOK, managementCluster())
+		writeJSON(w, r, http.StatusOK, s.managementCluster(r.Context()))
 		return
 	}
 	if !s.cfg.CAPIAvailable {

@@ -112,3 +112,24 @@ spec:
     - name: http
       port: 8080
       targetPort: 8080
+---
+# NodePort twin of the ClusterIP Service above, matching
+# render.PrometheusNodePortServiceName/GrafanaNodePortServiceName's own
+# convention (30909/30910 - this is 30911). Needed only for
+# /grafana-proxy/{cluster}/* (internal/api/grafana_proxy.go): the browser
+# has to reach cmd/apiserver directly, bypassing the k8s API server's own
+# service-proxy subresource entirely - see that file's doc comment for why.
+apiVersion: v1
+kind: Service
+metadata:
+  name: apiserver-nodeport
+  namespace: authentik-bench
+spec:
+  type: NodePort
+  selector:
+    app: authentik-bench-apiserver
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+      nodePort: 30911

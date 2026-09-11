@@ -175,6 +175,15 @@ type WorkloadClusterStatus struct {
 	// +optional
 	PrometheusURL string `json:"prometheusURL,omitempty"`
 
+	// GrafanaURL is where this cluster's own Grafana (installed by
+	// WorkloadClusterReconciler's ensureGrafana) is reachable *from the
+	// management cluster* - a node's InternalIP plus the fixed NodePort
+	// render.GrafanaNodePort exposes. cmd/apiserver's own reverse proxy
+	// (internal/api/grafana_proxy.go) connects to this to embed a
+	// dashboard in Headlamp's Grafana tab.
+	// +optional
+	GrafanaURL string `json:"grafanaURL,omitempty"`
+
 	// +optional
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 }

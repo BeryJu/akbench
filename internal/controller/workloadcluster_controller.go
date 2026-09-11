@@ -451,15 +451,25 @@ func (r *WorkloadClusterReconciler) ensureTempo(ctx context.Context, wc *benchv1
 // ensureGrafana installs a single-replica Grafana onto the workload cluster
 // if it isn't there already, pre-wired with Prometheus/Pyroscope/Tempo
 // datasources and this project's own 5 dashboards (see
-// render.GrafanaObjects) - reached from Headlamp's Grafana tab via the k8s
-// API server's own service-proxy subresource, not a cross-cluster URL this
-// status needs to record.
+// render.GrafanaObjects). Unlike Pyroscope/Tempo, this does need a
+// cross-cluster URL recorded: cmd/apiserver's own reverse proxy
+// (internal/api/grafana_proxy.go) is what Headlamp's Grafana tab actually
+// embeds, and it connects to Grafana via this NodePort URL, mirroring
+// ensurePrometheus exactly.
 func (r *WorkloadClusterReconciler) ensureGrafana(ctx context.Context, wc *benchv1alpha1.WorkloadCluster) error {
 	remoteClient, err := r.remoteAddonClient(ctx, wc)
 	if err != nil {
 		return err
 	}
-	return createAll(ctx, remoteClient, render.GrafanaObjects(wc))
+	if err := createAll(ctx, remoteClient, render.GrafanaObjects(wc)); err != nil {
+		return err
+	}
+	nodeIP, err := reachableNodeIP(ctx, remoteClient)
+	if err != nil {
+		return fmt.Errorf("resolve reachable node IP: %w", err)
+	}
+	wc.Status.GrafanaURL = fmt.Sprintf("http://%s:%d", nodeIP, render.GrafanaNodePort)
+	return nil
 }
 
 // createAll applies every object best-effort/idempotently, the same way for
