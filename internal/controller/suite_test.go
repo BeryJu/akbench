@@ -28,6 +28,8 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -104,6 +106,15 @@ var _ = BeforeSuite(func() {
 	k8sClient, err = client.New(cfg, client.Options{Scheme: scheme.Scheme})
 	Expect(err).NotTo(HaveOccurred())
 	Expect(k8sClient).NotTo(BeNil())
+
+	// TestCaseReconciler/TestRunReconciler both call ensureFixturesSecret,
+	// which errors out if this Secret doesn't exist anywhere to mirror from -
+	// every spec that reconciles a TestCase/TestRun needs it present, so it's
+	// created once here rather than per-spec.
+	Expect(k8sClient.Create(ctx, &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: fixturesSecretName, Namespace: "default"},
+		Data:       map[string][]byte{"users.json": []byte("[]")},
+	})).To(Succeed())
 })
 
 var _ = AfterSuite(func() {

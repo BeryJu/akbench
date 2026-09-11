@@ -150,6 +150,10 @@ func (r *TestRunReconciler) start(ctx context.Context, run *benchv1alpha1.TestRu
 		scriptCMName = tc.Spec.ScriptConfigMapRef.Name
 	}
 
+	if err := ensureFixturesSecret(ctx, r.Client, rc, run.Namespace); err != nil {
+		return ctrl.Result{}, fmt.Errorf("ensure fixtures secret: %w", err)
+	}
+
 	params := render.K6WorkloadParams{
 		TestCase:            resolvedTC,
 		TargetName:          targetName,

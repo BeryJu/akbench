@@ -16,11 +16,55 @@ limitations under the License.
 
 package controller
 
+import (
+	"context"
+	"fmt"
+
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+)
+
 // fixturesSecretName is the Secret every k6 workload mounts users.json from.
-// M1: created once per namespace by `make fixtures` (see fixtures/gen-blueprint.py)
-// and read directly, since everything is on one cluster. From M4 on the same
-// name is what RemoteSecretMirrorController mirrors to every runner cluster.
+// Created once per namespace by `make fixtures` (see
+// fixtures/gen-blueprint.py) on the management cluster; ensureFixturesSecret
+// below mirrors it onto whichever cluster a TestCase/TestRun's k6 pod
+// actually runs on.
 const fixturesSecretName = "bench-fixtures-users"
+
+// ensureFixturesSecret mirrors the management cluster's fixturesSecretName
+// Secret onto rc, the same create-or-update pattern
+// TestCaseReconciler.ensureScriptConfigMap already uses for the k6 script
+// ConfigMap. Every k6 pod (Burn Deployment and Quick Job alike) mounts this
+// Secret by this same fixed name (render.K6WorkloadParams.FixturesSecretName)
+// regardless of which cluster it runs on - without a real copy there, every
+// k6 pod sits in ContainerCreating forever ("FailedMount: secret ... not
+// found"), the exact failure mode this closes. A safe, cheap no-op when rc
+// already points at the management cluster (remote==false): it just reads
+// and rewrites the same object back to itself.
+func ensureFixturesSecret(ctx context.Context, c client.Client, rc client.Client, namespace string) error {
+	var source corev1.Secret
+	if err := c.Get(ctx, types.NamespacedName{Name: fixturesSecretName, Namespace: namespace}, &source); err != nil {
+		return fmt.Errorf("get fixtures secret: %w", err)
+	}
+	var existing corev1.Secret
+	err := rc.Get(ctx, types.NamespacedName{Name: fixturesSecretName, Namespace: namespace}, &existing)
+	switch {
+	case apierrors.IsNotFound(err):
+		mirrored := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: fixturesSecretName, Namespace: namespace},
+			Data:       source.Data,
+		}
+		return rc.Create(ctx, mirrored)
+	case err != nil:
+		return err
+	default:
+		existing.Data = source.Data
+		return rc.Update(ctx, &existing)
+	}
+}
 
 // fixturesBlueprintConfigMapName is the ConfigMap `make fixtures` also
 // writes (same script, same management-cluster namespace as

@@ -143,6 +143,10 @@ func (r *TestCaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	setCondition(r.Recorder, &tc, &tc.Status.Conditions, tc.Generation, benchv1alpha1.ConditionScriptReady, metav1.ConditionTrue,
 		benchv1alpha1.ReasonReady, "script resolved")
 
+	if err := ensureFixturesSecret(ctx, r.Client, rc, tc.Namespace); err != nil {
+		return ctrl.Result{}, fmt.Errorf("ensure fixtures secret: %w", err)
+	}
+
 	params := render.K6WorkloadParams{
 		TestCase:            &tc,
 		TargetName:          targetName,
