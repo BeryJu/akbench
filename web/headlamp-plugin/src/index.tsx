@@ -69,6 +69,7 @@ import { ClusterCreatePage, ClusterEditPage, ClustersPage } from './ClustersPage
 import { ComparePage } from './ComparePage';
 import { DashboardPage } from './DashboardPage';
 import { TestCaseSection, TopologySection } from './DetailSections';
+import { GrafanaPage } from './GrafanaPage';
 import { registerAuthentikIcon } from "./icon";
 import { TestCaseCreatePage, TestCaseEditPage, TestCasesPage } from './TestCasesPage';
 import { TestRunsPage } from './TestRunsPage';
@@ -228,6 +229,22 @@ registerRoute({
   useClusterURL: false,
   noAuthRequired: true,
   component: () => <ComparePage />,
+});
+
+registerSidebarEntry({
+  parent: 'authentik-bench',
+  name: 'authentik-bench-grafana',
+  label: 'Grafana',
+  url: '/authentik-bench/grafana',
+});
+registerRoute({
+  path: '/authentik-bench/grafana',
+  sidebar: { item: 'authentik-bench-grafana', sidebar: HOME_SIDEBAR },
+  name: 'authentik-bench-grafana',
+  exact: true,
+  useClusterURL: false,
+  noAuthRequired: true,
+  component: () => <GrafanaPage />,
 });
 
 registerDetailsViewSection(resource => {
