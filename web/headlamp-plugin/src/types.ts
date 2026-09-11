@@ -138,10 +138,6 @@ export interface Cluster {
   phase?: string;
   controlPlaneReady: boolean;
   infrastructureReady: boolean;
-  // nodeIP is only ever set for the management cluster - see
-  // internal/api/clusters.go's own Cluster.NodeIP doc comment. Used by
-  // GrafanaPage to build a cmd/apiserver NodePort URL directly.
-  nodeIP?: string;
 }
 
 export type InfrastructureProvider = 'Incus';

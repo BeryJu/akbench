@@ -32,13 +32,21 @@
 // path, matching Grafana's own GF_SERVER_SERVE_FROM_SUB_PATH=true. See
 // grafana_proxy.go's doc comment for the full story.
 //
-// The node IP + apiserver NodePort come from api.clusters()'s management
-// cluster entry (Cluster.nodeIP, only ever populated there) - the browser
-// needs a real routable address, not a cluster-relative DNS name.
+// The host portion is deliberately window.location.hostname, not a
+// resolved node IP: this plugin is often reached through an SSH tunnel or
+// similar remote-access forward, where only Headlamp's own port is
+// actually forwarded - a raw node IP (e.g. minikube's own
+// 192.168.49.2, reachable only from the host minikube itself runs on)
+// times out for any browser on the other end of such a tunnel. Using the
+// same hostname the browser already reached Headlamp on means this works
+// automatically for every access pattern (direct on-host, SSH tunnel,
+// port-forward) as long as the apiserver NodePort itself is *also*
+// forwarded alongside Headlamp's - one more -L/port-forward line, not a
+// code-side fix.
 import { SectionBox } from '@kinvolk/headlamp-plugin/lib/CommonComponents';
 import { Alert, MenuItem, TextField } from '@mui/material';
 import { useState } from 'react';
-import { api, MANAGEMENT_CLUSTER } from './api';
+import { api } from './api';
 import { useResource } from './useResource';
 
 // Matches hack/dev-apiserver.yaml's apiserver-nodeport Service.
@@ -52,14 +60,16 @@ const DASHBOARDS = [
   { uid: 'akbench-nodes', label: 'Nodes' },
 ];
 
-function grafanaProxyURL(nodeIP: string, workloadClusterName: string, dashboardUID: string): string {
-  return `http://${nodeIP}:${APISERVER_NODEPORT}/grafana-proxy/${workloadClusterName}/d/${dashboardUID}/-?orgId=1&kiosk`;
+function grafanaProxyURL(workloadClusterName: string, dashboardUID: string): string {
+  return (
+    `http://${window.location.hostname}:${APISERVER_NODEPORT}` +
+    `/grafana-proxy/${workloadClusterName}/d/${dashboardUID}/-?orgId=1&kiosk`
+  );
 }
 
 export function GrafanaPage() {
   const clusters = useResource(() => api.clusters(), [], 0);
   const workloadClusters = (clusters.data ?? []).filter(c => !c.management);
-  const nodeIP = (clusters.data ?? []).find(c => c.name === MANAGEMENT_CLUSTER)?.nodeIP;
 
   const [selectedCluster, setSelectedCluster] = useState('');
   const [selectedDashboard, setSelectedDashboard] = useState(DASHBOARDS[0].uid);
@@ -79,14 +89,18 @@ export function GrafanaPage() {
           WorkloadClusterReconciler's ensureGrafana), not centrally. Register one first.
         </Alert>
       )}
-      {!clusters.loading && workloadClusters.length > 0 && !nodeIP && (
-        <Alert severity="warning" sx={{ mb: 2 }}>
-          Could not resolve a reachable IP for the management cluster - cmd/apiserver's
-          Grafana proxy needs this to build the iframe's address. Check that its nodes
-          report an InternalIP.
+      {!clusters.loading && workloadClusters.length > 0 && (
+        <Alert severity="info" sx={{ mb: 2 }}>
+          The iframe below loads from{' '}
+          <code>
+            {window.location.hostname}:{APISERVER_NODEPORT}
+          </code>
+          , cmd/apiserver's own NodePort - if you reach Headlamp through an SSH tunnel or
+          similar port-forward, that same forward needs to also cover port {APISERVER_NODEPORT}
+          , not just Headlamp's own port.
         </Alert>
       )}
-      {workloadClusters.length > 0 && nodeIP && (
+      {workloadClusters.length > 0 && (
         <>
           <TextField
             select
@@ -119,7 +133,7 @@ export function GrafanaPage() {
           <iframe
             key={`${cluster}/${selectedDashboard}`}
             title="Grafana"
-            src={grafanaProxyURL(nodeIP, cluster, selectedDashboard)}
+            src={grafanaProxyURL(cluster, selectedDashboard)}
             style={{ width: '100%', height: '80vh', border: 'none' }}
           />
         </>
