@@ -21,9 +21,10 @@
 import { EmptyContent, Link, SectionBox, SimpleTable } from '@kinvolk/headlamp-plugin/lib/CommonComponents';
 import { Alert, Button, Chip } from '@mui/material';
 import { useParams } from 'react-router-dom';
-import { api, ApiError, headlampClusterName } from './api';
+import { api, ApiError, headlampClusterName, MANAGEMENT_CLUSTER } from './api';
 import { ClusterForm } from './ClusterForm';
 import { PrimaryLinkButton } from './PrimaryLinkButton';
+import { StatusChip } from './StatusPopover';
 import { useResource } from './useResource';
 
 export function ClustersPage() {
@@ -70,7 +71,22 @@ export function ClustersPage() {
             label: 'Role',
             getter: cluster => (cluster.management ? <Chip size="small" label="Management" /> : 'Workload'),
           },
-          { label: 'Phase', getter: cluster => cluster.phase ?? '-' },
+          {
+            label: 'Phase',
+            getter: cluster =>
+              cluster.management ? (
+                cluster.phase ?? '-'
+              ) : (
+                <StatusChip
+                  kind="WorkloadCluster"
+                  name={cluster.name}
+                  namespace="default"
+                  cluster={MANAGEMENT_CLUSTER}
+                  phase={cluster.phase}
+                  links={[{ label: 'Edit', routeName: 'authentik-bench-clusters-edit', params: { name: cluster.name } }]}
+                />
+              ),
+          },
           {
             label: 'Control plane',
             getter: cluster => <Chip size="small" label={cluster.controlPlaneReady ? 'Ready' : 'Not ready'} color={cluster.controlPlaneReady ? 'success' : 'default'} />,

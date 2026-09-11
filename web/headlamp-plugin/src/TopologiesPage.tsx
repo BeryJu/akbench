@@ -19,27 +19,14 @@
 // list/edit these too (as raw YAML), but this page is what actually exposes
 // the guided form (TopologyForm) the standalone UI had.
 import { EmptyContent, Link, SectionBox, SimpleTable } from '@kinvolk/headlamp-plugin/lib/CommonComponents';
-import { Alert, Button, Chip, Stack } from '@mui/material';
+import { Alert, Button, Stack } from '@mui/material';
 import { useParams } from 'react-router-dom';
-import { api, ApiError, headlampClusterName } from './api';
+import { api, ApiError, headlampClusterName, MANAGEMENT_CLUSTER } from './api';
 import { ClusterResourceButton } from './ClusterResourceButton';
 import { PrimaryLinkButton } from './PrimaryLinkButton';
+import { StatusChip } from './StatusPopover';
 import { TopologyForm } from './TopologyForm';
-import { readyCondition } from './types';
 import { useResource } from './useResource';
-
-function ReadyChip({ status }: { status?: string }) {
-  if (!status) {
-    return <Chip size="small" label="Unknown" />;
-  }
-  return (
-    <Chip
-      size="small"
-      label={status}
-      color={status === 'True' ? 'success' : status === 'False' ? 'error' : 'default'}
-    />
-  );
-}
 
 export function TopologiesPage() {
   const topologies = useResource(() => api.topologies());
@@ -85,7 +72,24 @@ export function TopologiesPage() {
           { label: 'Target', getter: topology => topology.spec.targetName || topology.metadata.name },
           { label: 'Cluster', getter: topology => topology.spec.clusterRef?.name ?? 'management' },
           { label: 'Postgres', getter: topology => topology.spec.postgres.mode },
-          { label: 'Ready', getter: topology => <ReadyChip status={readyCondition(topology.status?.conditions)?.status} /> },
+          {
+            label: 'Status',
+            getter: topology => {
+              const cluster = headlampClusterName(topology.spec.clusterRef?.name);
+              const links = [{ label: 'Namespace', routeName: 'Namespace', params: { name: topology.spec.namespace }, activeCluster: cluster }];
+              return (
+                <StatusChip
+                  kind="AuthentikTopology"
+                  name={topology.metadata.name}
+                  namespace={topology.metadata.namespace ?? 'default'}
+                  cluster={MANAGEMENT_CLUSTER}
+                  phase={topology.status?.phase}
+                  conditions={topology.status?.conditions}
+                  links={links}
+                />
+              );
+            },
+          },
           {
             label: 'Resources',
             getter: topology => {

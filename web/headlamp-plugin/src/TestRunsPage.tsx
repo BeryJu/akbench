@@ -21,18 +21,10 @@
 // list + delete only, matching api.testRuns()/api.deleteTestRun() which
 // were otherwise unused since the Headlamp pivot.
 import { EmptyContent, SectionBox, SimpleTable } from '@kinvolk/headlamp-plugin/lib/CommonComponents';
-import { Alert, Button, Chip } from '@mui/material';
-import { api, ApiError } from './api';
+import { Alert, Button } from '@mui/material';
+import { api, ApiError, MANAGEMENT_CLUSTER } from './api';
+import { StatusChip } from './StatusPopover';
 import { useResource } from './useResource';
-
-function PhaseChip({ phase }: { phase?: string }) {
-  if (!phase) {
-    return <Chip size="small" label="Unknown" />;
-  }
-  const color =
-    phase === 'Succeeded' ? 'success' : phase === 'Failed' ? 'error' : phase === 'Running' ? 'info' : 'default';
-  return <Chip size="small" label={phase} color={color} />;
-}
 
 export function TestRunsPage() {
   const testRuns = useResource(() => api.testRuns());
@@ -64,7 +56,20 @@ export function TestRunsPage() {
         columns={[
           { label: 'Run', getter: run => run.metadata.name },
           { label: 'Test case', getter: run => run.spec.testCaseRef.name },
-          { label: 'Phase', getter: run => <PhaseChip phase={run.status?.phase} /> },
+          {
+            label: 'Phase',
+            getter: run => (
+              <StatusChip
+                kind="TestRun"
+                name={run.metadata.name}
+                namespace={run.metadata.namespace ?? 'default'}
+                cluster={MANAGEMENT_CLUSTER}
+                phase={run.status?.phase}
+                conditions={run.status?.conditions}
+                links={[{ label: 'Test case', routeName: 'authentik-bench-testcases-edit', params: { name: run.spec.testCaseRef.name } }]}
+              />
+            ),
+          },
           { label: 'Started', getter: run => run.status?.startTime ?? run.metadata.creationTimestamp ?? '-' },
           { label: 'Completed', getter: run => run.status?.completionTime ?? '-' },
           {

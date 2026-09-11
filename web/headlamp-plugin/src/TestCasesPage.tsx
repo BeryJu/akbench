@@ -19,9 +19,10 @@
 import { EmptyContent, Link, SectionBox, SimpleTable } from '@kinvolk/headlamp-plugin/lib/CommonComponents';
 import { Alert, Button, Chip, Stack } from '@mui/material';
 import { useParams } from 'react-router-dom';
-import { api, ApiError, headlampClusterName } from './api';
+import { api, ApiError, headlampClusterName, MANAGEMENT_CLUSTER } from './api';
 import { ClusterResourceButton } from './ClusterResourceButton';
 import { PrimaryLinkButton } from './PrimaryLinkButton';
+import { StatusChip } from './StatusPopover';
 import { TestCaseForm } from './TestCaseForm';
 import { useResource } from './useResource';
 
@@ -86,6 +87,20 @@ export function TestCasesPage() {
             ),
           },
           { label: 'VUs', getter: testCase => testCase.spec.vus },
+          {
+            label: 'Status',
+            getter: testCase => (
+              <StatusChip
+                kind="TestCase"
+                name={testCase.metadata.name}
+                namespace={testCase.metadata.namespace ?? 'default'}
+                cluster={MANAGEMENT_CLUSTER}
+                phase={testCase.status?.phase}
+                conditions={testCase.status?.conditions}
+                links={[{ label: 'Topology', routeName: 'authentik-bench-topologies-edit', params: { name: testCase.spec.topologyRef.name } }]}
+              />
+            ),
+          },
           {
             label: 'Resources',
             getter: testCase => {

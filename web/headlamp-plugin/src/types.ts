@@ -79,6 +79,7 @@ export interface TopologySpec {
 
 export interface TopologyStatus {
   conditions?: Condition[];
+  phase?: string;
   serviceEndpoint?: string;
   helmReleaseRef?: { name: string };
   cnpgClusterRef?: { name: string };
@@ -109,6 +110,7 @@ export interface TestCase {
   spec: TestCaseSpec;
   status?: {
     conditions?: Condition[];
+    phase?: string;
     burnWorkloadRef?: { name: string };
   };
 }
