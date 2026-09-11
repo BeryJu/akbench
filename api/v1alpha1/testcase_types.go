@@ -104,6 +104,11 @@ type TestCaseStatus struct {
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 
+	// phase summarizes the Ready condition at a glance - computed from
+	// conditions, never set independently. See ReconcilePhase.
+	// +optional
+	Phase ReconcilePhase `json:"phase,omitempty"`
+
 	// burnWorkloadRef names the owned Deployment when profile is Burn.
 	// +optional
 	BurnWorkloadRef *corev1.LocalObjectReference `json:"burnWorkloadRef,omitempty"`
@@ -116,6 +121,7 @@ type TestCaseStatus struct {
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="Topology",type=string,JSONPath=`.spec.topologyRef.name`
 // +kubebuilder:printcolumn:name="Profile",type=string,JSONPath=`.spec.profile`
+// +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
 // +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=="Ready")].status`
 
 // TestCase is the Schema for the testcases API

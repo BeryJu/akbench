@@ -32,6 +32,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -90,6 +91,7 @@ type AuthentikTopologyReconciler struct {
 	// split resolveClient makes for the controller-runtime client.
 	RESTConfig *rest.Config
 	Tracker    *multicluster.Tracker
+	Recorder   record.EventRecorder
 }
 
 // resolveClient returns the client this reconcile should use for
@@ -161,8 +163,9 @@ func (r *AuthentikTopologyReconciler) applyExtraValues(ctx context.Context, topo
 	var cm corev1.ConfigMap
 	if err := r.Get(ctx, types.NamespacedName{Name: ref.Name, Namespace: topo.Namespace}, &cm); err != nil {
 		if apierrors.IsNotFound(err) {
-			setCondition(&topo.Status.Conditions, topo.Generation, benchv1alpha1.ConditionReady, metav1.ConditionFalse,
+			setCondition(r.Recorder, topo, &topo.Status.Conditions, topo.Generation, benchv1alpha1.ConditionReady, metav1.ConditionFalse,
 				benchv1alpha1.ReasonDependencyNotReady, fmt.Sprintf("extraValuesRef ConfigMap %q not found", ref.Name))
+			topo.Status.Phase = benchv1alpha1.PhaseFor(topo.Status.Conditions)
 			if err := r.Status().Update(ctx, topo); err != nil {
 				return nil, ctrl.Result{}, true, err
 			}
@@ -172,8 +175,9 @@ func (r *AuthentikTopologyReconciler) applyExtraValues(ctx context.Context, topo
 	}
 	merged, err := render.MergeExtraValues(values, cm.Data["values.yaml"])
 	if err != nil {
-		setCondition(&topo.Status.Conditions, topo.Generation, benchv1alpha1.ConditionReady, metav1.ConditionFalse,
+		setCondition(r.Recorder, topo, &topo.Status.Conditions, topo.Generation, benchv1alpha1.ConditionReady, metav1.ConditionFalse,
 			benchv1alpha1.ReasonReconcileError, fmt.Sprintf("invalid extraValuesRef YAML: %v", err))
+		topo.Status.Phase = benchv1alpha1.PhaseFor(topo.Status.Conditions)
 		return nil, ctrl.Result{}, true, r.Status().Update(ctx, topo)
 	}
 	return merged, ctrl.Result{}, false, nil
@@ -269,8 +273,9 @@ func (r *AuthentikTopologyReconciler) Reconcile(ctx context.Context, req ctrl.Re
 
 	rc, err := r.resolveClient(ctx, &topo)
 	if err != nil {
-		setCondition(&topo.Status.Conditions, topo.Generation, benchv1alpha1.ConditionReady, metav1.ConditionFalse,
+		setCondition(r.Recorder, &topo, &topo.Status.Conditions, topo.Generation, benchv1alpha1.ConditionReady, metav1.ConditionFalse,
 			benchv1alpha1.ReasonDependencyNotReady, fmt.Sprintf("waiting for cluster %q to be reachable: %v", topo.Spec.ClusterRef.Name, err))
+		topo.Status.Phase = benchv1alpha1.PhaseFor(topo.Status.Conditions)
 		if err := r.Status().Update(ctx, &topo); err != nil {
 			return ctrl.Result{}, err
 		}
@@ -286,8 +291,9 @@ func (r *AuthentikTopologyReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		return ctrl.Result{}, fmt.Errorf("resolve postgres: %w", err)
 	}
 	if !pgReady {
-		setCondition(&topo.Status.Conditions, topo.Generation, benchv1alpha1.ConditionReady, metav1.ConditionFalse,
+		setCondition(r.Recorder, &topo, &topo.Status.Conditions, topo.Generation, benchv1alpha1.ConditionReady, metav1.ConditionFalse,
 			benchv1alpha1.ReasonReconciling, "waiting on postgres backend")
+		topo.Status.Phase = benchv1alpha1.PhaseFor(topo.Status.Conditions)
 		if err := r.Status().Update(ctx, &topo); err != nil {
 			return ctrl.Result{}, err
 		}
@@ -350,7 +356,7 @@ func (r *AuthentikTopologyReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	if err != nil {
 		return ctrl.Result{}, err
 	}
-	setCondition(&topo.Status.Conditions, topo.Generation, benchv1alpha1.ConditionHelmReleaseReady, helmReleaseReady,
+	setCondition(r.Recorder, &topo, &topo.Status.Conditions, topo.Generation, benchv1alpha1.ConditionHelmReleaseReady, helmReleaseReady,
 		benchv1alpha1.ReasonReady, helmReleaseMessage)
 
 	topo.Status.HelmReleaseRef = &corev1.LocalObjectReference{Name: hr.Name}
@@ -358,21 +364,23 @@ func (r *AuthentikTopologyReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	topo.Status.ObservedGeneration = topo.Generation
 
 	blueprintReady, blueprintMessage, requeueForBlueprint := r.reconcileBlueprint(ctx, rc, &topo, hasBlueprint, helmReleaseReady, blueprintCM)
-	setCondition(&topo.Status.Conditions, topo.Generation, benchv1alpha1.ConditionBlueprintApplied, blueprintReady,
+	setCondition(r.Recorder, &topo, &topo.Status.Conditions, topo.Generation, benchv1alpha1.ConditionBlueprintApplied, blueprintReady,
 		benchv1alpha1.ReasonReady, blueprintMessage)
 
 	ready := helmReleaseReady == metav1.ConditionTrue && blueprintReady == metav1.ConditionTrue
 	if ready {
-		setCondition(&topo.Status.Conditions, topo.Generation, benchv1alpha1.ConditionReady, metav1.ConditionTrue,
+		setCondition(r.Recorder, &topo, &topo.Status.Conditions, topo.Generation, benchv1alpha1.ConditionReady, metav1.ConditionTrue,
 			benchv1alpha1.ReasonReady, "authentik chart installed and ready")
 	} else {
 		msg := helmReleaseMessage
 		if helmReleaseReady == metav1.ConditionTrue {
 			msg = blueprintMessage
 		}
-		setCondition(&topo.Status.Conditions, topo.Generation, benchv1alpha1.ConditionReady, metav1.ConditionFalse,
+		setCondition(r.Recorder, &topo, &topo.Status.Conditions, topo.Generation, benchv1alpha1.ConditionReady, metav1.ConditionFalse,
 			benchv1alpha1.ReasonReconciling, msg)
 	}
+
+	topo.Status.Phase = benchv1alpha1.PhaseFor(topo.Status.Conditions)
 
 	if err := r.Status().Update(ctx, &topo); err != nil {
 		return ctrl.Result{}, err
@@ -467,7 +475,7 @@ func (r *AuthentikTopologyReconciler) resolveEmbeddedPostgres(ctx context.Contex
 	if err != nil {
 		return nil, false, fmt.Errorf("ensure postgres password: %w", err)
 	}
-	setCondition(&topo.Status.Conditions, topo.Generation, benchv1alpha1.ConditionPostgresReady, metav1.ConditionTrue,
+	setCondition(r.Recorder, topo, &topo.Status.Conditions, topo.Generation, benchv1alpha1.ConditionPostgresReady, metav1.ConditionTrue,
 		benchv1alpha1.ReasonReady, "using the authentik chart's bundled postgresql subchart")
 	return &render.PostgresConnection{Password: pw}, true, nil
 }
@@ -493,7 +501,7 @@ func (r *AuthentikTopologyReconciler) resolveCNPGPostgres(ctx context.Context, r
 		return nil, false, fmt.Errorf("get CNPG Cluster: %w", err)
 	}
 	if !render.CNPGReady(existing) {
-		setCondition(&topo.Status.Conditions, topo.Generation, benchv1alpha1.ConditionPostgresReady, metav1.ConditionFalse,
+		setCondition(r.Recorder, topo, &topo.Status.Conditions, topo.Generation, benchv1alpha1.ConditionPostgresReady, metav1.ConditionFalse,
 			benchv1alpha1.ReasonReconciling, "waiting for CNPG Cluster to become healthy")
 		return nil, false, nil
 	}
@@ -502,13 +510,13 @@ func (r *AuthentikTopologyReconciler) resolveCNPGPostgres(ctx context.Context, r
 	var sec corev1.Secret
 	if err := rc.Get(ctx, types.NamespacedName{Name: secretName, Namespace: topo.Spec.Namespace}, &sec); err != nil {
 		if apierrors.IsNotFound(err) {
-			setCondition(&topo.Status.Conditions, topo.Generation, benchv1alpha1.ConditionPostgresReady, metav1.ConditionFalse,
+			setCondition(r.Recorder, topo, &topo.Status.Conditions, topo.Generation, benchv1alpha1.ConditionPostgresReady, metav1.ConditionFalse,
 				benchv1alpha1.ReasonReconciling, "waiting for CNPG's generated app secret")
 			return nil, false, nil
 		}
 		return nil, false, fmt.Errorf("get CNPG app secret: %w", err)
 	}
-	setCondition(&topo.Status.Conditions, topo.Generation, benchv1alpha1.ConditionPostgresReady, metav1.ConditionTrue,
+	setCondition(r.Recorder, topo, &topo.Status.Conditions, topo.Generation, benchv1alpha1.ConditionPostgresReady, metav1.ConditionTrue,
 		benchv1alpha1.ReasonReady, "CNPG Cluster is healthy")
 	return connectionFromSecret(sec, "host", "port", "dbname", "username", "password"), true, nil
 }
@@ -521,13 +529,13 @@ func (r *AuthentikTopologyReconciler) resolveExternalPostgres(ctx context.Contex
 	var sec corev1.Secret
 	if err := rc.Get(ctx, types.NamespacedName{Name: ext.SecretRef.Name, Namespace: topo.Spec.Namespace}, &sec); err != nil {
 		if apierrors.IsNotFound(err) {
-			setCondition(&topo.Status.Conditions, topo.Generation, benchv1alpha1.ConditionPostgresReady, metav1.ConditionFalse,
+			setCondition(r.Recorder, topo, &topo.Status.Conditions, topo.Generation, benchv1alpha1.ConditionPostgresReady, metav1.ConditionFalse,
 				benchv1alpha1.ReasonDependencyNotReady, fmt.Sprintf("external postgres secret %q not found", ext.SecretRef.Name))
 			return nil, false, nil
 		}
 		return nil, false, fmt.Errorf("get external postgres secret: %w", err)
 	}
-	setCondition(&topo.Status.Conditions, topo.Generation, benchv1alpha1.ConditionPostgresReady, metav1.ConditionTrue,
+	setCondition(r.Recorder, topo, &topo.Status.Conditions, topo.Generation, benchv1alpha1.ConditionPostgresReady, metav1.ConditionTrue,
 		benchv1alpha1.ReasonReady, "using the referenced external postgres secret")
 	return connectionFromSecret(sec, "host", "port", "database", "username", "password"), true, nil
 }

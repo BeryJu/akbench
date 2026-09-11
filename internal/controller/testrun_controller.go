@@ -28,6 +28,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -49,9 +50,10 @@ const testRunFinalizer = "bench.goauthentik.io/remote-cleanup"
 // when internal/grafana.FromEnv reports Enabled().
 type TestRunReconciler struct {
 	client.Client
-	Scheme  *runtime.Scheme
-	Grafana *grafana.Client
-	Tracker *multicluster.Tracker
+	Scheme   *runtime.Scheme
+	Grafana  *grafana.Client
+	Tracker  *multicluster.Tracker
+	Recorder record.EventRecorder
 }
 
 // +kubebuilder:rbac:groups=bench.goauthentik.io,resources=testruns,verbs=get;list;watch;create;update;patch;delete
@@ -103,14 +105,14 @@ func (r *TestRunReconciler) start(ctx context.Context, run *benchv1alpha1.TestRu
 	var tc benchv1alpha1.TestCase
 	if err := r.Get(ctx, types.NamespacedName{Name: run.Spec.TestCaseRef.Name, Namespace: run.Namespace}, &tc); err != nil {
 		if apierrors.IsNotFound(err) {
-			setCondition(&run.Status.Conditions, run.Generation, benchv1alpha1.ConditionReady, metav1.ConditionFalse,
+			setCondition(r.Recorder, run, &run.Status.Conditions, run.Generation, benchv1alpha1.ConditionReady, metav1.ConditionFalse,
 				benchv1alpha1.ReasonDependencyNotReady, fmt.Sprintf("TestCase %q not found", run.Spec.TestCaseRef.Name))
 			return ctrl.Result{}, r.Status().Update(ctx, run)
 		}
 		return ctrl.Result{}, err
 	}
 	if tc.Spec.Profile != benchv1alpha1.ProfileQuick {
-		setCondition(&run.Status.Conditions, run.Generation, benchv1alpha1.ConditionReady, metav1.ConditionFalse,
+		setCondition(r.Recorder, run, &run.Status.Conditions, run.Generation, benchv1alpha1.ConditionReady, metav1.ConditionFalse,
 			benchv1alpha1.ReasonReconcileError, "TestRuns only execute Quick TestCases; Burn TestCases run continuously via their own Deployment")
 		run.Status.Phase = benchv1alpha1.TestRunFailed
 		return ctrl.Result{}, r.Status().Update(ctx, run)
@@ -124,7 +126,7 @@ func (r *TestRunReconciler) start(ctx context.Context, run *benchv1alpha1.TestRu
 	topo, targetName, host, port, err := resolveReadyTopology(ctx, r.Client, tc.Namespace, tc.Spec.TopologyRef.Name)
 	if err != nil {
 		if errors.Is(err, errTopologyNotReady) {
-			setCondition(&run.Status.Conditions, run.Generation, benchv1alpha1.ConditionReady, metav1.ConditionFalse,
+			setCondition(r.Recorder, run, &run.Status.Conditions, run.Generation, benchv1alpha1.ConditionReady, metav1.ConditionFalse,
 				benchv1alpha1.ReasonDependencyNotReady, "AuthentikTopology is not Ready yet")
 			return ctrl.Result{RequeueAfter: 5 * time.Second}, r.Status().Update(ctx, run)
 		}
@@ -133,7 +135,7 @@ func (r *TestRunReconciler) start(ctx context.Context, run *benchv1alpha1.TestRu
 
 	rc, remote, err := resolveRunnerClient(ctx, r.Tracker, r.Client, run.Namespace, tc.Spec.RunnerClusterRef, topo.Spec.ClusterRef)
 	if err != nil {
-		setCondition(&run.Status.Conditions, run.Generation, benchv1alpha1.ConditionReady, metav1.ConditionFalse,
+		setCondition(r.Recorder, run, &run.Status.Conditions, run.Generation, benchv1alpha1.ConditionReady, metav1.ConditionFalse,
 			benchv1alpha1.ReasonDependencyNotReady, fmt.Sprintf("waiting for runner cluster to be reachable: %v", err))
 		return ctrl.Result{RequeueAfter: 10 * time.Second}, r.Status().Update(ctx, run)
 	}
@@ -176,7 +178,7 @@ func (r *TestRunReconciler) start(ctx context.Context, run *benchv1alpha1.TestRu
 	run.Status.StartTime = &now
 	run.Status.Phase = benchv1alpha1.TestRunRunning
 	run.Status.ResolvedSpec = resolved
-	setCondition(&run.Status.Conditions, run.Generation, benchv1alpha1.ConditionReady, metav1.ConditionFalse,
+	setCondition(r.Recorder, run, &run.Status.Conditions, run.Generation, benchv1alpha1.ConditionReady, metav1.ConditionFalse,
 		benchv1alpha1.ReasonReconciling, "quick job started")
 
 	if r.Grafana.Enabled() {
@@ -218,7 +220,7 @@ func (r *TestRunReconciler) pollJob(ctx context.Context, run *benchv1alpha1.Test
 	if err := rc.Get(ctx, types.NamespacedName{Name: run.Status.JobRef.Name, Namespace: run.Namespace}, &job); err != nil {
 		if apierrors.IsNotFound(err) {
 			run.Status.Phase = benchv1alpha1.TestRunFailed
-			setCondition(&run.Status.Conditions, run.Generation, benchv1alpha1.ConditionReady, metav1.ConditionFalse,
+			setCondition(r.Recorder, run, &run.Status.Conditions, run.Generation, benchv1alpha1.ConditionReady, metav1.ConditionFalse,
 				benchv1alpha1.ReasonReconcileError, "job disappeared before completing")
 			return ctrl.Result{}, r.Status().Update(ctx, run)
 		}
@@ -243,7 +245,7 @@ func (r *TestRunReconciler) finish(ctx context.Context, run *benchv1alpha1.TestR
 	if phase == benchv1alpha1.TestRunFailed {
 		ready = metav1.ConditionFalse
 	}
-	setCondition(&run.Status.Conditions, run.Generation, benchv1alpha1.ConditionReady, ready, benchv1alpha1.ReasonReady, message)
+	setCondition(r.Recorder, run, &run.Status.Conditions, run.Generation, benchv1alpha1.ConditionReady, ready, benchv1alpha1.ReasonReady, message)
 
 	if r.Grafana.Enabled() && run.Status.StartTime != nil {
 		targetName := ""

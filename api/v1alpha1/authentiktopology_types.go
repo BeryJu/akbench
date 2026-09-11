@@ -228,6 +228,11 @@ type AuthentikTopologyStatus struct {
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 
+	// phase summarizes the Ready condition at a glance - computed from
+	// conditions, never set independently. See ReconcilePhase.
+	// +optional
+	Phase ReconcilePhase `json:"phase,omitempty"`
+
 	// +optional
 	HelmReleaseRef *corev1.LocalObjectReference `json:"helmReleaseRef,omitempty"`
 	// +optional
@@ -244,6 +249,7 @@ type AuthentikTopologyStatus struct {
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="Target",type=string,JSONPath=`.spec.targetName`
 // +kubebuilder:printcolumn:name="Postgres",type=string,JSONPath=`.spec.postgres.mode`
+// +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
 // +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=="Ready")].status`
 
 // AuthentikTopology is the Schema for the authentiktopologies API

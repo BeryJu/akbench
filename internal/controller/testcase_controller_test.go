@@ -27,6 +27,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
@@ -65,7 +66,7 @@ var _ = Describe("TestCase Controller", func() {
 		})
 
 		It("owns a Deployment tagged with the testid/target/profile contract", func() {
-			r := &TestCaseReconciler{Client: k8sClient, Scheme: k8sClient.Scheme()}
+			r := &TestCaseReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Recorder: record.NewFakeRecorder(100)}
 			_, err := r.Reconcile(context.Background(), reconcile.Request{NamespacedName: typeNamespacedName})
 			Expect(err).NotTo(HaveOccurred())
 
@@ -117,7 +118,7 @@ var _ = Describe("TestCase Controller", func() {
 		})
 
 		It("does not create a burn Deployment - execution belongs to a TestRun", func() {
-			r := &TestCaseReconciler{Client: k8sClient, Scheme: k8sClient.Scheme()}
+			r := &TestCaseReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Recorder: record.NewFakeRecorder(100)}
 			_, err := r.Reconcile(context.Background(), reconcile.Request{NamespacedName: typeNamespacedName})
 			Expect(err).NotTo(HaveOccurred())
 

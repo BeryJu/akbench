@@ -27,6 +27,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
@@ -57,7 +58,7 @@ var _ = Describe("AuthentikTopology Controller", func() {
 		})
 
 		It("renders a HelmRepository and a HelmRelease with the topology's values", func() {
-			r := &AuthentikTopologyReconciler{Client: k8sClient, Scheme: k8sClient.Scheme()}
+			r := &AuthentikTopologyReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Recorder: record.NewFakeRecorder(100)}
 			_, err := r.Reconcile(context.Background(), reconcile.Request{NamespacedName: typeNamespacedName})
 			Expect(err).NotTo(HaveOccurred())
 
@@ -111,7 +112,7 @@ var _ = Describe("AuthentikTopology Controller", func() {
 		})
 
 		It("renders a required pod anti-affinity directly on server/worker", func() {
-			r := &AuthentikTopologyReconciler{Client: k8sClient, Scheme: k8sClient.Scheme()}
+			r := &AuthentikTopologyReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Recorder: record.NewFakeRecorder(100)}
 			_, err := r.Reconcile(context.Background(), reconcile.Request{NamespacedName: typeNamespacedName})
 			Expect(err).NotTo(HaveOccurred())
 
@@ -172,7 +173,7 @@ var _ = Describe("AuthentikTopology Controller", func() {
 		})
 
 		It("wires the referenced secret's connection into the chart values without touching CNPG", func() {
-			r := &AuthentikTopologyReconciler{Client: k8sClient, Scheme: k8sClient.Scheme()}
+			r := &AuthentikTopologyReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Recorder: record.NewFakeRecorder(100)}
 			_, err := r.Reconcile(context.Background(), reconcile.Request{NamespacedName: typeNamespacedName})
 			Expect(err).NotTo(HaveOccurred())
 
@@ -211,7 +212,7 @@ var _ = Describe("AuthentikTopology Controller", func() {
 			// No Tracker configured (this suite only unit-tests reconcile
 			// logic directly, without a running manager/ClusterCache) -
 			// resolveClient must report this as "not ready yet", not panic.
-			r := &AuthentikTopologyReconciler{Client: k8sClient, Scheme: k8sClient.Scheme()}
+			r := &AuthentikTopologyReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Recorder: record.NewFakeRecorder(100)}
 			key := types.NamespacedName{Name: topo.Name, Namespace: topo.Namespace}
 			result, err := r.Reconcile(context.Background(), reconcile.Request{NamespacedName: key})
 			Expect(err).NotTo(HaveOccurred())

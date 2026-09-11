@@ -29,6 +29,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -60,7 +61,8 @@ const workloadClusterFinalizer = "bench.goauthentik.io/workload-cluster-cleanup"
 // mirrors the resulting CAPI Cluster's readiness back onto its own status.
 type WorkloadClusterReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
+	Scheme   *runtime.Scheme
+	Recorder record.EventRecorder
 }
 
 // +kubebuilder:rbac:groups=bench.goauthentik.io,resources=workloadclusters,verbs=get;list;watch;create;update;patch;delete
@@ -96,7 +98,7 @@ func (r *WorkloadClusterReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	// render functions, not a breaking schema change, but there's nothing to
 	// render for it yet.
 	if (wc.Spec.Provider != benchv1alpha1.InfrastructureIncus && wc.Spec.Provider != "") || wc.Spec.Incus == nil {
-		setCondition(&wc.Status.Conditions, wc.Generation, benchv1alpha1.ConditionReady, metav1.ConditionFalse,
+		setCondition(r.Recorder, &wc, &wc.Status.Conditions, wc.Generation, benchv1alpha1.ConditionReady, metav1.ConditionFalse,
 			benchv1alpha1.ReasonReconcileError,
 			fmt.Sprintf("provider %q is not implemented; only %q (with spec.incus set) is", wc.Spec.Provider, benchv1alpha1.InfrastructureIncus))
 		return ctrl.Result{}, r.Status().Update(ctx, &wc)
@@ -140,8 +142,8 @@ func (r *WorkloadClusterReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		if !apierrors.IsNotFound(err) {
 			return ctrl.Result{}, fmt.Errorf("get Cluster: %w", err)
 		}
-		setCondition(&wc.Status.Conditions, wc.Generation, benchv1alpha1.ConditionReady, metav1.ConditionFalse,
-			"Reconciling", "waiting for Cluster to be created")
+		setCondition(r.Recorder, &wc, &wc.Status.Conditions, wc.Generation, benchv1alpha1.ConditionReady, metav1.ConditionFalse,
+			benchv1alpha1.ReasonReconciling, "waiting for Cluster to be created")
 		return ctrl.Result{}, r.Status().Update(ctx, &wc)
 	}
 
@@ -156,8 +158,8 @@ func (r *WorkloadClusterReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	// including this operator's own multicluster tracker - fails TLS
 	// verification permanently for that machine's lifetime.
 	if existing.Spec.ControlPlaneEndpoint.Host == "" {
-		setCondition(&wc.Status.Conditions, wc.Generation, benchv1alpha1.ConditionReady, metav1.ConditionFalse,
-			"Reconciling", "waiting for the load balancer's controlPlaneEndpoint before creating the control plane")
+		setCondition(r.Recorder, &wc, &wc.Status.Conditions, wc.Generation, benchv1alpha1.ConditionReady, metav1.ConditionFalse,
+			benchv1alpha1.ReasonReconciling, "waiting for the load balancer's controlPlaneEndpoint before creating the control plane")
 		return ctrl.Result{RequeueAfter: 2 * time.Second}, r.Status().Update(ctx, &wc)
 	}
 
@@ -197,6 +199,7 @@ func (r *WorkloadClusterReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		// object's status, and the next reconcile just retries it.
 		if err := r.ensureCNI(ctx, &wc); err != nil {
 			log.Error(err, "failed to ensure CNI on workload cluster")
+			r.Recorder.Eventf(&wc, corev1.EventTypeWarning, "AddonFailed", "failed to ensure CNI: %v", err)
 		}
 		// Same reasoning as ensureCNI: without a default StorageClass, any
 		// PVC left without an explicit storageClassName (the authentik
@@ -213,6 +216,7 @@ func (r *WorkloadClusterReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		// earlier in this function).
 		if err := r.ensureCSIIncus(ctx, &wc); err != nil {
 			log.Error(err, "failed to ensure csi-incus on workload cluster")
+			r.Recorder.Eventf(&wc, corev1.EventTypeWarning, "AddonFailed", "failed to ensure csi-incus: %v", err)
 		}
 		// Best-effort/idempotent for the same reason as ensureCNI/
 		// ensureCSIIncus: without it, there's no metrics.k8s.io API on this
@@ -221,6 +225,7 @@ func (r *WorkloadClusterReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		// per-pod usage graphs have nothing to read from.
 		if err := r.ensureMetricsServer(ctx, &wc); err != nil {
 			log.Error(err, "failed to ensure metrics-server on workload cluster")
+			r.Recorder.Eventf(&wc, corev1.EventTypeWarning, "AddonFailed", "failed to ensure metrics-server: %v", err)
 		}
 		// Same best-effort/idempotent reasoning as the addons above. Unlike
 		// them, this one also resolves a URL cmd/apiserver (on the
@@ -230,6 +235,7 @@ func (r *WorkloadClusterReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		// creates actually useful cross-cluster.
 		if err := r.ensurePrometheus(ctx, &wc); err != nil {
 			log.Error(err, "failed to ensure Prometheus on workload cluster")
+			r.Recorder.Eventf(&wc, corev1.EventTypeWarning, "AddonFailed", "failed to ensure Prometheus: %v", err)
 		}
 		// Best-effort/idempotent for the same reason: without these,
 		// authentik's own AUTHENTIK_PYROSCOPE_HOST/
@@ -237,9 +243,11 @@ func (r *WorkloadClusterReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		// (internal/render/helmrelease.go) point at nothing.
 		if err := r.ensurePyroscope(ctx, &wc); err != nil {
 			log.Error(err, "failed to ensure Pyroscope on workload cluster")
+			r.Recorder.Eventf(&wc, corev1.EventTypeWarning, "AddonFailed", "failed to ensure Pyroscope: %v", err)
 		}
 		if err := r.ensureTempo(ctx, &wc); err != nil {
 			log.Error(err, "failed to ensure Tempo on workload cluster")
+			r.Recorder.Eventf(&wc, corev1.EventTypeWarning, "AddonFailed", "failed to ensure Tempo: %v", err)
 		}
 	}
 
@@ -252,7 +260,7 @@ func (r *WorkloadClusterReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		ready = metav1.ConditionTrue
 		message = "control plane and infrastructure ready"
 	}
-	setCondition(&wc.Status.Conditions, wc.Generation, benchv1alpha1.ConditionReady, ready, "Ready", message)
+	setCondition(r.Recorder, &wc, &wc.Status.Conditions, wc.Generation, benchv1alpha1.ConditionReady, ready, benchv1alpha1.ReasonReady, message)
 
 	if err := r.Status().Update(ctx, &wc); err != nil {
 		return ctrl.Result{}, err

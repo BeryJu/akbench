@@ -21,6 +21,9 @@ spec:
     - jsonPath: .spec.postgres.mode
       name: Postgres
       type: string
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
     - jsonPath: .status.conditions[?(@.type=="Ready")].status
       name: Ready
       type: string
@@ -523,6 +526,16 @@ spec:
               observedGeneration:
                 format: int64
                 type: integer
+              phase:
+                description: |-
+                  phase summarizes the Ready condition at a glance - computed from
+                  conditions, never set independently. See ReconcilePhase.
+                enum:
+                - Pending
+                - Reconciling
+                - Ready
+                - Failed
+                type: string
               serviceEndpoint:
                 description: |-
                   serviceEndpoint is the in-cluster host:port a TestCase drives, e.g.

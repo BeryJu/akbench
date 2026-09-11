@@ -25,6 +25,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
@@ -66,7 +67,7 @@ var _ = Describe("TestRun Controller", func() {
 	})
 
 	It("creates a Job with the testid/target/profile contract and tracks it to completion", func() {
-		r := &TestRunReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Grafana: &grafana.Client{}}
+		r := &TestRunReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Grafana: &grafana.Client{}, Recorder: record.NewFakeRecorder(100)}
 
 		_, err := r.Reconcile(context.Background(), reconcile.Request{NamespacedName: typeNamespacedName})
 		Expect(err).NotTo(HaveOccurred())

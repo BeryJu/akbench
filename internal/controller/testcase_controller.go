@@ -30,6 +30,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -66,8 +67,9 @@ func envOrDefault(key, def string) string {
 // over time.
 type TestCaseReconciler struct {
 	client.Client
-	Scheme  *runtime.Scheme
-	Tracker *multicluster.Tracker
+	Scheme   *runtime.Scheme
+	Tracker  *multicluster.Tracker
+	Recorder record.EventRecorder
 }
 
 // +kubebuilder:rbac:groups=bench.goauthentik.io,resources=testcases,verbs=get;list;watch;create;update;patch;delete
@@ -98,28 +100,31 @@ func (r *TestCaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	topo, targetName, host, port, err := resolveReadyTopology(ctx, r.Client, tc.Namespace, tc.Spec.TopologyRef.Name)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
-			setCondition(&tc.Status.Conditions, tc.Generation, benchv1alpha1.ConditionTopologyReady, metav1.ConditionFalse,
+			setCondition(r.Recorder, &tc, &tc.Status.Conditions, tc.Generation, benchv1alpha1.ConditionTopologyReady, metav1.ConditionFalse,
 				benchv1alpha1.ReasonDependencyNotReady, fmt.Sprintf("AuthentikTopology %q not found", tc.Spec.TopologyRef.Name))
-			setCondition(&tc.Status.Conditions, tc.Generation, benchv1alpha1.ConditionReady, metav1.ConditionFalse,
+			setCondition(r.Recorder, &tc, &tc.Status.Conditions, tc.Generation, benchv1alpha1.ConditionReady, metav1.ConditionFalse,
 				benchv1alpha1.ReasonDependencyNotReady, "waiting for topology")
+			tc.Status.Phase = benchv1alpha1.PhaseFor(tc.Status.Conditions)
 			return ctrl.Result{}, r.Status().Update(ctx, &tc)
 		}
 		if errors.Is(err, errTopologyNotReady) {
-			setCondition(&tc.Status.Conditions, tc.Generation, benchv1alpha1.ConditionTopologyReady, metav1.ConditionFalse,
+			setCondition(r.Recorder, &tc, &tc.Status.Conditions, tc.Generation, benchv1alpha1.ConditionTopologyReady, metav1.ConditionFalse,
 				benchv1alpha1.ReasonDependencyNotReady, "AuthentikTopology is not Ready yet")
-			setCondition(&tc.Status.Conditions, tc.Generation, benchv1alpha1.ConditionReady, metav1.ConditionFalse,
+			setCondition(r.Recorder, &tc, &tc.Status.Conditions, tc.Generation, benchv1alpha1.ConditionReady, metav1.ConditionFalse,
 				benchv1alpha1.ReasonDependencyNotReady, "waiting for topology")
+			tc.Status.Phase = benchv1alpha1.PhaseFor(tc.Status.Conditions)
 			return ctrl.Result{}, r.Status().Update(ctx, &tc)
 		}
 		return ctrl.Result{}, fmt.Errorf("resolve topology: %w", err)
 	}
-	setCondition(&tc.Status.Conditions, tc.Generation, benchv1alpha1.ConditionTopologyReady, metav1.ConditionTrue,
+	setCondition(r.Recorder, &tc, &tc.Status.Conditions, tc.Generation, benchv1alpha1.ConditionTopologyReady, metav1.ConditionTrue,
 		benchv1alpha1.ReasonReady, "topology is Ready")
 
 	rc, remote, err := resolveRunnerClient(ctx, r.Tracker, r.Client, tc.Namespace, tc.Spec.RunnerClusterRef, topo.Spec.ClusterRef)
 	if err != nil {
-		setCondition(&tc.Status.Conditions, tc.Generation, benchv1alpha1.ConditionReady, metav1.ConditionFalse,
+		setCondition(r.Recorder, &tc, &tc.Status.Conditions, tc.Generation, benchv1alpha1.ConditionReady, metav1.ConditionFalse,
 			benchv1alpha1.ReasonDependencyNotReady, fmt.Sprintf("waiting for runner cluster to be reachable: %v", err))
+		tc.Status.Phase = benchv1alpha1.PhaseFor(tc.Status.Conditions)
 		if err := r.Status().Update(ctx, &tc); err != nil {
 			return ctrl.Result{}, err
 		}
@@ -135,7 +140,7 @@ func (r *TestCaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("ensure script configmap: %w", err)
 	}
-	setCondition(&tc.Status.Conditions, tc.Generation, benchv1alpha1.ConditionScriptReady, metav1.ConditionTrue,
+	setCondition(r.Recorder, &tc, &tc.Status.Conditions, tc.Generation, benchv1alpha1.ConditionScriptReady, metav1.ConditionTrue,
 		benchv1alpha1.ReasonReady, "script resolved")
 
 	params := render.K6WorkloadParams{
@@ -162,14 +167,16 @@ func (r *TestCaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		}
 		tc.Status.BurnWorkloadRef = nil
 	default:
-		setCondition(&tc.Status.Conditions, tc.Generation, benchv1alpha1.ConditionReady, metav1.ConditionFalse,
+		setCondition(r.Recorder, &tc, &tc.Status.Conditions, tc.Generation, benchv1alpha1.ConditionReady, metav1.ConditionFalse,
 			benchv1alpha1.ReasonReconcileError, fmt.Sprintf("unknown profile %q", tc.Spec.Profile))
+		tc.Status.Phase = benchv1alpha1.PhaseFor(tc.Status.Conditions)
 		return ctrl.Result{}, r.Status().Update(ctx, &tc)
 	}
 
 	tc.Status.ObservedGeneration = tc.Generation
-	setCondition(&tc.Status.Conditions, tc.Generation, benchv1alpha1.ConditionReady, metav1.ConditionTrue,
+	setCondition(r.Recorder, &tc, &tc.Status.Conditions, tc.Generation, benchv1alpha1.ConditionReady, metav1.ConditionTrue,
 		benchv1alpha1.ReasonReady, "test case reconciled")
+	tc.Status.Phase = benchv1alpha1.PhaseFor(tc.Status.Conditions)
 	if err := r.Status().Update(ctx, &tc); err != nil {
 		return ctrl.Result{}, err
 	}

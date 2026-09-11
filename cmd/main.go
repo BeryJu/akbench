@@ -203,29 +203,33 @@ func main() {
 		Scheme:     mgr.GetScheme(),
 		RESTConfig: mgr.GetConfig(),
 		Tracker:    tracker,
+		Recorder:   mgr.GetEventRecorderFor("authentiktopology-controller"),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "authentiktopology")
 		os.Exit(1)
 	}
 	if err := (&controller.TestCaseReconciler{
-		Client:  mgr.GetClient(),
-		Scheme:  mgr.GetScheme(),
-		Tracker: tracker,
+		Client:   mgr.GetClient(),
+		Scheme:   mgr.GetScheme(),
+		Tracker:  tracker,
+		Recorder: mgr.GetEventRecorderFor("testcase-controller"),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "testcase")
 		os.Exit(1)
 	}
 	if err := (&controller.TestRunReconciler{
-		Client:  mgr.GetClient(),
-		Scheme:  mgr.GetScheme(),
-		Tracker: tracker,
+		Client:   mgr.GetClient(),
+		Scheme:   mgr.GetScheme(),
+		Tracker:  tracker,
+		Recorder: mgr.GetEventRecorderFor("testrun-controller"),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "testrun")
 		os.Exit(1)
 	}
 	if err := (&controller.WorkloadClusterReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
+		Client:   mgr.GetClient(),
+		Scheme:   mgr.GetScheme(),
+		Recorder: mgr.GetEventRecorderFor("workloadcluster-controller"),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "workloadcluster")
 		os.Exit(1)
