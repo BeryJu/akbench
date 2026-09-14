@@ -21,8 +21,10 @@ import (
 	"fmt"
 
 	appsv1 "k8s.io/api/apps/v1"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -90,18 +92,18 @@ entries:
 // running oidc-test-client (owned by tc, not topo - see
 // testtemplate.Template.RequiresOAuthClient's own doc comment for why) plus
 // a matching OAuth2Provider/Application registered in the target
-// AuthentikDeployment via the same ak apply_blueprint mechanism
+// AuthentikDeployment via the same render.BlueprintJob mechanism
 // AuthentikDeploymentReconciler's own fixtures blueprint already uses.
 // oidc-test-client is created on rc (the same cluster the k6 workload
 // itself runs on, not necessarily topo's own cluster) since that's the one
 // cluster this reconcile already knows can reach BenchHost/BenchPort - the
-// blueprint application, in contrast, always execs into topo's own cluster,
-// resolved independently since it can differ from rc when
-// spec.runnerClusterRef is set.
+// blueprint import Job, in contrast, always runs on topo's own cluster
+// (deploymentClient below), resolved independently since it can differ
+// from rc when spec.runnerClusterRef is set.
 //
 // Returns oidc-test-client's own in-cluster host/port, to render as
 // OAUTH_TEST_CLIENT_HOST/PORT. RBAC markers for the extra resources this
-// needs (services, secrets, pods, pods/exec) live on
+// needs (services, secrets, batch/jobs) live on
 // TestCaseReconciler.Reconcile in testcase_controller.go, not here -
 // controller-gen's RBAC generator only picks up markers attached to a
 // Reconcile method, confirmed by testing: the identical marker on this
@@ -170,13 +172,57 @@ func (r *TestCaseReconciler) ensureOAuthClient(ctx context.Context, rc client.Cl
 	if err != nil {
 		return "", 0, fmt.Errorf("resolve deployment cluster client: %w", err)
 	}
-	restConfig, err := resolveClusterRESTConfig(ctx, r.RESTConfig, r.Tracker, tc.Namespace, topo.Spec.ClusterRef)
-	if err != nil {
-		return "", 0, fmt.Errorf("resolve deployment cluster REST config: %w", err)
-	}
-	if err := applyBlueprint(ctx, restConfig, deploymentClient, topo, oauthProviderBlueprint(id, id, clientSecret, redirectURI)); err != nil {
-		return "", 0, fmt.Errorf("apply oauth2 provider blueprint: %w", err)
+
+	content := string(oauthProviderBlueprint(id, id, clientSecret, redirectURI))
+	blueprintCMName := "oauth-blueprint-" + tc.Name
+	var existingCM corev1.ConfigMap
+	switch err := deploymentClient.Get(ctx, types.NamespacedName{Name: blueprintCMName, Namespace: topo.Spec.Namespace}, &existingCM); {
+	case apierrors.IsNotFound(err):
+		cm := &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{Name: blueprintCMName, Namespace: topo.Spec.Namespace},
+			Data:       map[string]string{oauthBlueprintKey: content},
+		}
+		if err := deploymentClient.Create(ctx, cm); err != nil {
+			return "", 0, fmt.Errorf("create oauth2 provider blueprint configmap: %w", err)
+		}
+	case err != nil:
+		return "", 0, fmt.Errorf("get oauth2 provider blueprint configmap: %w", err)
+	default:
+		existingCM.Data = map[string]string{oauthBlueprintKey: content}
+		if err := deploymentClient.Update(ctx, &existingCM); err != nil {
+			return "", 0, fmt.Errorf("update oauth2 provider blueprint configmap: %w", err)
+		}
 	}
 
-	return render.OIDCTestClientName(tc) + "." + tc.Namespace + ".svc.cluster.local", render.OIDCTestClientPort, nil
+	// A Job, not an exec into the server pod: see render.BlueprintJob's own
+	// doc comment - the same RWO-volume rolling-update deadlock that
+	// motivated moving the fixtures blueprint off the server Deployment
+	// entirely applies here too, since both share the exact same
+	// BlueprintPVC/BlueprintMountPath.
+	jobName := render.BlueprintJobName(topo, "oauth-"+tc.Name, content)
+	var job batchv1.Job
+	switch err := deploymentClient.Get(ctx, types.NamespacedName{Name: jobName, Namespace: topo.Spec.Namespace}, &job); {
+	case apierrors.IsNotFound(err):
+		newJob := render.BlueprintJob(topo, jobName, blueprintCMName, oauthBlueprintKey)
+		if err := deploymentClient.Create(ctx, newJob); err != nil && !apierrors.IsAlreadyExists(err) {
+			return "", 0, fmt.Errorf("create oauth2 provider blueprint import job: %w", err)
+		}
+		return "", 0, fmt.Errorf("waiting for oauth2 provider blueprint import job %q to start", jobName)
+	case err != nil:
+		return "", 0, fmt.Errorf("get oauth2 provider blueprint import job: %w", err)
+	}
+	for _, c := range job.Status.Conditions {
+		if c.Type == batchv1.JobFailed && c.Status == corev1.ConditionTrue {
+			return "", 0, fmt.Errorf("oauth2 provider blueprint import job %q failed: %s", jobName, c.Message)
+		}
+		if c.Type == batchv1.JobComplete && c.Status == corev1.ConditionTrue {
+			return render.OIDCTestClientName(tc) + "." + tc.Namespace + ".svc.cluster.local", render.OIDCTestClientPort, nil
+		}
+	}
+	return "", 0, fmt.Errorf("waiting for oauth2 provider blueprint import job %q to complete", jobName)
 }
+
+// oauthBlueprintKey is the data key oauthProviderBlueprint's content is
+// stored under in its own per-TestCase ConfigMap - mirrors
+// fixturesBlueprintKey's role for the fixtures blueprint.
+const oauthBlueprintKey = "blueprint.yaml"

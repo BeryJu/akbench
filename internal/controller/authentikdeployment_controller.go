@@ -23,6 +23,7 @@ import (
 	"time"
 
 	helmv2 "github.com/fluxcd/helm-controller/api/v2"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -31,7 +32,6 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -85,13 +85,9 @@ func kubeconfigSecretName(clusterName string) string {
 // controller generates move with clusterRef.
 type AuthentikDeploymentReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
-	// RESTConfig is the management cluster's own config (mgr.GetConfig()) -
-	// resolveRESTConfig's answer when spec.clusterRef is empty, the same
-	// split resolveClient makes for the controller-runtime client.
-	RESTConfig *rest.Config
-	Tracker    *multicluster.Tracker
-	Recorder   record.EventRecorder
+	Scheme   *runtime.Scheme
+	Tracker  *multicluster.Tracker
+	Recorder record.EventRecorder
 }
 
 // resolveClient returns the client this reconcile should use for
@@ -110,34 +106,51 @@ func (r *AuthentikDeploymentReconciler) resolveClient(ctx context.Context, topo 
 	return r.Tracker.GetClient(ctx, client.ObjectKey{Namespace: topo.Namespace, Name: topo.Spec.ClusterRef.Name})
 }
 
-// resolveRESTConfig is resolveClient's counterpart for applyBlueprint, which
-// needs a raw REST config (for pod exec) rather than a controller-runtime
-// client - always the same cluster resolveClient itself would pick.
-func (r *AuthentikDeploymentReconciler) resolveRESTConfig(ctx context.Context, topo *benchv1alpha1.AuthentikDeployment) (*rest.Config, error) {
-	return resolveClusterRESTConfig(ctx, r.RESTConfig, r.Tracker, topo.Namespace, topo.Spec.ClusterRef)
-}
-
 // resolveFixturesBlueprint looks up the fixtures blueprint ConfigMap, which,
 // like extraValuesRef, always lives alongside the AuthentikDeployment object
 // itself (topo.Namespace on the management cluster) rather than on rc -
 // `make fixtures` writes it there, and it's config for the deployment, not
 // part of it. Optional: a deployment with none configured just skips
 // blueprint application entirely (fixtures are a dev/benchmark convenience,
-// not required). When one is configured, also applies the PVC the chart's
-// server pod will mount it into (see render.HelmValues' withBlueprintVolume)
-// before the caller renders values referencing it.
-func (r *AuthentikDeploymentReconciler) resolveFixturesBlueprint(ctx context.Context, rc client.Client, topo *benchv1alpha1.AuthentikDeployment) (bool, corev1.ConfigMap, error) {
+// not required). When one is configured, mirrors it onto rc as a ConfigMap
+// (the same create-or-update pattern ensureFixturesSecret/
+// ensureScriptConfigMap already use elsewhere) and applies the PVC a
+// BlueprintJob will mount, returning the blueprint's own content so the
+// caller can compute BlueprintJobName's content hash.
+func (r *AuthentikDeploymentReconciler) resolveFixturesBlueprint(ctx context.Context, rc client.Client, topo *benchv1alpha1.AuthentikDeployment) (bool, string, error) {
 	var cm corev1.ConfigMap
 	if err := r.Get(ctx, types.NamespacedName{Name: fixturesBlueprintConfigMapName, Namespace: topo.Namespace}, &cm); err != nil {
 		if apierrors.IsNotFound(err) {
-			return false, cm, nil
+			return false, "", nil
 		}
-		return false, cm, fmt.Errorf("get fixtures blueprint configmap: %w", err)
+		return false, "", fmt.Errorf("get fixtures blueprint configmap: %w", err)
 	}
+	content := cm.Data[fixturesBlueprintKey]
+
+	var existing corev1.ConfigMap
+	mirrorErr := rc.Get(ctx, types.NamespacedName{Name: fixturesBlueprintConfigMapName, Namespace: topo.Namespace}, &existing)
+	switch {
+	case apierrors.IsNotFound(mirrorErr):
+		mirrored := &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{Name: fixturesBlueprintConfigMapName, Namespace: topo.Namespace},
+			Data:       map[string]string{fixturesBlueprintKey: content},
+		}
+		if err := rc.Create(ctx, mirrored); err != nil {
+			return false, "", fmt.Errorf("mirror fixtures blueprint configmap: %w", err)
+		}
+	case mirrorErr != nil:
+		return false, "", fmt.Errorf("get mirrored fixtures blueprint configmap: %w", mirrorErr)
+	default:
+		existing.Data = map[string]string{fixturesBlueprintKey: content}
+		if err := rc.Update(ctx, &existing); err != nil {
+			return false, "", fmt.Errorf("update mirrored fixtures blueprint configmap: %w", err)
+		}
+	}
+
 	if err := applyUnowned(ctx, rc, render.BlueprintPVC(topo)); err != nil {
-		return false, cm, fmt.Errorf("apply blueprint PVC: %w", err)
+		return false, "", fmt.Errorf("apply blueprint PVC: %w", err)
 	}
-	return true, cm, nil
+	return true, content, nil
 }
 
 // applyExtraValues merges topo.Spec.Authentik.ExtraValuesRef's ConfigMap
@@ -216,7 +229,7 @@ func (r *AuthentikDeploymentReconciler) helmReleaseReadiness(ctx context.Context
 // deployment with no blueprint configured reports Ready with nothing done, so
 // it never blocks the overall Ready condition.
 func (r *AuthentikDeploymentReconciler) reconcileBlueprint(ctx context.Context, rc client.Client, topo *benchv1alpha1.AuthentikDeployment,
-	hasBlueprint bool, helmReleaseReady metav1.ConditionStatus, blueprintCM corev1.ConfigMap) (metav1.ConditionStatus, string, bool) {
+	hasBlueprint bool, helmReleaseReady metav1.ConditionStatus, content string) (metav1.ConditionStatus, string, bool) {
 	switch {
 	case !hasBlueprint:
 		return metav1.ConditionTrue, "no fixtures blueprint configured", false
@@ -224,14 +237,29 @@ func (r *AuthentikDeploymentReconciler) reconcileBlueprint(ctx context.Context, 
 		return metav1.ConditionFalse, "waiting for the HelmRelease to be Ready before applying the fixtures blueprint", false
 	}
 
-	restConfig, err := r.resolveRESTConfig(ctx, topo)
-	if err != nil {
-		return metav1.ConditionFalse, fmt.Sprintf("waiting for cluster to be reachable: %v", err), true
+	name := render.BlueprintJobName(topo, "fixtures", content)
+	var job batchv1.Job
+	err := rc.Get(ctx, types.NamespacedName{Name: name, Namespace: topo.Spec.Namespace}, &job)
+	switch {
+	case apierrors.IsNotFound(err):
+		newJob := render.BlueprintJob(topo, name, fixturesBlueprintConfigMapName, fixturesBlueprintKey)
+		if err := rc.Create(ctx, newJob); err != nil && !apierrors.IsAlreadyExists(err) {
+			return metav1.ConditionFalse, fmt.Sprintf("create fixtures blueprint import job: %v", err), true
+		}
+		return metav1.ConditionFalse, "fixtures blueprint import job started", true
+	case err != nil:
+		return metav1.ConditionFalse, fmt.Sprintf("get fixtures blueprint import job: %v", err), true
 	}
-	if err := applyBlueprint(ctx, restConfig, rc, topo, []byte(blueprintCM.Data[fixturesBlueprintKey])); err != nil {
-		return metav1.ConditionFalse, err.Error(), true
+
+	for _, c := range job.Status.Conditions {
+		if c.Type == batchv1.JobComplete && c.Status == corev1.ConditionTrue {
+			return metav1.ConditionTrue, "fixtures blueprint applied", false
+		}
+		if c.Type == batchv1.JobFailed && c.Status == corev1.ConditionTrue {
+			return metav1.ConditionFalse, fmt.Sprintf("fixtures blueprint import job %q failed: %s", name, c.Message), false
+		}
 	}
-	return metav1.ConditionTrue, "fixtures blueprint applied", false
+	return metav1.ConditionFalse, "waiting for fixtures blueprint import job to complete", true
 }
 
 // +kubebuilder:rbac:groups=bench.goauthentik.io,resources=authentikdeployments,verbs=get;list;watch;create;update;patch;delete
@@ -242,10 +270,9 @@ func (r *AuthentikDeploymentReconciler) reconcileBlueprint(ctx context.Context, 
 // +kubebuilder:rbac:groups=postgresql.cnpg.io,resources=clusters,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=core,resources=namespaces,verbs=get;list;watch;create;delete
 // +kubebuilder:rbac:groups=core,resources=secrets,verbs=get;list;watch;create;update
-// +kubebuilder:rbac:groups=core,resources=configmaps,verbs=get;list;watch
+// +kubebuilder:rbac:groups=core,resources=configmaps,verbs=get;list;watch;create;update
 // +kubebuilder:rbac:groups=core,resources=persistentvolumeclaims,verbs=get;list;watch;create;update
-// +kubebuilder:rbac:groups=core,resources=pods,verbs=get;list;watch
-// +kubebuilder:rbac:groups=core,resources=pods/exec,verbs=create
+// +kubebuilder:rbac:groups=batch,resources=jobs,verbs=get;list;watch;create
 
 func (r *AuthentikDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
@@ -323,12 +350,12 @@ func (r *AuthentikDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.
 		tracingEndpoint = defaultTracingEndpoint
 	}
 
-	hasBlueprint, blueprintCM, err := r.resolveFixturesBlueprint(ctx, rc, &topo)
+	hasBlueprint, blueprintContent, err := r.resolveFixturesBlueprint(ctx, rc, &topo)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
 
-	values, err := render.HelmValues(&topo, secretKey, pgConn, pyroscopeHost, tracingEndpoint, hasBlueprint)
+	values, err := render.HelmValues(&topo, secretKey, pgConn, pyroscopeHost, tracingEndpoint)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("build helm values: %w", err)
 	}
@@ -357,7 +384,7 @@ func (r *AuthentikDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.
 	topo.Status.ServiceEndpoint = render.ServiceEndpoint(&topo)
 	topo.Status.ObservedGeneration = topo.Generation
 
-	blueprintReady, blueprintMessage, requeueForBlueprint := r.reconcileBlueprint(ctx, rc, &topo, hasBlueprint, helmReleaseReady, blueprintCM)
+	blueprintReady, blueprintMessage, requeueForBlueprint := r.reconcileBlueprint(ctx, rc, &topo, hasBlueprint, helmReleaseReady, blueprintContent)
 	setCondition(r.Recorder, &topo, &topo.Status.Conditions, topo.Generation, benchv1alpha1.ConditionBlueprintApplied, blueprintReady,
 		benchv1alpha1.ReasonReady, blueprintMessage)
 

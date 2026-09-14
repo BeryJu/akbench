@@ -30,7 +30,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -69,16 +68,9 @@ func envOrDefault(key, def string) string {
 // over time.
 type TestCaseReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
-	// RESTConfig is the management cluster's own config (mgr.GetConfig()) -
-	// resolveClusterRESTConfig's answer when a deployment's clusterRef is
-	// empty, needed only by the oauth-oidc template's own OAuth2
-	// provider/application blueprint (ensureOAuthClient), which execs into
-	// the target AuthentikDeployment's server pod the same way
-	// AuthentikDeploymentReconciler's own fixtures blueprint does.
-	RESTConfig *rest.Config
-	Tracker    *multicluster.Tracker
-	Recorder   record.EventRecorder
+	Scheme   *runtime.Scheme
+	Tracker  *multicluster.Tracker
+	Recorder record.EventRecorder
 }
 
 // +kubebuilder:rbac:groups=bench.goauthentik.io,resources=testcases,verbs=get;list;watch;create;update;patch;delete
@@ -89,8 +81,7 @@ type TestCaseReconciler struct {
 // +kubebuilder:rbac:groups=core,resources=configmaps,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=core,resources=services,verbs=get;list;watch;create;update
 // +kubebuilder:rbac:groups=core,resources=secrets,verbs=get;list;watch;create;update
-// +kubebuilder:rbac:groups=core,resources=pods,verbs=get;list;watch
-// +kubebuilder:rbac:groups=core,resources=pods/exec,verbs=create
+// +kubebuilder:rbac:groups=batch,resources=jobs,verbs=get;list;watch;create
 
 func (r *TestCaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)

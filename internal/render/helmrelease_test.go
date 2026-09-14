@@ -32,7 +32,7 @@ func decodeValues(t *testing.T, raw json.RawMessage) AuthentikDeploymentHelmValu
 
 func TestHelmValuesEmbedded(t *testing.T) {
 	topo := exampleDeployment()
-	raw, err := HelmValues(topo, "the-secret-key", &PostgresConnection{Password: "pw"}, "http://pyroscope.example:4040", "http://tempo.example:4318", false)
+	raw, err := HelmValues(topo, "the-secret-key", &PostgresConnection{Password: "pw"}, "http://pyroscope.example:4040", "http://tempo.example:4318")
 	if err != nil {
 		t.Fatalf("HelmValues: %v", err)
 	}
@@ -97,7 +97,7 @@ func affinityOf(t *testing.T, w map[string]any) map[string]any {
 func TestHelmValuesDedicatedSetsServerWorkerAffinity(t *testing.T) {
 	topo := exampleDeployment()
 	topo.Spec.Placement = benchv1alpha1.PlacementSpec{Mode: benchv1alpha1.PlacementDedicated}
-	raw, err := HelmValues(topo, "secret", &PostgresConnection{Password: "pw"}, "http://pyroscope.example:4040", "http://tempo.example:4318", false)
+	raw, err := HelmValues(topo, "secret", &PostgresConnection{Password: "pw"}, "http://pyroscope.example:4040", "http://tempo.example:4318")
 	if err != nil {
 		t.Fatalf("HelmValues: %v", err)
 	}
@@ -130,7 +130,7 @@ func TestHelmValuesDedicatedSetsServerWorkerAffinity(t *testing.T) {
 func TestHelmValuesPacked(t *testing.T) {
 	topo := exampleDeployment()
 	topo.Spec.Placement = benchv1alpha1.PlacementSpec{Mode: benchv1alpha1.PlacementPacked}
-	raw, err := HelmValues(topo, "secret", &PostgresConnection{Password: "pw"}, "http://pyroscope.example:4040", "http://tempo.example:4318", false)
+	raw, err := HelmValues(topo, "secret", &PostgresConnection{Password: "pw"}, "http://pyroscope.example:4040", "http://tempo.example:4318")
 	if err != nil {
 		t.Fatalf("HelmValues: %v", err)
 	}
@@ -157,7 +157,7 @@ func TestHelmValuesPacked(t *testing.T) {
 // another deployment's pods either.
 func TestHelmValuesEmbeddedPostgresGetsCrossDeploymentAffinity(t *testing.T) {
 	topo := exampleDeployment()
-	raw, err := HelmValues(topo, "secret", &PostgresConnection{Password: "pw"}, "http://pyroscope.example:4040", "http://tempo.example:4318", false)
+	raw, err := HelmValues(topo, "secret", &PostgresConnection{Password: "pw"}, "http://pyroscope.example:4040", "http://tempo.example:4318")
 	if err != nil {
 		t.Fatalf("HelmValues: %v", err)
 	}
@@ -184,7 +184,7 @@ func TestHelmValuesExternalDisablesBundledPostgres(t *testing.T) {
 	}
 	raw, err := HelmValues(topo, "secret", &PostgresConnection{
 		Host: "pg.example.com", Port: 5432, Database: "authentik", User: "authentik", Password: "s3cret",
-	}, "http://pyroscope.example:4040", "http://tempo.example:4318", false)
+	}, "http://pyroscope.example:4040", "http://tempo.example:4318")
 	if err != nil {
 		t.Fatalf("HelmValues: %v", err)
 	}
@@ -204,7 +204,7 @@ func TestHelmValuesExternalDisablesBundledPostgres(t *testing.T) {
 
 func TestHelmReleaseUsesExplicitReleaseName(t *testing.T) {
 	topo := exampleDeployment()
-	raw, err := HelmValues(topo, "secret", nil, "http://pyroscope.example:4040", "http://tempo.example:4318", false)
+	raw, err := HelmValues(topo, "secret", nil, "http://pyroscope.example:4040", "http://tempo.example:4318")
 	if err != nil {
 		t.Fatalf("HelmValues: %v", err)
 	}
@@ -247,7 +247,7 @@ func envValue(t *testing.T, w map[string]any, name string) (string, bool) {
 // matching the Ansible harness this project replaces).
 func TestHelmValuesPyroscopeAlwaysSet(t *testing.T) {
 	topo := exampleDeployment()
-	raw, err := HelmValues(topo, "secret", &PostgresConnection{Password: "pw"}, "http://pyroscope.example:4040", "http://tempo.example:4318", false)
+	raw, err := HelmValues(topo, "secret", &PostgresConnection{Password: "pw"}, "http://pyroscope.example:4040", "http://tempo.example:4318")
 	if err != nil {
 		t.Fatalf("HelmValues: %v", err)
 	}
@@ -295,32 +295,10 @@ func TestHelmValuesTracingOnlyWhenErrorReportingEnabled(t *testing.T) {
 
 func mustValues(t *testing.T, topo *benchv1alpha1.AuthentikDeployment) AuthentikDeploymentHelmValues {
 	t.Helper()
-	raw, err := HelmValues(topo, "secret", &PostgresConnection{Password: "pw"}, "http://pyroscope.example:4040", "http://tempo.example:4318", false)
+	raw, err := HelmValues(topo, "secret", &PostgresConnection{Password: "pw"}, "http://pyroscope.example:4040", "http://tempo.example:4318")
 	if err != nil {
 		t.Fatalf("HelmValues: %v", err)
 	}
 	return decodeValues(t, raw.Raw)
 }
 
-// TestHelmValuesBlueprintVolumeSetsFsGroup guards against a real bug caught
-// live: a freshly provisioned csi-incus block volume is root:root-owned
-// (standard mkfs default), so the authentik container's non-root user
-// (uid/gid 1000) can't write into it without an explicit fsGroup - without
-// this, AuthentikDeploymentReconciler.ApplyBlueprint's exec fails with
-// "Permission denied" writing the fixtures blueprint.
-func TestHelmValuesBlueprintVolumeSetsFsGroup(t *testing.T) {
-	topo := exampleDeployment()
-	raw, err := HelmValues(topo, "secret", &PostgresConnection{Password: "pw"}, "http://pyroscope.example:4040", "http://tempo.example:4318", true)
-	if err != nil {
-		t.Fatalf("HelmValues: %v", err)
-	}
-	values := decodeValues(t, raw.Raw)
-
-	sc, ok := values.Server["securityContext"].(map[string]any)
-	if !ok {
-		t.Fatalf("server.securityContext missing or wrong type: %v", values.Server["securityContext"])
-	}
-	if sc["fsGroup"] != float64(1000) {
-		t.Errorf("server.securityContext.fsGroup = %v, want 1000", sc["fsGroup"])
-	}
-}

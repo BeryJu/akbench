@@ -24,7 +24,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
@@ -80,22 +79,4 @@ func resolveRunnerClient(ctx context.Context, tracker *multicluster.Tracker, loc
 	}
 	rc, err := tracker.GetClient(ctx, client.ObjectKey{Namespace: namespace, Name: name})
 	return rc, true, err
-}
-
-// resolveClusterRESTConfig returns a raw REST config for clusterRef - local
-// (the caller's own management-cluster config) when clusterRef is empty,
-// else Tracker's live config for that Cluster. Shared by
-// AuthentikDeploymentReconciler.resolveRESTConfig (the fixtures blueprint)
-// and TestCaseReconciler (the oauth-oidc template's own OAuth2
-// provider/application blueprint) - both need a raw *rest.Config for
-// applyBlueprint's pod exec, unlike every other cross-cluster access here,
-// which only needs a controller-runtime client.Client.
-func resolveClusterRESTConfig(ctx context.Context, local *rest.Config, tracker *multicluster.Tracker, namespace string, clusterRef corev1.LocalObjectReference) (*rest.Config, error) {
-	if clusterRef.Name == "" {
-		return local, nil
-	}
-	if tracker == nil {
-		return nil, fmt.Errorf("multicluster tracker not configured")
-	}
-	return tracker.GetRESTConfig(ctx, client.ObjectKey{Namespace: namespace, Name: clusterRef.Name})
 }

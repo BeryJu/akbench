@@ -93,19 +93,14 @@ type AuthentikDeploymentHelmValues struct {
 // send_pii, not an OTLP endpoint or sample rate), so both go in as raw
 // AUTHENTIK_* env vars, the same names the Ansible harness this project
 // replaces used (roles/authentik/templates/env.j2).
-// withBlueprintVolume, if true, mounts a PVC (BlueprintPVCName) into the
-// server pod at BlueprintMountPath so AuthentikDeploymentReconciler's
-// ApplyBlueprint can write a fixtures blueprint into it and exec
-// `ak apply_blueprint` against it once the release is Ready. A volume at
-// all (rather than exec writing straight into the image's own filesystem)
-// is required for two independently-verified reasons: /blueprints itself
-// isn't writable by the container's non-root user ("Permission denied" on a
-// live pod), and ak apply_blueprint rejects any path outside
-// CONFIG.blueprints_dir anyway ("Invalid blueprint path", also verified
-// live). A PVC rather than a ConfigMap volume specifically because a
-// benchmark-scale blueprint (thousands of synthetic users) can exceed a
-// ConfigMap's ~1MiB etcd-backed size limit.
-func HelmValues(t *benchv1alpha1.AuthentikDeployment, secretKey string, pgConn *PostgresConnection, pyroscopeHost, tracingEndpoint string, withBlueprintVolume bool) (*apiextensionsv1.JSON, error) {
+// Blueprint fixtures are deliberately never mounted into the server/worker
+// pod template at all - see BlueprintJob's own doc comment for why: a PVC
+// mounted onto a long-lived Deployment caused a real RWO-volume
+// rolling-update deadlock (old and new pod both wanting the same
+// single-attach volume) every time the pod template changed for any
+// unrelated reason. A one-shot Job mounts BlueprintPVC instead, and
+// releases it as soon as the import completes.
+func HelmValues(t *benchv1alpha1.AuthentikDeployment, secretKey string, pgConn *PostgresConnection, pyroscopeHost, tracingEndpoint string) (*apiextensionsv1.JSON, error) {
 	embedded := t.Spec.Postgres.Mode == benchv1alpha1.PostgresEmbedded
 	values := AuthentikDeploymentHelmValues{
 		Server: map[string]any{
@@ -211,34 +206,6 @@ func HelmValues(t *benchv1alpha1.AuthentikDeployment, secretKey string, pgConn *
 		}
 	}
 
-	if withBlueprintVolume {
-		const volumeName = "bench-fixtures-blueprint"
-		values.Server["volumes"] = []map[string]any{
-			{valuesKeyName: volumeName, "persistentVolumeClaim": map[string]any{"claimName": BlueprintPVCName(t)}},
-		}
-		values.Server["volumeMounts"] = []map[string]any{
-			// Not read-only: AuthentikDeploymentReconciler writes the blueprint
-			// file into this mount itself (see ApplyBlueprint), rather than
-			// the content coming from a mounted ConfigMap - a benchmark-scale
-			// fixture set (thousands of synthetic users) can exceed a
-			// ConfigMap/Secret's ~1MiB etcd-backed size limit, which a PVC
-			// (backed by real Incus-attached storage via csi-incus - see
-			// CSIIncusStorageClass) has no equivalent of.
-			{valuesKeyName: volumeName, "mountPath": BlueprintMountPath},
-		}
-		// A freshly provisioned csi-incus block volume is a bare
-		// root:root-owned filesystem (standard mkfs default) - the
-		// authentik container's non-root user (uid/gid 1000) can't write
-		// into it without this, so ApplyBlueprint's "cat > ... && ak
-		// apply_blueprint" exec fails with "Permission denied" (caught
-		// live once local-path-provisioner's more permissive volumes were
-		// replaced with real Incus-backed ones). fsGroup makes kubelet
-		// recursively chown the volume's files to this group at mount time
-		// - only works because csi-incus's CSIDriver advertises
-		// fsGroupPolicy: File (see its own deploy/csidriver.yaml).
-		values.Server["securityContext"] = map[string]any{"fsGroup": 1000}
-	}
-
 	applyPlacement := func(w map[string]any) {
 		if sel := NodeSelector(t.Spec.Placement); len(sel) > 0 {
 			w["nodeSelector"] = sel
@@ -298,14 +265,15 @@ func HelmReleaseName(t *benchv1alpha1.AuthentikDeployment) string {
 	return t.Name
 }
 
-// BlueprintMountPath is where the fixtures blueprint PVC (see
-// withBlueprintVolume on HelmValues) is mounted into the server pod - must
-// stay under authentik's own configured blueprints_dir (verified live:
-// "/blueprints"), since ak apply_blueprint rejects any path outside it.
+// BlueprintMountPath is where BlueprintPVC is mounted into a BlueprintJob's
+// pod (see internal/render/blueprintjob.go) - must stay under authentik's
+// own configured blueprints_dir (verified live: "/blueprints"), since ak
+// apply_blueprint rejects any path outside it.
 const BlueprintMountPath = "/blueprints/custom"
 
-// BlueprintFileName is the file AuthentikDeploymentReconciler.ApplyBlueprint
-// writes the blueprint content into, under BlueprintMountPath.
+// BlueprintFileName is the file a BlueprintJob copies its blueprint
+// ConfigMap's content into, under BlueprintMountPath, before running
+// ak apply_blueprint against it.
 const BlueprintFileName = "bench-fixtures.yaml"
 
 // BlueprintPVCName is deterministic from the deployment name, mirroring
@@ -315,9 +283,10 @@ func BlueprintPVCName(t *benchv1alpha1.AuthentikDeployment) string {
 }
 
 // BlueprintPVC is the (small - a benchmark-scale blueprint is at most a few
-// MB of YAML) PVC AuthentikDeploymentReconciler applies onto the runner
-// cluster before installing the chart, so the server pod has somewhere
-// writable to receive the fixtures blueprint ApplyBlueprint execs in.
+// MB of YAML) PVC a BlueprintJob mounts to give ak apply_blueprint somewhere
+// writable under blueprints_dir to read its argument from - never mounted
+// into the server/worker Deployment itself (see BlueprintJob's own doc
+// comment for why).
 func BlueprintPVC(t *benchv1alpha1.AuthentikDeployment) *corev1.PersistentVolumeClaim {
 	return &corev1.PersistentVolumeClaim{
 		ObjectMeta: metav1.ObjectMeta{

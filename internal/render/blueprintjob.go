@@ -1,0 +1,140 @@
+/*
+Copyright 2026.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package render
+
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
+
+	batchv1 "k8s.io/api/batch/v1"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
+
+	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
+)
+
+// blueprintSourceMountPath is where a blueprint-source ConfigMap (see
+// BlueprintJob) is mounted, read-only, in the Job's pod - separate from
+// BlueprintMountPath (the PVC): ak apply_blueprint requires its argument to
+// live under the chart's own configured blueprints_dir, which a ConfigMap
+// volume can't itself be mounted at without also being writable there (see
+// BlueprintMountPath's own doc comment) - the Job's own command copies from
+// here to there first.
+const blueprintSourceMountPath = "/blueprints/source"
+
+// authentikConfigSecretName is the authentik Helm chart's own generated
+// Secret (templates/secret.yaml, named via its `authentik.fullname` helper)
+// holding every derived AUTHENTIK_* env var (secret_key, postgresql.*,
+// log_level, error_reporting...) - confirmed directly against a live
+// install (kubectl get secrets), not assumed. BlueprintJob's container
+// envFrom's this exact Secret so ak apply_blueprint (a Django management
+// command, not a self-contained tool) gets a real database connection,
+// identical to what the server/worker pods themselves run with.
+func authentikConfigSecretName(t *benchv1alpha1.AuthentikDeployment) string {
+	return t.Name + "-authentik"
+}
+
+// BlueprintJobName is deterministic from the deployment name, a caller-given
+// label distinguishing which blueprint this is (e.g. "fixtures", or an
+// oauth-oidc TestCase's own name), and a hash of the blueprint content - so
+// a content change creates a new Job (Jobs are immutable once created,
+// there's no "update and re-run"), while re-applying identical content is a
+// no-op: the caller's create call just hits AlreadyExists for the same
+// name, the same idempotent-apply convention every other addon in this
+// codebase already follows.
+func BlueprintJobName(t *benchv1alpha1.AuthentikDeployment, label, content string) string {
+	sum := sha256.Sum256([]byte(content))
+	return fmt.Sprintf("%s-blueprint-%s-%s", t.Name, label, hex.EncodeToString(sum[:])[:8])
+}
+
+// BlueprintJob renders a one-shot Job that imports a blueprint: it mounts
+// sourceConfigMapName (read-only, the blueprint content under
+// sourceConfigMapKey) and BlueprintPVC (writable, under the chart's own
+// blueprints_dir), copies the former onto the latter, and runs
+// `ak apply_blueprint`.
+//
+// Deliberately not mounted into the server/worker Deployment at all (see
+// HelmValues, which no longer references BlueprintPVC in any way): a Job's
+// pod releases the PVC as soon as it completes, rather than holding it for
+// the Deployment's entire lifetime, which is what caused a real RWO-volume
+// rolling-update deadlock - old and new server pods both wanting to attach
+// the same single-attach volume at once - every time the deployment's pod
+// template changed for any unrelated reason at all (confirmed live: a
+// label-only change was enough to trigger it).
+//
+// TTLSecondsAfterFinished lets Kubernetes' own TTL controller garbage
+// collect a completed import Job on its own; content-hashed names mean
+// these otherwise accumulate one object per distinct blueprint version
+// forever.
+func BlueprintJob(t *benchv1alpha1.AuthentikDeployment, name, sourceConfigMapName, sourceConfigMapKey string) *batchv1.Job {
+	targetPath := BlueprintMountPath + "/" + BlueprintFileName
+	sourcePath := blueprintSourceMountPath + "/" + sourceConfigMapKey
+	image := t.Spec.Authentik.Image
+	if image == "" {
+		image = "ghcr.io/goauthentik/server"
+	}
+	tag := t.Spec.Authentik.Tag
+	if tag == "" {
+		// The authentik chart itself falls back to .Chart.AppVersion here -
+		// a Job rendered outside Helm has no equivalent to fall back to.
+		tag = "latest"
+	}
+
+	return &batchv1.Job{
+		TypeMeta:   metav1.TypeMeta{Kind: "Job", APIVersion: "batch/v1"},
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: t.Spec.Namespace},
+		Spec: batchv1.JobSpec{
+			BackoffLimit:            ptr.To(int32(3)),
+			TTLSecondsAfterFinished: ptr.To(int32(3600)),
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{Labels: DeploymentLabels(t.Name)},
+				Spec: corev1.PodSpec{
+					RestartPolicy: corev1.RestartPolicyNever,
+					// A freshly provisioned csi-incus block volume is
+					// root:root-owned, unwritable by the authentik image's
+					// non-root user without this - the same fix HelmValues
+					// used to need on the server Deployment before this PVC
+					// moved here (see fsGroupPolicy: File on csi-incus's own
+					// CSIDriver).
+					SecurityContext: &corev1.PodSecurityContext{FSGroup: ptr.To(int64(1000))},
+					Containers: []corev1.Container{{
+						Name:    "apply-blueprint",
+						Image:   fmt.Sprintf("%s:%s", image, tag),
+						Command: []string{"sh", "-c", fmt.Sprintf("cp %s %s && ak apply_blueprint %s", sourcePath, targetPath, targetPath)},
+						EnvFrom: []corev1.EnvFromSource{
+							{SecretRef: &corev1.SecretEnvSource{LocalObjectReference: corev1.LocalObjectReference{Name: authentikConfigSecretName(t)}}},
+						},
+						VolumeMounts: []corev1.VolumeMount{
+							{Name: "blueprint-source", MountPath: blueprintSourceMountPath, ReadOnly: true},
+							{Name: "blueprint-target", MountPath: BlueprintMountPath},
+						},
+					}},
+					Volumes: []corev1.Volume{
+						{Name: "blueprint-source", VolumeSource: corev1.VolumeSource{
+							ConfigMap: &corev1.ConfigMapVolumeSource{LocalObjectReference: corev1.LocalObjectReference{Name: sourceConfigMapName}},
+						}},
+						{Name: "blueprint-target", VolumeSource: corev1.VolumeSource{
+							PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: BlueprintPVCName(t)},
+						}},
+					},
+				},
+			},
+		},
+	}
+}
