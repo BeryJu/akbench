@@ -50,3 +50,38 @@ const palette = [
 export function colorFor(index: number): string {
   return palette[index % palette.length];
 }
+
+/**
+ * metricsAnchorFromRuns resolves a fixed-in-the-past metrics window from a
+ * Quick TestCase's own run history, instead of the usual "trailing window
+ * ending at now" - a Quick TestCase's k6 Job exits once its run completes,
+ * so a window anchored to "now" only ever shows data for as long as the
+ * run's own samples stay within that trailing window (Prometheus' own
+ * ~5-minute staleness lookback for an instant query, or metricsRange's own
+ * rangeSeconds), then silently goes empty even though the run itself
+ * succeeded and its data is still in Prometheus.
+ *
+ * Returns undefined (meaning "use now", MetricsChart's own default) when the
+ * latest run is still in flight (no completionTime yet) or there's no run
+ * history at all - both cases where "now" is already the right anchor.
+ */
+export function metricsAnchorFromRuns(
+  runs: { status?: { startTime?: string; completionTime?: string } }[]
+): { endSeconds: number; rangeSeconds: number } | undefined {
+  const completed = runs
+    .filter(r => r.status?.completionTime)
+    .sort((a, b) => Date.parse(b.status!.completionTime!) - Date.parse(a.status!.completionTime!));
+  const latest = completed[0];
+  if (!latest?.status?.completionTime) {
+    return undefined;
+  }
+  // A short buffer past completion, so the run's own last few samples
+  // (k6's final Prometheus remote-write push can trail completion slightly)
+  // are still inside the window.
+  const endSeconds = Math.floor(Date.parse(latest.status.completionTime) / 1000) + 60;
+  const startSeconds = latest.status.startTime
+    ? Math.floor(Date.parse(latest.status.startTime) / 1000)
+    : endSeconds - 900;
+  const rangeSeconds = Math.max(900, endSeconds - startSeconds + 120);
+  return { endSeconds, rangeSeconds };
+}

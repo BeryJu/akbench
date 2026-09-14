@@ -23,6 +23,7 @@ import { Alert, Box, Button, Stack } from '@mui/material';
 import { useState } from 'react';
 import { api, headlampClusterName } from './api';
 import { ClusterResourceButton } from './ClusterResourceButton';
+import { metricsAnchorFromRuns } from './format';
 import { MetricsChart } from './MetricsChart';
 import { useResource } from './useResource';
 
@@ -50,6 +51,15 @@ export function TestCaseSection({ name, profile }: { name: string; profile?: str
   );
   const namespace = testCase.data?.metadata.namespace;
   const burnDeployment = testCase.data?.status?.burnWorkloadRef?.name;
+
+  // Only Quick has a run history to anchor against - Burn runs continuously,
+  // so "now" (MetricsChart's own default) is already correct for it.
+  const runs = useResource(
+    () => (profile === 'Quick' ? api.testRuns(name) : Promise.resolve([])),
+    [name, profile],
+    15000
+  );
+  const anchor = profile === 'Quick' ? metricsAnchorFromRuns(runs.data ?? []) : undefined;
 
   async function runNow() {
     setRunning(true);
@@ -94,8 +104,23 @@ export function TestCaseSection({ name, profile }: { name: string; profile?: str
           />
         </Stack>
       )}
-      <MetricsChart metric="http_reqs" testids={[name]} />
-      <MetricsChart metric="http_req_duration_p95" testids={[name]} />
+      {profile === 'Quick' && !anchor && (runs.data?.length ?? 0) > 0 && (
+        <Alert severity="info" sx={{ mb: 2 }}>
+          Latest run is still in progress - metrics will show once it completes.
+        </Alert>
+      )}
+      <MetricsChart
+        metric="http_reqs"
+        testids={[name]}
+        endSeconds={anchor?.endSeconds}
+        rangeSeconds={anchor?.rangeSeconds}
+      />
+      <MetricsChart
+        metric="http_req_duration_p95"
+        testids={[name]}
+        endSeconds={anchor?.endSeconds}
+        rangeSeconds={anchor?.rangeSeconds}
+      />
     </Box>
   );
 }

@@ -201,9 +201,17 @@ export const api = {
   deleteTestRun: (name: string) => request<void>(`/api/v1/testruns/${name}`, { method: 'DELETE' }),
 
   // -- Metrics
-  compare: (testids: string[], window: string) =>
+  // atSeconds anchors the instant query to a specific unix time instead of
+  // "now" (internal/api/metrics.go's own `time` param, forwarded straight to
+  // Prometheus) - needed for a Quick TestCase, whose k6 Job has already
+  // exited by the time anyone looks: an instant query always evaluated at
+  // "now" finds nothing once more than the summary window has elapsed since
+  // the run completed. See ComparePage.tsx/DetailSections.tsx for how the
+  // anchor is resolved from a TestRun's own completionTime.
+  compare: (testids: string[], window: string, atSeconds?: number) =>
     request<CompareResponse>(
-      `/api/v1/metrics/compare?testids=${encodeURIComponent(testids.join(','))}&window=${encodeURIComponent(window)}`
+      `/api/v1/metrics/compare?testids=${encodeURIComponent(testids.join(','))}&window=${encodeURIComponent(window)}` +
+        (atSeconds !== undefined ? `&time=${atSeconds}` : '')
     ),
   metricsRange: (
     testids: string[],

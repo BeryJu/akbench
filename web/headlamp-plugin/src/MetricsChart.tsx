@@ -56,6 +56,7 @@ export function MetricsChart({
   step = '15s',
   refreshMs = 15000,
   height = 220,
+  endSeconds,
 }: {
   metric: string;
   testids: string[];
@@ -63,6 +64,13 @@ export function MetricsChart({
   step?: string;
   refreshMs?: number;
   height?: number;
+  // endSeconds anchors the window to a specific unix time instead of "now" -
+  // for a Quick TestCase, whose k6 Job has already exited by the time
+  // anyone looks, a window that always ends at "now" ages out of the run's
+  // actual data within minutes. Pass the run's own completionTime (see
+  // DetailSections.tsx/ComparePage.tsx) instead. Omit for an
+  // always-running Burn TestCase, where "now" is exactly right.
+  endSeconds?: number;
 }) {
   const theme = useTheme();
   const { data, error } = useResource<RangeResponse | undefined>(
@@ -70,11 +78,13 @@ export function MetricsChart({
       if (testids.length === 0) {
         return Promise.resolve(undefined);
       }
-      const end = Math.floor(Date.now() / 1000);
+      const end = endSeconds ?? Math.floor(Date.now() / 1000);
       return api.metricsRange(testids, metric, end - rangeSeconds, end, step);
     },
-    [testids.join(','), metric, rangeSeconds, step],
-    refreshMs
+    [testids.join(','), metric, rangeSeconds, step, endSeconds],
+    // A fixed-in-the-past window (endSeconds set) never gains new data on
+    // its own the way a "now"-anchored one does - polling it is pure waste.
+    endSeconds !== undefined ? 0 : refreshMs
   );
 
   const { rows, unit, label } = useMemo(() => {

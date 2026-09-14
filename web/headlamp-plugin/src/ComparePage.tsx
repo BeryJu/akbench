@@ -20,7 +20,7 @@ import { SectionBox, SimpleTable } from '@kinvolk/headlamp-plugin/lib/CommonComp
 import { Alert, Checkbox, FormControlLabel, FormGroup, Grid, MenuItem, TextField, Typography } from '@mui/material';
 import { useMemo, useState } from 'react';
 import { api } from './api';
-import { formatMetricValue } from './format';
+import { formatMetricValue, metricsAnchorFromRuns } from './format';
 import { MetricsChart } from './MetricsChart';
 import { CompareMetric, CompareResponse } from './types';
 import { useResource } from './useResource';
@@ -47,16 +47,33 @@ function best(response: CompareResponse, key: string, better: string): string | 
 
 export function ComparePage() {
   const testCases = useResource(() => api.testCases(), [], 0);
+  // Only needed to anchor the window for an all-Quick selection (see
+  // anchor below) - a Burn TestCase never stops, so "now" stays correct for
+  // any selection that includes one.
+  const testRuns = useResource(() => api.testRuns(), [], 15000);
   const [selected, setSelected] = useState<string[]>([]);
   const [window, setWindow] = useState('5m');
   const [rangeSeconds, setRangeSeconds] = useState(CHART_RANGES[0].seconds);
 
+  const allSelectedAreQuick =
+    selected.length > 0 &&
+    selected.every(id => (testCases.data ?? []).find(tc => tc.metadata.name === id)?.spec.profile === 'Quick');
+  // A Quick TestCase's k6 Job exits once its run completes - an instant/range
+  // query always evaluated at "now" goes empty within minutes of a
+  // completed run, even though its data is still in Prometheus (see
+  // metricsAnchorFromRuns's own doc comment). Anchoring only kicks in when
+  // every selected test is Quick; a mixed selection keeps the "now" default,
+  // which is right for whichever Burn test is in the mix.
+  const anchor = allSelectedAreQuick
+    ? metricsAnchorFromRuns((testRuns.data ?? []).filter(r => selected.includes(r.spec.testCaseRef.name)))
+    : undefined;
+
   const comparison = useResource(
     () =>
       selected.length
-        ? api.compare(selected, window)
+        ? api.compare(selected, window, anchor?.endSeconds)
         : Promise.resolve(undefined as unknown as CompareResponse),
-    [selected.join(','), window],
+    [selected.join(','), window, anchor?.endSeconds],
     10000
   );
 
@@ -101,6 +118,12 @@ export function ComparePage() {
       {(comparison.error || testCases.error) && (
         <Alert severity="error" sx={{ mb: 2 }}>
           {comparison.error ?? testCases.error}
+        </Alert>
+      )}
+      {anchor && (
+        <Alert severity="info" sx={{ mb: 2 }}>
+          All selected tests are Quick - showing data as of their latest completed run (
+          {new Date(anchor.endSeconds * 1000).toLocaleString()}) instead of "now".
         </Alert>
       )}
 
@@ -169,7 +192,12 @@ export function ComparePage() {
           <Grid container spacing={2}>
             {metrics.map(metric => (
               <Grid item xs={12} md={6} key={metric.key}>
-                <MetricsChart metric={metric.key} testids={selected} rangeSeconds={rangeSeconds} />
+                <MetricsChart
+                  metric={metric.key}
+                  testids={selected}
+                  rangeSeconds={rangeSeconds}
+                  endSeconds={anchor?.endSeconds}
+                />
               </Grid>
             ))}
           </Grid>
