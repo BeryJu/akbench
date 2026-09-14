@@ -110,17 +110,11 @@ func (r *AuthentikDeploymentReconciler) resolveClient(ctx context.Context, topo 
 	return r.Tracker.GetClient(ctx, client.ObjectKey{Namespace: topo.Namespace, Name: topo.Spec.ClusterRef.Name})
 }
 
-// resolveRESTConfig is resolveClient's counterpart for ApplyBlueprint, which
+// resolveRESTConfig is resolveClient's counterpart for applyBlueprint, which
 // needs a raw REST config (for pod exec) rather than a controller-runtime
 // client - always the same cluster resolveClient itself would pick.
 func (r *AuthentikDeploymentReconciler) resolveRESTConfig(ctx context.Context, topo *benchv1alpha1.AuthentikDeployment) (*rest.Config, error) {
-	if topo.Spec.ClusterRef.Name == "" {
-		return r.RESTConfig, nil
-	}
-	if r.Tracker == nil {
-		return nil, fmt.Errorf("multicluster tracker not configured")
-	}
-	return r.Tracker.GetRESTConfig(ctx, client.ObjectKey{Namespace: topo.Namespace, Name: topo.Spec.ClusterRef.Name})
+	return resolveClusterRESTConfig(ctx, r.RESTConfig, r.Tracker, topo.Namespace, topo.Spec.ClusterRef)
 }
 
 // resolveFixturesBlueprint looks up the fixtures blueprint ConfigMap, which,
@@ -234,7 +228,7 @@ func (r *AuthentikDeploymentReconciler) reconcileBlueprint(ctx context.Context, 
 	if err != nil {
 		return metav1.ConditionFalse, fmt.Sprintf("waiting for cluster to be reachable: %v", err), true
 	}
-	if err := r.ApplyBlueprint(ctx, restConfig, rc, topo, []byte(blueprintCM.Data[fixturesBlueprintKey])); err != nil {
+	if err := applyBlueprint(ctx, restConfig, rc, topo, []byte(blueprintCM.Data[fixturesBlueprintKey])); err != nil {
 		return metav1.ConditionFalse, err.Error(), true
 	}
 	return metav1.ConditionTrue, "fixtures blueprint applied", false

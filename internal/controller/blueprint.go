@@ -74,13 +74,16 @@ func serverPodForExec(ctx context.Context, rc client.Client, topo *benchv1alpha1
 // and no other AuthentikDeployment reconciled again as long as it sat there).
 const blueprintApplyTimeout = 5 * time.Minute
 
-// ApplyBlueprint writes blueprintYAML into the fixtures PVC HelmValues
+// applyBlueprint writes blueprintYAML into the fixtures PVC HelmValues
 // mounted at render.BlueprintMountPath (see withBlueprintVolume) and applies
 // it with `ak apply_blueprint`, via a single exec so the write and the apply
-// see the same content even if the operator's own copy changes between
-// reconciles. restConfig is whichever cluster topo actually runs on
-// (resolveRESTConfig) - always the same cluster rc itself talks to.
-func (r *AuthentikDeploymentReconciler) ApplyBlueprint(ctx context.Context, restConfig *rest.Config, rc client.Client, topo *benchv1alpha1.AuthentikDeployment, blueprintYAML []byte) error {
+// see the same content even if the caller's own copy changes between
+// reconciles. restConfig is whichever cluster topo actually runs on - always
+// the same cluster rc itself talks to. A free function (not a method)
+// because both AuthentikDeploymentReconciler (the shared fixtures blueprint)
+// and TestCaseReconciler (the oauth-oidc template's own OAuth2
+// provider/application blueprint, scoped to one TestCase) need it.
+func applyBlueprint(ctx context.Context, restConfig *rest.Config, rc client.Client, topo *benchv1alpha1.AuthentikDeployment, blueprintYAML []byte) error {
 	ctx, cancel := context.WithTimeout(ctx, blueprintApplyTimeout)
 	defer cancel()
 
