@@ -113,6 +113,14 @@ entries:
 // controller-gen's RBAC generator only picks up markers attached to a
 // Reconcile method, confirmed by testing: the identical marker on this
 // helper was silently dropped from the generated ClusterRole.
+//
+// Known benign race on first creation, observed live: the oidc-test-client
+// Deployment is created before the blueprint import Job has necessarily
+// succeeded, so its first few pods can CrashLoopBackOff on a 404 (go-oidc's
+// discovery request against an OAuth2Provider/Application that doesn't
+// exist yet). It self-heals once the Job completes and Kubernetes retries
+// the pod - not worth reordering to block Deployment creation on Job
+// completion given how quickly it resolves on its own in practice.
 func (r *TestCaseReconciler) ensureOAuthClient(ctx context.Context, rc client.Client, remote bool, tc *benchv1alpha1.TestCase, topo *benchv1alpha1.AuthentikDeployment, host string, port int32) (string, int32, error) {
 	id := "oauth-test-" + tc.Name
 
