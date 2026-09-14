@@ -301,4 +301,3 @@ func mustValues(t *testing.T, topo *benchv1alpha1.AuthentikDeployment) Authentik
 	}
 	return decodeValues(t, raw.Raw)
 }
-

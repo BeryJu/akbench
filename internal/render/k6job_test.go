@@ -20,7 +20,7 @@ func TestPodTemplateNeverSharesNodeWithItsDeployment(t *testing.T) {
 			ObjectMeta: metav1.ObjectMeta{Name: "login-a"},
 			Spec: benchv1alpha1.TestCaseSpec{
 				DeploymentRef: corev1.LocalObjectReference{Name: "topo-a"},
-				Profile:     benchv1alpha1.ProfileBurn,
+				Profile:       benchv1alpha1.ProfileBurn,
 			},
 		},
 		TargetName: "some-other-display-name",

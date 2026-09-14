@@ -191,8 +191,8 @@ func (p K6WorkloadParams) PodTemplate() corev1.PodTemplateSpec {
 	// has to match on that same value to find them.
 	deploymentName := p.TestCase.Spec.DeploymentRef.Name
 	labels := map[string]string{
-		benchv1alpha1.LabelTestCase: p.TestCase.Name,
-		benchv1alpha1.LabelProfile:  k6ProfileValue(p.TestCase.Spec.Profile),
+		benchv1alpha1.LabelTestCase:   p.TestCase.Name,
+		benchv1alpha1.LabelProfile:    k6ProfileValue(p.TestCase.Spec.Profile),
 		benchv1alpha1.LabelDeployment: deploymentName,
 	}
 	return corev1.PodTemplateSpec{

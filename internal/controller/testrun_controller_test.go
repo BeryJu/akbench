@@ -45,10 +45,10 @@ var _ = Describe("TestRun Controller", func() {
 			ObjectMeta: metav1.ObjectMeta{Name: "quick-login", Namespace: "default"},
 			Spec: benchv1alpha1.TestCaseSpec{
 				DeploymentRef: corev1.LocalObjectReference{Name: topo.Name},
-				Profile:     benchv1alpha1.ProfileQuick,
-				VUs:         4,
-				Iterations:  100,
-				Flow:        "default-authentication-flow",
+				Profile:       benchv1alpha1.ProfileQuick,
+				VUs:           4,
+				Iterations:    100,
+				Flow:          "default-authentication-flow",
 			},
 		}
 		Expect(k8sClient.Create(context.Background(), tc)).To(Succeed())
