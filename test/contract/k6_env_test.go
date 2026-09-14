@@ -22,7 +22,7 @@ func exampleTestCase(profile benchv1alpha1.TestProfile) *benchv1alpha1.TestCase 
 	return &benchv1alpha1.TestCase{
 		ObjectMeta: metav1.ObjectMeta{Name: "login-baseline", Namespace: "default"},
 		Spec: benchv1alpha1.TestCaseSpec{
-			Script:          "login.ts",
+			Template:        "login",
 			Profile:         profile,
 			VUs:             8,
 			Iterations:      1000,

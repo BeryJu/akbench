@@ -94,7 +94,8 @@ export interface AuthentikDeployment {
 export interface TestCaseSpec {
   deploymentRef: { name: string };
   runnerClusterRef?: { name: string };
-  script?: string;
+  template?: string;
+  inline?: string;
   profile: TestProfile;
   vus: number;
   iterations?: number;

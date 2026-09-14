@@ -41,6 +41,7 @@ import (
 	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
 	"github.com/goauthentik/authentik-bench/internal/multicluster"
 	"github.com/goauthentik/authentik-bench/internal/render"
+	"github.com/goauthentik/authentik-bench/internal/testtemplate"
 	k6scripts "github.com/goauthentik/authentik-bench/k6/scripts"
 )
 
@@ -262,26 +263,36 @@ func (r *TestCaseReconciler) reconcileBurn(ctx context.Context, rc client.Client
 	return nil
 }
 
-// ensureScriptConfigMap mirrors the built-in k6 script (or a user-supplied
-// scriptConfigMapRef's content) into the ConfigMap the k6 pod mounts on rc,
-// returning its name.
+// ensureScriptConfigMap mirrors the resolved script content - a
+// user-supplied scriptConfigMapRef (BYO, used directly), inline content
+// stored on the TestCase itself, or the selected template's built-in
+// script, in that precedence order (matching render.scriptFileName's own) -
+// into the ConfigMap the k6 pod mounts on rc, returning its name.
 func (r *TestCaseReconciler) ensureScriptConfigMap(ctx context.Context, rc client.Client, remote bool, tc *benchv1alpha1.TestCase) (string, error) {
 	if tc.Spec.ScriptConfigMapRef != nil {
 		// BYO script: used directly, nothing to mirror.
 		return tc.Spec.ScriptConfigMapRef.Name, nil
 	}
-	script := tc.Spec.Script
-	if script == "" {
-		script = "login.ts"
+
+	var key, content string
+	if tc.Spec.Inline != "" {
+		key, content = "script.ts", tc.Spec.Inline
+	} else {
+		tmpl, ok := testtemplate.Resolve(tc.Spec.Template)
+		if !ok {
+			return "", fmt.Errorf("unknown template %q", tc.Spec.Template)
+		}
+		c, ok := k6scripts.Get(tmpl.ScriptName)
+		if !ok {
+			return "", fmt.Errorf("template %q's script %q is missing from the embedded k6/scripts", tmpl.Name, tmpl.ScriptName)
+		}
+		key, content = tmpl.ScriptName, c
 	}
-	content, ok := k6scripts.Get(script)
-	if !ok {
-		return "", fmt.Errorf("unknown built-in script %q", script)
-	}
+
 	name := "k6-script-" + tc.Name
 	cm := &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: tc.Namespace},
-		Data:       map[string]string{script: content},
+		Data:       map[string]string{key: content},
 	}
 	if !remote {
 		if err := controllerutil.SetControllerReference(tc, cm, r.Scheme); err != nil {

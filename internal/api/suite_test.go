@@ -136,10 +136,10 @@ func sampleTestCase(name, deployment string, profile benchv1alpha1.TestProfile) 
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: testNamespace},
 		Spec: benchv1alpha1.TestCaseSpec{
 			DeploymentRef: corev1.LocalObjectReference{Name: deployment},
-			Profile:     profile,
-			Script:      "login.ts",
-			VUs:         8,
-			Iterations:  1000,
+			Profile:       profile,
+			Template:      "login",
+			VUs:           8,
+			Iterations:    1000,
 		},
 	}
 }

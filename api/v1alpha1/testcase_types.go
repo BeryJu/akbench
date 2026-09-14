@@ -49,13 +49,25 @@ type TestCaseSpec struct {
 	// +optional
 	RunnerClusterRef *corev1.LocalObjectReference `json:"runnerClusterRef,omitempty"`
 
-	// script names a built-in script under k6/scripts (e.g. "login.ts").
-	// +kubebuilder:default=login.ts
+	// template names a built-in test template from internal/testtemplate's
+	// Registry (e.g. "login", "oauth-oidc") - which k6 script runs, plus any
+	// extra provisioning that template's flow needs (e.g. oauth-oidc's own
+	// oidc-test-client and OAuth2 provider/application). Ignored when inline
+	// or scriptConfigMapRef is set.
+	// +kubebuilder:default=login
 	// +optional
-	Script string `json:"script,omitempty"`
+	Template string `json:"template,omitempty"`
 
-	// scriptConfigMapRef, if set, overrides script with a user-supplied
-	// script's contents (key "script.ts").
+	// inline is a raw k6 script body stored directly on this TestCase,
+	// instead of picking one of the built-in templates or pointing at an
+	// externally-managed ConfigMap. Overrides template; overridden by
+	// scriptConfigMapRef.
+	// +optional
+	Inline string `json:"inline,omitempty"`
+
+	// scriptConfigMapRef, if set, overrides template/inline with a
+	// user-supplied script's contents (key "script.ts") in an
+	// externally-managed ConfigMap.
 	// +optional
 	ScriptConfigMapRef *corev1.LocalObjectReference `json:"scriptConfigMapRef,omitempty"`
 

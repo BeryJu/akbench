@@ -53,9 +53,9 @@ var _ = Describe("TestCase Controller", func() {
 				ObjectMeta: metav1.ObjectMeta{Name: resourceName, Namespace: "default"},
 				Spec: benchv1alpha1.TestCaseSpec{
 					DeploymentRef: corev1.LocalObjectReference{Name: topo.Name},
-					Profile:     benchv1alpha1.ProfileBurn,
-					VUs:         8,
-					Flow:        "default-authentication-flow",
+					Profile:       benchv1alpha1.ProfileBurn,
+					VUs:           8,
+					Flow:          "default-authentication-flow",
 				},
 			}
 			Expect(k8sClient.Create(context.Background(), tc)).To(Succeed())
@@ -104,10 +104,10 @@ var _ = Describe("TestCase Controller", func() {
 				ObjectMeta: metav1.ObjectMeta{Name: resourceName, Namespace: "default"},
 				Spec: benchv1alpha1.TestCaseSpec{
 					DeploymentRef: corev1.LocalObjectReference{Name: topo.Name},
-					Profile:     benchv1alpha1.ProfileQuick,
-					VUs:         4,
-					Iterations:  100,
-					Flow:        "default-authentication-flow",
+					Profile:       benchv1alpha1.ProfileQuick,
+					VUs:           4,
+					Iterations:    100,
+					Flow:          "default-authentication-flow",
 				},
 			}
 			Expect(k8sClient.Create(context.Background(), tc)).To(Succeed())
@@ -132,6 +132,71 @@ var _ = Describe("TestCase Controller", func() {
 			scriptReady := meta.FindStatusCondition(tc.Status.Conditions, benchv1alpha1.ConditionScriptReady)
 			Expect(scriptReady).NotTo(BeNil())
 			Expect(scriptReady.Status).To(Equal(metav1.ConditionTrue))
+		})
+	})
+
+	Context("inline script", func() {
+		const resourceName = "inline-script"
+		typeNamespacedName := types.NamespacedName{Name: resourceName, Namespace: "default"}
+		const inlineBody = "export default function () { /* custom */ }"
+
+		BeforeEach(func() {
+			tc := &benchv1alpha1.TestCase{
+				ObjectMeta: metav1.ObjectMeta{Name: resourceName, Namespace: "default"},
+				Spec: benchv1alpha1.TestCaseSpec{
+					DeploymentRef: corev1.LocalObjectReference{Name: topo.Name},
+					Inline:        inlineBody,
+					Profile:       benchv1alpha1.ProfileQuick,
+					VUs:           1,
+					Iterations:    1,
+				},
+			}
+			Expect(k8sClient.Create(context.Background(), tc)).To(Succeed())
+		})
+
+		AfterEach(func() {
+			forceDelete(context.Background(), &benchv1alpha1.TestCase{ObjectMeta: metav1.ObjectMeta{Name: typeNamespacedName.Name, Namespace: typeNamespacedName.Namespace}})
+		})
+
+		It("mirrors the inline body verbatim into the script ConfigMap under script.ts, overriding template", func() {
+			r := &TestCaseReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Recorder: record.NewFakeRecorder(100)}
+			_, err := r.Reconcile(context.Background(), reconcile.Request{NamespacedName: typeNamespacedName})
+			Expect(err).NotTo(HaveOccurred())
+
+			var cm corev1.ConfigMap
+			cmKey := types.NamespacedName{Name: "k6-script-" + resourceName, Namespace: "default"}
+			Expect(k8sClient.Get(context.Background(), cmKey, &cm)).To(Succeed())
+			Expect(cm.Data).To(HaveKeyWithValue("script.ts", inlineBody))
+		})
+	})
+
+	Context("unknown template", func() {
+		const resourceName = "bad-template"
+		typeNamespacedName := types.NamespacedName{Name: resourceName, Namespace: "default"}
+
+		BeforeEach(func() {
+			tc := &benchv1alpha1.TestCase{
+				ObjectMeta: metav1.ObjectMeta{Name: resourceName, Namespace: "default"},
+				Spec: benchv1alpha1.TestCaseSpec{
+					DeploymentRef: corev1.LocalObjectReference{Name: topo.Name},
+					Template:      "does-not-exist",
+					Profile:       benchv1alpha1.ProfileQuick,
+					VUs:           1,
+					Iterations:    1,
+				},
+			}
+			Expect(k8sClient.Create(context.Background(), tc)).To(Succeed())
+		})
+
+		AfterEach(func() {
+			forceDelete(context.Background(), &benchv1alpha1.TestCase{ObjectMeta: metav1.ObjectMeta{Name: typeNamespacedName.Name, Namespace: typeNamespacedName.Namespace}})
+		})
+
+		It("fails the reconcile with a clear error instead of silently falling back", func() {
+			r := &TestCaseReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Recorder: record.NewFakeRecorder(100)}
+			_, err := r.Reconcile(context.Background(), reconcile.Request{NamespacedName: typeNamespacedName})
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("does-not-exist"))
 		})
 	})
 })

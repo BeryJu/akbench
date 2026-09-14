@@ -18,17 +18,27 @@
 // Headlamp's own SectionBox instead of PatternFly/Next.js's router.
 import { Router } from '@kinvolk/headlamp-plugin/lib';
 import { SectionBox } from '@kinvolk/headlamp-plugin/lib/CommonComponents';
-import { Alert, Box, Button, Grid, MenuItem, TextField, Typography } from '@mui/material';
+import Editor from '@monaco-editor/react';
+import { Alert, Box, Button, Grid, MenuItem, TextField, Typography, useTheme } from '@mui/material';
 import { useState } from 'react';
 import { useHistory } from 'react-router-dom';
 import { api, ApiError } from './api';
 import { TestCase, TestCaseSpec, TestProfile } from './types';
 import { useResource } from './useResource';
 
+// Matches internal/testtemplate's Registry - hardcoded here the same way
+// GrafanaPage.tsx hardcodes its dashboard list, since this is a small,
+// developer-curated catalog, not something to fetch from the API.
+const TEMPLATES = [
+  { name: 'login', label: 'Login - standard username/password (+ MFA) flow' },
+  { name: 'oauth-oidc', label: 'OAuth/OIDC - authorization-code flow via oidc-test-client' },
+];
+const INLINE_TEMPLATE = '__inline__';
+
 function emptySpec(): TestCaseSpec {
   return {
     deploymentRef: { name: '' },
-    script: 'login.ts',
+    template: 'login',
     profile: 'Quick',
     vus: 8,
     iterations: 1000,
@@ -41,6 +51,7 @@ function emptySpec(): TestCaseSpec {
 
 export function TestCaseForm({ existing }: { existing?: TestCase }) {
   const history = useHistory();
+  const theme = useTheme();
   const deployments = useResource(() => api.deployments(), [], 0);
   const [name, setName] = useState(existing?.metadata.name ?? '');
   const [spec, setSpec] = useState<TestCaseSpec>(existing?.spec ?? emptySpec());
@@ -48,6 +59,10 @@ export function TestCaseForm({ existing }: { existing?: TestCase }) {
   const [saving, setSaving] = useState(false);
 
   const patch = (changes: Partial<TestCaseSpec>) => setSpec(current => ({ ...current, ...changes }));
+
+  // scriptConfigMapRef (an externally-managed ConfigMap) is a power-user
+  // escape hatch this form doesn't expose - only template vs. inline.
+  const scriptChoice = spec.inline !== undefined ? INLINE_TEMPLATE : (spec.template ?? 'login');
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -109,6 +124,49 @@ export function TestCaseForm({ existing }: { existing?: TestCase }) {
               ))}
             </TextField>
           </Grid>
+        </Grid>
+
+        <Typography variant="h6" gutterBottom>
+          Test template
+        </Typography>
+        <Grid container spacing={2} sx={{ mb: 3 }}>
+          <Grid item xs={12} md={6}>
+            <TextField
+              select
+              fullWidth
+              label="Template"
+              value={scriptChoice}
+              onChange={e => {
+                const value = e.target.value;
+                if (value === INLINE_TEMPLATE) {
+                  patch({ inline: spec.inline ?? '', template: undefined });
+                } else {
+                  patch({ template: value, inline: undefined });
+                }
+              }}
+            >
+              {TEMPLATES.map(t => (
+                <MenuItem key={t.name} value={t.name}>
+                  {t.label}
+                </MenuItem>
+              ))}
+              <MenuItem value={INLINE_TEMPLATE}>Custom - inline k6 script</MenuItem>
+            </TextField>
+          </Grid>
+          {scriptChoice === INLINE_TEMPLATE && (
+            <Grid item xs={12}>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                Inline k6 script (TypeScript) - stored directly on this TestCase.
+              </Typography>
+              <Editor
+                height="300px"
+                language="typescript"
+                theme={theme.palette.mode === 'dark' ? 'vs-dark' : 'light'}
+                value={spec.inline ?? ''}
+                onChange={value => patch({ inline: value ?? '' })}
+              />
+            </Grid>
+          )}
         </Grid>
 
         <Typography variant="h6" gutterBottom>

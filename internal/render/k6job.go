@@ -10,6 +10,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
+	"github.com/goauthentik/authentik-bench/internal/testtemplate"
 )
 
 // K6Image is the k6 image every rendered workload runs. Pinned rather than
@@ -19,6 +20,17 @@ import (
 // from that version on - earlier images fail every run with a script parse
 // error before a single request is ever sent.
 const K6Image = "grafana/k6:0.57.0"
+
+// K6BrowserImage is grafana/k6's browser-capable build (bundled Chromium,
+// launched with --no-sandbox per k6's own docs) - not wired to any TestCase
+// field yet. Adopting it later means: use this image instead of K6Image,
+// set K6_BROWSER_HEADLESS=true, and the script itself must declare
+// options.scenarios.<x>.options.browser.type = "chromium" (k6/browser is a
+// script-level concern, not something this renderer configures). The exact
+// tag is a placeholder - k6 only documents "master-with-browser"; a real
+// pinned version-tagged browser build needs confirming against the actual
+// image registry before this is ever used.
+const K6BrowserImage = "grafana/k6:master-with-browser" // placeholder, unverified tag
 
 // ScriptVolumeMountPath, FixturesMountPath and UsersFilePath match the paths
 // the ported login.ts (and any future script) expects, mirroring
@@ -82,11 +94,24 @@ func k6ProfileValue(p benchv1alpha1.TestProfile) string {
 }
 
 // scriptFileName is the file under ScriptVolumeMountPath k6 is told to run.
+// Precedence matches ensureScriptConfigMap's own (testcase_controller.go):
+// scriptConfigMapRef > inline > the resolved template's script - both of the
+// first two are always mounted under the fixed key "script.ts".
 func scriptFileName(tc *benchv1alpha1.TestCase) string {
 	if tc.Spec.ScriptConfigMapRef != nil {
 		return "script.ts"
 	}
-	return tc.Spec.Script
+	if tc.Spec.Inline != "" {
+		return "script.ts"
+	}
+	tmpl, ok := testtemplate.Resolve(tc.Spec.Template)
+	if !ok {
+		// Reconcile already fails this TestCase with a clear condition before
+		// ever rendering it (see testcase_controller.go) - falling back to
+		// the default here just keeps this function total/panic-free.
+		tmpl, _ = testtemplate.Resolve(testtemplate.DefaultName)
+	}
+	return tmpl.ScriptName
 }
 
 // Args builds the k6 command line, matching the --tag scheme every Grafana

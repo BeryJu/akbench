@@ -85,6 +85,13 @@ spec:
               flow:
                 default: default-authentication-flow
                 type: string
+              inline:
+                description: |-
+                  inline is a raw k6 script body stored directly on this TestCase,
+                  instead of picking one of the built-in templates or pointing at an
+                  externally-managed ConfigMap. Overrides template; overridden by
+                  scriptConfigMapRef.
+                type: string
               iterations:
                 default: 1000
                 description: iterations is logins per VU. Quick only.
@@ -119,15 +126,11 @@ spec:
                     type: string
                 type: object
                 x-kubernetes-map-type: atomic
-              script:
-                default: login.ts
-                description: script names a built-in script under k6/scripts (e.g.
-                  "login.ts").
-                type: string
               scriptConfigMapRef:
                 description: |-
-                  scriptConfigMapRef, if set, overrides script with a user-supplied
-                  script's contents (key "script.ts").
+                  scriptConfigMapRef, if set, overrides template/inline with a
+                  user-supplied script's contents (key "script.ts") in an
+                  externally-managed ConfigMap.
                 properties:
                   name:
                     default: ""
@@ -140,6 +143,15 @@ spec:
                     type: string
                 type: object
                 x-kubernetes-map-type: atomic
+              template:
+                default: login
+                description: |-
+                  template names a built-in test template from internal/testtemplate's
+                  Registry (e.g. "login", "oauth-oidc") - which k6 script runs, plus any
+                  extra provisioning that template's flow needs (e.g. oauth-oidc's own
+                  oidc-test-client and OAuth2 provider/application). Ignored when inline
+                  or scriptConfigMapRef is set.
+                type: string
               traceSampleRate:
                 default: "0.01"
                 description: |-
