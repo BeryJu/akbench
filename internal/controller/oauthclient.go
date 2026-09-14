@@ -51,8 +51,13 @@ import (
 // default-provider-invalidation-flow) - the same slugs
 // blueprints/testing/oidc-conformance.yaml itself uses, seeded by
 // authentik's always-applied blueprints/default/*.yaml. scope-openid/-email/
-// -profile-oidc-standard/-offline_access match exactly what oidc-test-client
-// itself requests by default (its own OIDC_SCOPES default).
+// -profile/-offline_access match what oidc-test-client itself requests by
+// default (its own OIDC_SCOPES default) - caught live that
+// oidc-conformance.yaml's own "scope-profile-oidc-standard" is NOT one of
+// the four ScopeMappings blueprints/system/providers-oauth2.yaml actually
+// seeds (that one only ever creates "scope-profile"): the blueprint job
+// failed with "Invalid pk None - object does not exist" until this was
+// changed to match the real system-seeded managed name.
 func oauthProviderBlueprint(id, clientID, clientSecret, redirectURI string) []byte {
 	return fmt.Appendf(nil, `version: 1
 entries:
@@ -75,7 +80,7 @@ entries:
       property_mappings:
         - !Find [authentik_providers_oauth2.scopemapping, [managed, goauthentik.io/providers/oauth2/scope-openid]]
         - !Find [authentik_providers_oauth2.scopemapping, [managed, goauthentik.io/providers/oauth2/scope-email]]
-        - !Find [authentik_providers_oauth2.scopemapping, [managed, goauthentik.io/providers/oauth2/scope-profile-oidc-standard]]
+        - !Find [authentik_providers_oauth2.scopemapping, [managed, goauthentik.io/providers/oauth2/scope-profile]]
         - !Find [authentik_providers_oauth2.scopemapping, [managed, goauthentik.io/providers/oauth2/scope-offline_access]]
       signing_key: !Find [authentik_crypto.certificatekeypair, [name, authentik Self-signed Certificate]]
   - model: authentik_core.application
