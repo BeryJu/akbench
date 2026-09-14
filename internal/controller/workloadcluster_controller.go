@@ -498,12 +498,49 @@ func (r *WorkloadClusterReconciler) ensureGrafana(ctx context.Context, wc *bench
 // interface both satisfy.
 func createAll(ctx context.Context, c client.Client, objs []client.Object) error {
 	for _, obj := range objs {
-		if err := c.Create(ctx, obj); err != nil && !apierrors.IsAlreadyExists(err) {
-			gvk := obj.GetObjectKind().GroupVersionKind()
-			return fmt.Errorf("create %s %s/%s: %w", gvk.Kind, obj.GetNamespace(), obj.GetName(), err)
+		if err := createIfMissing(ctx, c, obj); err != nil {
+			return err
 		}
 	}
 	return nil
+}
+
+// createIfMissing is createAll's per-object step, its own function so the
+// "does this already exist" recheck below can run twice (once before,
+// optionally once after Create) without duplicating the error-wrapping.
+//
+// A plain "Create, ignore AlreadyExists" (this function's own first version)
+// is not enough for a NodePort Service with an explicit spec.ports[].nodePort:
+// confirmed live that re-Create-ing one that already exists with the exact
+// same requested port fails with a spec-validation error ("provided port is
+// already allocated"), not AlreadyExists - the apiserver's port allocator
+// runs before the etcd-level existence check, so an object that's already
+// there in every way still gets rejected at the allocation step first. Every
+// pinned-NodePort addon this file renders (Prometheus, Grafana, Pyroscope)
+// hit this on every single reconcile after their first successful creation,
+// silently logged as an AddonFailed event forever after - not a fluke this
+// session happened to catch once.
+func createIfMissing(ctx context.Context, c client.Client, obj client.Object) error {
+	gvk := obj.GetObjectKind().GroupVersionKind()
+	key := client.ObjectKeyFromObject(obj)
+	existing := obj.DeepCopyObject().(client.Object)
+	if err := c.Get(ctx, key, existing); err == nil {
+		return nil
+	} else if !apierrors.IsNotFound(err) {
+		return fmt.Errorf("get %s %s/%s: %w", gvk.Kind, key.Namespace, key.Name, err)
+	}
+	err := c.Create(ctx, obj)
+	if err == nil || apierrors.IsAlreadyExists(err) {
+		return nil
+	}
+	// Re-check before giving up: a Create that failed for any reason -
+	// including the NodePort-allocation case above - might still mean the
+	// object is there and fine, just not via a race Get-then-Create alone
+	// can fully close.
+	if getErr := c.Get(ctx, key, existing); getErr == nil {
+		return nil
+	}
+	return fmt.Errorf("create %s %s/%s: %w", gvk.Kind, key.Namespace, key.Name, err)
 }
 
 // deleteRemovedWorkerPools deletes the MachineDeployment (and, via CAPI's own
