@@ -402,17 +402,36 @@ func reachableNodeIP(ctx context.Context, remoteClient client.Client) (string, e
 	return "", fmt.Errorf("no node with an InternalIP found")
 }
 
-// ensurePrometheus installs a single-replica Prometheus (remote-write
-// receiver) onto the workload cluster if it isn't there already, and
-// records a management-cluster-reachable URL for it in this object's own
-// status so cmd/apiserver can query it directly (see
-// internal/api/metrics.go's per-testid Prometheus resolution).
+// ensurePrometheus installs kube-prometheus-stack (prometheus-operator +
+// Prometheus with the remote-write receiver enabled + node-exporter +
+// kube-state-metrics) onto the workload cluster via its own official Helm
+// chart - the same Flux HelmRepository + HelmRelease mechanism ensureCNI/
+// ensureCSIIncus/ensureMetricsServer already use, applied here on the
+// management cluster with spec.kubeConfig pointing at the workload cluster,
+// rather than the hand-rolled single-Deployment Prometheus this replaces.
+// node-exporter is the actual point of the switch: the prior install had no
+// per-node CPU/memory/disk/network metrics at all. Records a
+// management-cluster-reachable URL for it in this object's own status so
+// cmd/apiserver can query it directly (see internal/api/metrics.go's
+// per-testid Prometheus resolution) - unchanged from before, since the
+// chart-managed Prometheus is still reachable at the exact same compat
+// Service name/NodePort (see render.PrometheusServiceName's own doc
+// comment for why no other consumer needed to change).
 func (r *WorkloadClusterReconciler) ensurePrometheus(ctx context.Context, wc *benchv1alpha1.WorkloadCluster) error {
-	remoteClient, err := r.remoteAddonClient(ctx, wc)
+	values, err := render.KubePrometheusStackHelmValues()
 	if err != nil {
 		return err
 	}
-	if err := createAll(ctx, remoteClient, render.PrometheusObjects()); err != nil {
+	if err := applyOwned(ctx, r.Client, r.Scheme, wc, render.KubePrometheusStackHelmRepository(wc.Namespace)); err != nil {
+		return fmt.Errorf("apply kube-prometheus-stack HelmRepository: %w", err)
+	}
+	hr := render.KubePrometheusStackHelmRelease(wc.Namespace, render.KubeconfigSecretName(wc), values)
+	if err := applyOwned(ctx, r.Client, r.Scheme, wc, hr); err != nil {
+		return fmt.Errorf("apply kube-prometheus-stack HelmRelease: %w", err)
+	}
+
+	remoteClient, err := r.remoteAddonClient(ctx, wc)
+	if err != nil {
 		return err
 	}
 	nodeIP, err := reachableNodeIP(ctx, remoteClient)
