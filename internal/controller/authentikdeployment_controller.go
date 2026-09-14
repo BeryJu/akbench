@@ -127,12 +127,19 @@ func (r *AuthentikDeploymentReconciler) resolveFixturesBlueprint(ctx context.Con
 	}
 	content := cm.Data[fixturesBlueprintKey]
 
+	// Mirrored into topo.Spec.Namespace (the deployment's own target
+	// namespace, e.g. "main-2026-08-23") - not topo.Namespace (the CR
+	// object's own namespace, always "default") - since that's where the
+	// BlueprintPVC/BlueprintJob it's mounted into actually live. Confirmed
+	// live: mirroring into topo.Namespace instead left the Job's pod stuck
+	// in ContainerCreating forever ("configmap ... not found"), since
+	// nothing ever mirrored it into the namespace the Job could see.
 	var existing corev1.ConfigMap
-	mirrorErr := rc.Get(ctx, types.NamespacedName{Name: fixturesBlueprintConfigMapName, Namespace: topo.Namespace}, &existing)
+	mirrorErr := rc.Get(ctx, types.NamespacedName{Name: fixturesBlueprintConfigMapName, Namespace: topo.Spec.Namespace}, &existing)
 	switch {
 	case apierrors.IsNotFound(mirrorErr):
 		mirrored := &corev1.ConfigMap{
-			ObjectMeta: metav1.ObjectMeta{Name: fixturesBlueprintConfigMapName, Namespace: topo.Namespace},
+			ObjectMeta: metav1.ObjectMeta{Name: fixturesBlueprintConfigMapName, Namespace: topo.Spec.Namespace},
 			Data:       map[string]string{fixturesBlueprintKey: content},
 		}
 		if err := rc.Create(ctx, mirrored); err != nil {
