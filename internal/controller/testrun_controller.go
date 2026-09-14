@@ -38,6 +38,7 @@ import (
 	"github.com/goauthentik/authentik-bench/internal/grafana"
 	"github.com/goauthentik/authentik-bench/internal/multicluster"
 	"github.com/goauthentik/authentik-bench/internal/render"
+	"github.com/goauthentik/authentik-bench/internal/testtemplate"
 )
 
 const testRunFinalizer = "bench.goauthentik.io/remote-cleanup"
@@ -154,6 +155,12 @@ func (r *TestRunReconciler) start(ctx context.Context, run *benchv1alpha1.TestRu
 		return ctrl.Result{}, fmt.Errorf("ensure fixtures secret: %w", err)
 	}
 
+	var oauthHost string
+	var oauthPort int32
+	if tmpl, ok := testtemplate.Resolve(tc.Spec.Template); ok && tmpl.RequiresOAuthClient && tc.Spec.Inline == "" && tc.Spec.ScriptConfigMapRef == nil {
+		oauthHost, oauthPort = oidcTestClientHostPort(&tc)
+	}
+
 	params := render.K6WorkloadParams{
 		TestCase:            resolvedTC,
 		TargetName:          targetName,
@@ -162,6 +169,8 @@ func (r *TestRunReconciler) start(ctx context.Context, run *benchv1alpha1.TestRu
 		RemoteWriteURL:      defaultRemoteWriteURL,
 		ScriptConfigMapName: scriptCMName,
 		FixturesSecretName:  fixturesSecretName,
+		OAuthTestClientHost: oauthHost,
+		OAuthTestClientPort: oauthPort,
 	}
 	jobName := "testrun-" + run.Name
 	job := render.QuickJob(jobName, run.Namespace, params)

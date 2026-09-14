@@ -229,10 +229,21 @@ func (r *TestCaseReconciler) ensureOAuthClient(ctx context.Context, rc client.Cl
 			return "", 0, fmt.Errorf("oauth2 provider blueprint import job %q failed: %s", jobName, c.Message)
 		}
 		if c.Type == batchv1.JobComplete && c.Status == corev1.ConditionTrue {
-			return render.OIDCTestClientName(tc) + "." + tc.Namespace + ".svc.cluster.local", render.OIDCTestClientPort, nil
+			host, port := oidcTestClientHostPort(tc)
+			return host, port, nil
 		}
 	}
 	return "", 0, fmt.Errorf("waiting for oauth2 provider blueprint import job %q to complete", jobName)
+}
+
+// oidcTestClientHostPort is oidc-test-client's own in-cluster address for a
+// given TestCase - a pure function of the TestCase's name/namespace, safe to
+// call from any reconciler once the TestCase itself reports Ready (which
+// TestCaseReconciler's own Reconcile only does once ensureOAuthClient above
+// has actually finished provisioning it), without re-running the
+// Deployment/Service/blueprint-Job ensure logic a second time.
+func oidcTestClientHostPort(tc *benchv1alpha1.TestCase) (string, int32) {
+	return render.OIDCTestClientName(tc) + "." + tc.Namespace + ".svc.cluster.local", render.OIDCTestClientPort
 }
 
 // oauthBlueprintKey is the data key oauthProviderBlueprint's content is
