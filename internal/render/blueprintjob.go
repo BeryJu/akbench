@@ -52,15 +52,23 @@ func authentikConfigSecretName(t *benchv1alpha1.AuthentikDeployment) string {
 
 // BlueprintJobName is deterministic from the deployment name, a caller-given
 // label distinguishing which blueprint this is (e.g. "fixtures", or an
-// oauth-oidc TestCase's own name), and a hash of the blueprint content - so
-// a content change creates a new Job (Jobs are immutable once created,
-// there's no "update and re-run"), while re-applying identical content is a
-// no-op: the caller's create call just hits AlreadyExists for the same
-// name, the same idempotent-apply convention every other addon in this
-// codebase already follows.
+// oauth-oidc TestCase's own name), and the blueprint content - so a content
+// change creates a new Job (Jobs are immutable once created, there's no
+// "update and re-run"), while re-applying identical content is a no-op: the
+// caller's create call just hits AlreadyExists for the same name, the same
+// idempotent-apply convention every other addon in this codebase already
+// follows.
+//
+// The whole name is a single hash, not <deployment>-blueprint-<label>-<hash>
+// as the obvious/readable version would be: Kubernetes' Job controller
+// copies a Job's own name verbatim onto its pods as the "job-name" label
+// value, and label values are capped at 63 bytes - confirmed live, a
+// deployment name + label + hash comfortably exceeds that for realistic
+// names (e.g. a longer TestCase name), and the create call fails outright
+// ("must be no more than 63 bytes") rather than silently truncating.
 func BlueprintJobName(t *benchv1alpha1.AuthentikDeployment, label, content string) string {
-	sum := sha256.Sum256([]byte(content))
-	return fmt.Sprintf("%s-blueprint-%s-%s", t.Name, label, hex.EncodeToString(sum[:])[:8])
+	sum := sha256.Sum256(fmt.Appendf(nil, "%s/%s/%s", t.Name, label, content))
+	return "blueprint-" + hex.EncodeToString(sum[:])[:16]
 }
 
 // BlueprintJob renders a one-shot Job that imports a blueprint: it mounts

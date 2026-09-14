@@ -35,10 +35,14 @@ func exampleBlueprintDeployment() *benchv1alpha1.AuthentikDeployment {
 	}
 }
 
-// TestBlueprintJobNameChangesWithContent guards the one property that makes
-// re-applying an unchanged blueprint a no-op and a changed one a fresh
-// import: the Job name must be a pure function of (deployment, label,
-// content).
+// TestBlueprintJobNameChangesWithContent guards the two properties that
+// make re-applying an unchanged blueprint a no-op and a changed one a fresh
+// import (the Job name must be a pure function of deployment/label/content),
+// and that it always fits Kubernetes' 63-byte label-value cap regardless of
+// how long the deployment/TestCase names are (the Job controller copies a
+// Job's own name verbatim onto its pods as the "job-name" label value -
+// confirmed live that a deployment-name-and-label-prefixed name blows past
+// this for realistic TestCase names, hence the fixed-length hash-only form).
 func TestBlueprintJobNameChangesWithContent(t *testing.T) {
 	topo := exampleBlueprintDeployment()
 	a := BlueprintJobName(topo, "fixtures", "content-a")
@@ -50,8 +54,15 @@ func TestBlueprintJobNameChangesWithContent(t *testing.T) {
 	if a != aAgain {
 		t.Errorf("BlueprintJobName is not deterministic: %q vs %q", a, aAgain)
 	}
-	if !strings.HasPrefix(a, "authentik-1-blueprint-fixtures-") {
-		t.Errorf("BlueprintJobName = %q, want prefix %q", a, "authentik-1-blueprint-fixtures-")
+	if len(a) > 63 {
+		t.Errorf("BlueprintJobName = %q (%d bytes), want <= 63 bytes (Kubernetes' own label-value cap)", a, len(a))
+	}
+	longLabel := "oauth-login-a-very-long-testcase-name-that-a-real-user-might-actually-pick"
+	if got := BlueprintJobName(topo, longLabel, "content-a"); len(got) > 63 {
+		t.Errorf("BlueprintJobName with a long label = %q (%d bytes), want <= 63 bytes", got, len(got))
+	}
+	if !strings.HasPrefix(a, "blueprint-") {
+		t.Errorf("BlueprintJobName = %q, want prefix %q", a, "blueprint-")
 	}
 }
 
