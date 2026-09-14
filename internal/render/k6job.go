@@ -60,6 +60,14 @@ type K6WorkloadParams struct {
 	ScriptConfigMapName string
 	// FixturesSecretName holds the generated users.json fixture.
 	FixturesSecretName string
+	// OAuthTestClientHost/Port are set only when the resolved template
+	// requires an OAuth client (oauth-oidc - see
+	// testtemplate.Template.RequiresOAuthClient and
+	// internal/controller/oauthclient.go's ensureOAuthClient). Empty
+	// otherwise, in which case EnvVars renders no OAUTH_TEST_CLIENT_* vars
+	// at all, so a non-oauth script never sees them.
+	OAuthTestClientHost string
+	OAuthTestClientPort int32
 }
 
 // EnvVars builds the exact environment contract k6/scripts/login.ts reads,
@@ -67,7 +75,7 @@ type K6WorkloadParams struct {
 // resulting metrics carry the same meaning as the Ansible-based harness.
 func (p K6WorkloadParams) EnvVars() []corev1.EnvVar {
 	tc := p.TestCase
-	return []corev1.EnvVar{
+	vars := []corev1.EnvVar{
 		{Name: "TEST_ID", Value: tc.Name},
 		{Name: "TARGET", Value: p.TargetName},
 		{Name: "PROFILE", Value: k6ProfileValue(tc.Spec.Profile)},
@@ -84,6 +92,13 @@ func (p K6WorkloadParams) EnvVars() []corev1.EnvVar {
 		{Name: "K6_PROMETHEUS_RW_TREND_AS_NATIVE_HISTOGRAM", Value: "true"},
 		{Name: "K6_PROMETHEUS_RW_PUSH_INTERVAL", Value: "1s"},
 	}
+	if p.OAuthTestClientHost != "" {
+		vars = append(vars,
+			corev1.EnvVar{Name: "OAUTH_TEST_CLIENT_HOST", Value: p.OAuthTestClientHost},
+			corev1.EnvVar{Name: "OAUTH_TEST_CLIENT_PORT", Value: fmt.Sprintf("%d", p.OAuthTestClientPort)},
+		)
+	}
+	return vars
 }
 
 func k6ProfileValue(p benchv1alpha1.TestProfile) string {

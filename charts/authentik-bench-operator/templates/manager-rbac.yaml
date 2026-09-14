@@ -39,6 +39,7 @@ rules:
   resources:
   - persistentvolumeclaims
   - secrets
+  - services
   verbs:
   - create
   - get
