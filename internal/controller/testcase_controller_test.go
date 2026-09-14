@@ -34,10 +34,10 @@ import (
 )
 
 var _ = Describe("TestCase Controller", func() {
-	var topo *benchv1alpha1.AuthentikTopology
+	var topo *benchv1alpha1.AuthentikDeployment
 
 	BeforeEach(func() {
-		topo = createReadyTopology(context.Background(), "testcase-topology", "authentik-1", "authentik-1-server.ns.svc.cluster.local", 80)
+		topo = createReadyDeployment(context.Background(), "testcase-deployment", "authentik-1", "authentik-1-server.ns.svc.cluster.local", 80)
 	})
 
 	AfterEach(func() {
@@ -52,7 +52,7 @@ var _ = Describe("TestCase Controller", func() {
 			tc := &benchv1alpha1.TestCase{
 				ObjectMeta: metav1.ObjectMeta{Name: resourceName, Namespace: "default"},
 				Spec: benchv1alpha1.TestCaseSpec{
-					TopologyRef: corev1.LocalObjectReference{Name: topo.Name},
+					DeploymentRef: corev1.LocalObjectReference{Name: topo.Name},
 					Profile:     benchv1alpha1.ProfileBurn,
 					VUs:         8,
 					Flow:        "default-authentication-flow",
@@ -103,7 +103,7 @@ var _ = Describe("TestCase Controller", func() {
 			tc := &benchv1alpha1.TestCase{
 				ObjectMeta: metav1.ObjectMeta{Name: resourceName, Namespace: "default"},
 				Spec: benchv1alpha1.TestCaseSpec{
-					TopologyRef: corev1.LocalObjectReference{Name: topo.Name},
+					DeploymentRef: corev1.LocalObjectReference{Name: topo.Name},
 					Profile:     benchv1alpha1.ProfileQuick,
 					VUs:         4,
 					Iterations:  100,

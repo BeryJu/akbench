@@ -30,24 +30,24 @@ import (
 	"github.com/goauthentik/authentik-bench/internal/multicluster"
 )
 
-// errTopologyNotReady is returned by resolveReadyTopology when the topology
+// errDeploymentNotReady is returned by resolveReadyDeployment when the deployment
 // exists but hasn't reached Ready yet - distinct from a lookup failure so
 // callers can requeue/wait rather than treat it as an error.
-var errTopologyNotReady = errors.New("topology not ready")
+var errDeploymentNotReady = errors.New("deployment not ready")
 
-// resolveReadyTopology fetches the AuthentikTopology a TestCase/TestRun
+// resolveReadyDeployment fetches the AuthentikDeployment a TestCase/TestRun
 // drives, requiring it to be Ready, and returns its target name and
 // in-cluster BENCH_HOST/BENCH_PORT. Both TestCaseReconciler and
-// TestRunReconciler share this so a topology's readiness contract is defined
+// TestRunReconciler share this so a deployment's readiness contract is defined
 // in exactly one place.
-func resolveReadyTopology(ctx context.Context, c client.Client, namespace, name string) (topo *benchv1alpha1.AuthentikTopology, targetName, host string, port int32, err error) {
-	topo = &benchv1alpha1.AuthentikTopology{}
+func resolveReadyDeployment(ctx context.Context, c client.Client, namespace, name string) (topo *benchv1alpha1.AuthentikDeployment, targetName, host string, port int32, err error) {
+	topo = &benchv1alpha1.AuthentikDeployment{}
 	if err = c.Get(ctx, types.NamespacedName{Name: name, Namespace: namespace}, topo); err != nil {
 		return nil, "", "", 0, err
 	}
 	ready := findCondition(topo.Status.Conditions, benchv1alpha1.ConditionReady)
 	if ready == nil || ready.Status != metav1.ConditionTrue {
-		return topo, "", "", 0, errTopologyNotReady
+		return topo, "", "", 0, errDeploymentNotReady
 	}
 	targetName = topo.Spec.TargetName
 	if targetName == "" {
@@ -62,7 +62,7 @@ func resolveReadyTopology(ctx context.Context, c client.Client, namespace, name 
 
 // resolveRunnerClient returns the client TestCaseReconciler/TestRunReconciler
 // should use for the k6 workload itself: runnerClusterRef if set, else the
-// topology's own clusterRef, else local. The bool result is true when this
+// deployment's own clusterRef, else local. The bool result is true when this
 // is a different (remote) cluster than local - callers should skip
 // ownerReferences (meaningless across clusters) and rely on periodic
 // requeues rather than a local-only Owns() watch.

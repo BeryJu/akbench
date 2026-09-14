@@ -9,17 +9,17 @@ import (
 	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
 )
 
-// TestPodTemplateNeverSharesNodeWithItsTopology guards the k6 runner's own
+// TestPodTemplateNeverSharesNodeWithItsDeployment guards the k6 runner's own
 // required anti-affinity: it must never land on the same node as the
-// topology it's driving (topologyRef.name, not TargetName, which is only a
+// deployment it's driving (deploymentRef.name, not TargetName, which is only a
 // metric label and can differ), so the load generator never competes with
 // the system under test for the same node's CPU.
-func TestPodTemplateNeverSharesNodeWithItsTopology(t *testing.T) {
+func TestPodTemplateNeverSharesNodeWithItsDeployment(t *testing.T) {
 	p := K6WorkloadParams{
 		TestCase: &benchv1alpha1.TestCase{
 			ObjectMeta: metav1.ObjectMeta{Name: "login-a"},
 			Spec: benchv1alpha1.TestCaseSpec{
-				TopologyRef: corev1.LocalObjectReference{Name: "topo-a"},
+				DeploymentRef: corev1.LocalObjectReference{Name: "topo-a"},
 				Profile:     benchv1alpha1.ProfileBurn,
 			},
 		},
@@ -27,8 +27,8 @@ func TestPodTemplateNeverSharesNodeWithItsTopology(t *testing.T) {
 	}
 	tmpl := p.PodTemplate()
 
-	if got := tmpl.ObjectMeta.Labels[benchv1alpha1.LabelTopology]; got != "topo-a" {
-		t.Errorf("pod template topology label = %q, want topo-a", got)
+	if got := tmpl.ObjectMeta.Labels[benchv1alpha1.LabelDeployment]; got != "topo-a" {
+		t.Errorf("pod template deployment label = %q, want topo-a", got)
 	}
 	if tmpl.Spec.Affinity == nil || tmpl.Spec.Affinity.PodAntiAffinity == nil {
 		t.Fatal("pod template has no PodAntiAffinity")
@@ -37,8 +37,8 @@ func TestPodTemplateNeverSharesNodeWithItsTopology(t *testing.T) {
 	if len(terms) != 1 {
 		t.Fatalf("got %d required anti-affinity terms, want 1", len(terms))
 	}
-	if got := terms[0].LabelSelector.MatchLabels[benchv1alpha1.LabelTopology]; got != "topo-a" {
-		t.Errorf("required term matches topology=%q, want topo-a", got)
+	if got := terms[0].LabelSelector.MatchLabels[benchv1alpha1.LabelDeployment]; got != "topo-a" {
+		t.Errorf("required term matches deployment=%q, want topo-a", got)
 	}
 	if terms[0].TopologyKey != "kubernetes.io/hostname" {
 		t.Errorf("required term topologyKey = %q, want kubernetes.io/hostname", terms[0].TopologyKey)

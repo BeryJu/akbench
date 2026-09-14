@@ -46,18 +46,18 @@ import (
 	"github.com/goauthentik/authentik-bench/internal/render"
 )
 
-// authentikTopologyFinalizer guards the remote objects (namespace, CNPG
+// authentikDeploymentFinalizer guards the remote objects (namespace, CNPG
 // Cluster, generated Secrets - everything spec.clusterRef puts on a
-// different cluster than the AuthentikTopology object itself) that
+// different cluster than the AuthentikDeployment object itself) that
 // Kubernetes garbage collection cannot reach on its own.
-const authentikTopologyFinalizer = "bench.goauthentik.io/remote-cleanup"
+const authentikDeploymentFinalizer = "bench.goauthentik.io/remote-cleanup"
 
 // defaultPyroscopeHost/defaultTracingEndpoint are the central metrics
-// stack's Pyroscope/Tempo, used whenever a topology doesn't set
+// stack's Pyroscope/Tempo, used whenever a deployment doesn't set
 // spec.authentik.pyroscopeHost/errorReporting.tracingEndpoint itself -
 // mirrors defaultRemoteWriteURL's env-overridable-default pattern
-// (testcase_controller.go) so every topology gets profiling/tracing wired up
-// for free instead of needing it configured per topology.
+// (testcase_controller.go) so every deployment gets profiling/tracing wired up
+// for free instead of needing it configured per deployment.
 var (
 	defaultPyroscopeHost   = envOrDefault("BENCH_PYROSCOPE_HOST", "http://pyroscope.bench-system.svc.cluster.local:4040")
 	defaultTracingEndpoint = envOrDefault("BENCH_TRACING_ENDPOINT", "http://tempo.bench-system.svc.cluster.local:4318")
@@ -67,12 +67,12 @@ var (
 // defines for a Cluster's admin kubeconfig - the same one
 // render.KubeconfigSecretName (internal/render/workloadcluster.go) produces,
 // duplicated here rather than imported to avoid a dependency from
-// render (WorkloadCluster) back onto AuthentikTopology's naming.
+// render (WorkloadCluster) back onto AuthentikDeployment's naming.
 func kubeconfigSecretName(clusterName string) string {
 	return clusterName + "-kubeconfig"
 }
 
-// AuthentikTopologyReconciler reconciles an AuthentikTopology object.
+// AuthentikDeploymentReconciler reconciles an AuthentikDeployment object.
 //
 // spec.clusterRef (a cluster.x-k8s.io Cluster name in the same namespace)
 // deploys onto any cluster Tracker can reach - a Cluster API-managed
@@ -83,7 +83,7 @@ func kubeconfigSecretName(clusterName string) string {
 // spec.kubeConfig.secretRef is what points helm-controller at the remote
 // cluster) - only the namespace, postgres backend, and the Secrets this
 // controller generates move with clusterRef.
-type AuthentikTopologyReconciler struct {
+type AuthentikDeploymentReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
 	// RESTConfig is the management cluster's own config (mgr.GetConfig()) -
@@ -100,7 +100,7 @@ type AuthentikTopologyReconciler struct {
 // Tracker otherwise. A non-nil error here always means "not ready yet,
 // requeue" (multicluster.ErrClusterNotConnected) rather than a permanent
 // failure.
-func (r *AuthentikTopologyReconciler) resolveClient(ctx context.Context, topo *benchv1alpha1.AuthentikTopology) (client.Client, error) {
+func (r *AuthentikDeploymentReconciler) resolveClient(ctx context.Context, topo *benchv1alpha1.AuthentikDeployment) (client.Client, error) {
 	if topo.Spec.ClusterRef.Name == "" {
 		return r.Client, nil
 	}
@@ -113,7 +113,7 @@ func (r *AuthentikTopologyReconciler) resolveClient(ctx context.Context, topo *b
 // resolveRESTConfig is resolveClient's counterpart for ApplyBlueprint, which
 // needs a raw REST config (for pod exec) rather than a controller-runtime
 // client - always the same cluster resolveClient itself would pick.
-func (r *AuthentikTopologyReconciler) resolveRESTConfig(ctx context.Context, topo *benchv1alpha1.AuthentikTopology) (*rest.Config, error) {
+func (r *AuthentikDeploymentReconciler) resolveRESTConfig(ctx context.Context, topo *benchv1alpha1.AuthentikDeployment) (*rest.Config, error) {
 	if topo.Spec.ClusterRef.Name == "" {
 		return r.RESTConfig, nil
 	}
@@ -124,15 +124,15 @@ func (r *AuthentikTopologyReconciler) resolveRESTConfig(ctx context.Context, top
 }
 
 // resolveFixturesBlueprint looks up the fixtures blueprint ConfigMap, which,
-// like extraValuesRef, always lives alongside the AuthentikTopology object
+// like extraValuesRef, always lives alongside the AuthentikDeployment object
 // itself (topo.Namespace on the management cluster) rather than on rc -
 // `make fixtures` writes it there, and it's config for the deployment, not
-// part of it. Optional: a topology with none configured just skips
+// part of it. Optional: a deployment with none configured just skips
 // blueprint application entirely (fixtures are a dev/benchmark convenience,
 // not required). When one is configured, also applies the PVC the chart's
 // server pod will mount it into (see render.HelmValues' withBlueprintVolume)
 // before the caller renders values referencing it.
-func (r *AuthentikTopologyReconciler) resolveFixturesBlueprint(ctx context.Context, rc client.Client, topo *benchv1alpha1.AuthentikTopology) (bool, corev1.ConfigMap, error) {
+func (r *AuthentikDeploymentReconciler) resolveFixturesBlueprint(ctx context.Context, rc client.Client, topo *benchv1alpha1.AuthentikDeployment) (bool, corev1.ConfigMap, error) {
 	var cm corev1.ConfigMap
 	if err := r.Get(ctx, types.NamespacedName{Name: fixturesBlueprintConfigMapName, Namespace: topo.Namespace}, &cm); err != nil {
 		if apierrors.IsNotFound(err) {
@@ -148,14 +148,14 @@ func (r *AuthentikTopologyReconciler) resolveFixturesBlueprint(ctx context.Conte
 
 // applyExtraValues merges topo.Spec.Authentik.ExtraValuesRef's ConfigMap
 // (which, like the fixtures blueprint ConfigMap, always lives alongside the
-// AuthentikTopology object itself rather than on rc) over values, if one is
+// AuthentikDeployment object itself rather than on rc) over values, if one is
 // referenced. done=true means the caller should return (result, err)
 // immediately - either a real error, or this reconcile already updated
 // status itself (a not-yet-existing ConfigMap requeues on a timer; invalid
-// YAML doesn't, since the extra-values API always touches the topology
+// YAML doesn't, since the extra-values API always touches the deployment
 // object on save, which re-triggers this reconcile as soon as the user
 // corrects it).
-func (r *AuthentikTopologyReconciler) applyExtraValues(ctx context.Context, topo *benchv1alpha1.AuthentikTopology, values *apiextensionsv1.JSON) (*apiextensionsv1.JSON, ctrl.Result, bool, error) {
+func (r *AuthentikDeploymentReconciler) applyExtraValues(ctx context.Context, topo *benchv1alpha1.AuthentikDeployment, values *apiextensionsv1.JSON) (*apiextensionsv1.JSON, ctrl.Result, bool, error) {
 	ref := topo.Spec.Authentik.ExtraValuesRef
 	if ref == nil || ref.Name == "" {
 		return values, ctrl.Result{}, false, nil
@@ -194,7 +194,7 @@ func (r *AuthentikTopologyReconciler) applyExtraValues(ctx context.Context, topo
 // into whichever pod happened to still be running - the old one, without
 // the mount ("Directory nonexistent"), not the new one the still-in-flight
 // rollout was replacing it with.
-func (r *AuthentikTopologyReconciler) helmReleaseReadiness(ctx context.Context, hr *helmv2.HelmRelease) (metav1.ConditionStatus, string, error) {
+func (r *AuthentikDeploymentReconciler) helmReleaseReadiness(ctx context.Context, hr *helmv2.HelmRelease) (metav1.ConditionStatus, string, error) {
 	var existing helmv2.HelmRelease
 	if err := r.Get(ctx, types.NamespacedName{Name: hr.Name, Namespace: hr.Namespace}, &existing); err != nil {
 		if apierrors.IsNotFound(err) {
@@ -219,9 +219,9 @@ func (r *AuthentikTopologyReconciler) helmReleaseReadiness(ctx context.Context, 
 // once the HelmRelease itself is Ready (a server pod actually exists to
 // exec into), returning the BlueprintApplied condition to set and whether
 // the caller should requeue on a timer to retry a transient failure. A
-// topology with no blueprint configured reports Ready with nothing done, so
+// deployment with no blueprint configured reports Ready with nothing done, so
 // it never blocks the overall Ready condition.
-func (r *AuthentikTopologyReconciler) reconcileBlueprint(ctx context.Context, rc client.Client, topo *benchv1alpha1.AuthentikTopology,
+func (r *AuthentikDeploymentReconciler) reconcileBlueprint(ctx context.Context, rc client.Client, topo *benchv1alpha1.AuthentikDeployment,
 	hasBlueprint bool, helmReleaseReady metav1.ConditionStatus, blueprintCM corev1.ConfigMap) (metav1.ConditionStatus, string, bool) {
 	switch {
 	case !hasBlueprint:
@@ -240,9 +240,9 @@ func (r *AuthentikTopologyReconciler) reconcileBlueprint(ctx context.Context, rc
 	return metav1.ConditionTrue, "fixtures blueprint applied", false
 }
 
-// +kubebuilder:rbac:groups=bench.goauthentik.io,resources=authentiktopologies,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=bench.goauthentik.io,resources=authentiktopologies/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=bench.goauthentik.io,resources=authentiktopologies/finalizers,verbs=update
+// +kubebuilder:rbac:groups=bench.goauthentik.io,resources=authentikdeployments,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=bench.goauthentik.io,resources=authentikdeployments/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=bench.goauthentik.io,resources=authentikdeployments/finalizers,verbs=update
 // +kubebuilder:rbac:groups=helm.toolkit.fluxcd.io,resources=helmreleases,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=source.toolkit.fluxcd.io,resources=helmrepositories,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=postgresql.cnpg.io,resources=clusters,verbs=get;list;watch;create;update;patch;delete
@@ -253,10 +253,10 @@ func (r *AuthentikTopologyReconciler) reconcileBlueprint(ctx context.Context, rc
 // +kubebuilder:rbac:groups=core,resources=pods,verbs=get;list;watch
 // +kubebuilder:rbac:groups=core,resources=pods/exec,verbs=create
 
-func (r *AuthentikTopologyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+func (r *AuthentikDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 
-	var topo benchv1alpha1.AuthentikTopology
+	var topo benchv1alpha1.AuthentikDeployment
 	if err := r.Get(ctx, req.NamespacedName, &topo); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
@@ -264,8 +264,8 @@ func (r *AuthentikTopologyReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	if !topo.DeletionTimestamp.IsZero() {
 		return r.reconcileDelete(ctx, &topo)
 	}
-	if !controllerutil.ContainsFinalizer(&topo, authentikTopologyFinalizer) {
-		controllerutil.AddFinalizer(&topo, authentikTopologyFinalizer)
+	if !controllerutil.ContainsFinalizer(&topo, authentikDeploymentFinalizer) {
+		controllerutil.AddFinalizer(&topo, authentikDeploymentFinalizer)
 		if err := r.Update(ctx, &topo); err != nil {
 			return ctrl.Result{}, err
 		}
@@ -385,16 +385,16 @@ func (r *AuthentikTopologyReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	if err := r.Status().Update(ctx, &topo); err != nil {
 		return ctrl.Result{}, err
 	}
-	log.Info("reconciled AuthentikTopology", "ready", ready)
+	log.Info("reconciled AuthentikDeployment", "ready", ready)
 	if requeueForBlueprint {
 		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 	}
 	return ctrl.Result{}, nil
 }
 
-func (r *AuthentikTopologyReconciler) reconcileDelete(ctx context.Context, topo *benchv1alpha1.AuthentikTopology) (ctrl.Result, error) {
+func (r *AuthentikDeploymentReconciler) reconcileDelete(ctx context.Context, topo *benchv1alpha1.AuthentikDeployment) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
-	if !controllerutil.ContainsFinalizer(topo, authentikTopologyFinalizer) {
+	if !controllerutil.ContainsFinalizer(topo, authentikDeploymentFinalizer) {
 		return ctrl.Result{}, nil
 	}
 
@@ -443,7 +443,7 @@ func (r *AuthentikTopologyReconciler) reconcileDelete(ctx context.Context, topo 
 			}
 		}
 	}
-	controllerutil.RemoveFinalizer(topo, authentikTopologyFinalizer)
+	controllerutil.RemoveFinalizer(topo, authentikDeploymentFinalizer)
 	return ctrl.Result{}, r.Update(ctx, topo)
 }
 
@@ -453,7 +453,7 @@ func (r *AuthentikTopologyReconciler) reconcileDelete(ctx context.Context, topo 
 // whether the backend is ready for the authentik chart to be installed
 // against. A false ready with a nil error means "still reconciling, check
 // back later" (e.g. CNPG cluster not healthy yet), not a failure.
-func (r *AuthentikTopologyReconciler) resolvePostgres(ctx context.Context, rc client.Client, topo *benchv1alpha1.AuthentikTopology) (*render.PostgresConnection, bool, error) {
+func (r *AuthentikDeploymentReconciler) resolvePostgres(ctx context.Context, rc client.Client, topo *benchv1alpha1.AuthentikDeployment) (*render.PostgresConnection, bool, error) {
 	switch topo.Spec.Postgres.Mode {
 	case benchv1alpha1.PostgresCNPG:
 		return r.resolveCNPGPostgres(ctx, rc, topo)
@@ -464,7 +464,7 @@ func (r *AuthentikTopologyReconciler) resolvePostgres(ctx context.Context, rc cl
 	}
 }
 
-func (r *AuthentikTopologyReconciler) resolveEmbeddedPostgres(ctx context.Context, rc client.Client, topo *benchv1alpha1.AuthentikTopology) (*render.PostgresConnection, bool, error) {
+func (r *AuthentikDeploymentReconciler) resolveEmbeddedPostgres(ctx context.Context, rc client.Client, topo *benchv1alpha1.AuthentikDeployment) (*render.PostgresConnection, bool, error) {
 	// Pin the bundled postgresql subchart's own auth.password to a value we
 	// generate, so it matches what we also hand authentik as
 	// AUTHENTIK_POSTGRESQL__PASSWORD - the two are otherwise generated
@@ -483,11 +483,11 @@ func (r *AuthentikTopologyReconciler) resolveEmbeddedPostgres(ctx context.Contex
 // resolveCNPGPostgres applies the CNPG Cluster via rc (the management
 // cluster when clusterRef is empty, otherwise a remote client) rather than
 // applyOwned: a cross-cluster ownerReference is meaningless (the owning
-// AuthentikTopology's UID doesn't exist in the remote cluster's etcd for its
+// AuthentikDeployment's UID doesn't exist in the remote cluster's etcd for its
 // garbage collector to recognize), and cleanup already goes through
 // reconcileDelete's namespace sweep on whichever cluster this is, so no
 // finalizer-tracked per-object cleanup is needed either.
-func (r *AuthentikTopologyReconciler) resolveCNPGPostgres(ctx context.Context, rc client.Client, topo *benchv1alpha1.AuthentikTopology) (*render.PostgresConnection, bool, error) {
+func (r *AuthentikDeploymentReconciler) resolveCNPGPostgres(ctx context.Context, rc client.Client, topo *benchv1alpha1.AuthentikDeployment) (*render.PostgresConnection, bool, error) {
 	cluster := render.CNPGCluster(topo)
 	if err := applyUnowned(ctx, rc, cluster); err != nil {
 		return nil, false, fmt.Errorf("apply CNPG Cluster: %w", err)
@@ -521,7 +521,7 @@ func (r *AuthentikTopologyReconciler) resolveCNPGPostgres(ctx context.Context, r
 	return connectionFromSecret(sec, "host", "port", "dbname", "username", "password"), true, nil
 }
 
-func (r *AuthentikTopologyReconciler) resolveExternalPostgres(ctx context.Context, rc client.Client, topo *benchv1alpha1.AuthentikTopology) (*render.PostgresConnection, bool, error) {
+func (r *AuthentikDeploymentReconciler) resolveExternalPostgres(ctx context.Context, rc client.Client, topo *benchv1alpha1.AuthentikDeployment) (*render.PostgresConnection, bool, error) {
 	ext := topo.Spec.Postgres.External
 	if ext == nil {
 		return nil, false, fmt.Errorf("postgres mode External requires spec.postgres.external")
@@ -573,33 +573,33 @@ func ensureNamespace(ctx context.Context, rc client.Client, name string) error {
 }
 
 // SetupWithManager sets up the controller with the Manager.
-func (r *AuthentikTopologyReconciler) SetupWithManager(mgr ctrl.Manager) error {
+func (r *AuthentikDeploymentReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&benchv1alpha1.AuthentikTopology{}).
+		For(&benchv1alpha1.AuthentikDeployment{}).
 		Owns(&helmv2.HelmRelease{}).
-		// Without this, a topology whose extraValuesRef/fixtures blueprint
+		// Without this, a deployment whose extraValuesRef/fixtures blueprint
 		// ConfigMap didn't exist yet only notices it was created on its own
 		// next unrelated reconcile - the same staleness TestCaseReconciler's
-		// AuthentikTopology watch fixes, just one hop earlier: fixturesCM's
-		// creation (`make fixtures`, run any time after the topology
-		// already exists) doesn't touch the topology at all on its own.
-		Watches(&corev1.ConfigMap{}, handler.EnqueueRequestsFromMapFunc(r.topologiesForConfigMap)).
+		// AuthentikDeployment watch fixes, just one hop earlier: fixturesCM's
+		// creation (`make fixtures`, run any time after the deployment
+		// already exists) doesn't touch the deployment at all on its own.
+		Watches(&corev1.ConfigMap{}, handler.EnqueueRequestsFromMapFunc(r.deploymentsForConfigMap)).
 		// Defense in depth alongside blueprintApplyTimeout (blueprint.go):
 		// the default of 1 means a single slow reconcile - blueprint
 		// application under load is the known slow one - blocks every
-		// *other* topology's reconciles too, not just its own, since they
+		// *other* deployment's reconciles too, not just its own, since they
 		// all share the one worker.
 		WithOptions(controller.Options{MaxConcurrentReconciles: 5}).
-		Named("authentiktopology").
+		Named("authentikdeployment").
 		Complete(r)
 }
 
-// topologiesForConfigMap maps a changed ConfigMap to every AuthentikTopology
+// deploymentsForConfigMap maps a changed ConfigMap to every AuthentikDeployment
 // in the same namespace that references it - by name, for the fixtures
-// blueprint (a fixed name every topology in a namespace shares), or via
-// spec.authentik.extraValuesRef for a topology-specific one.
-func (r *AuthentikTopologyReconciler) topologiesForConfigMap(ctx context.Context, cm client.Object) []reconcile.Request {
-	var list benchv1alpha1.AuthentikTopologyList
+// blueprint (a fixed name every deployment in a namespace shares), or via
+// spec.authentik.extraValuesRef for a deployment-specific one.
+func (r *AuthentikDeploymentReconciler) deploymentsForConfigMap(ctx context.Context, cm client.Object) []reconcile.Request {
+	var list benchv1alpha1.AuthentikDeploymentList
 	if err := r.List(ctx, &list, client.InNamespace(cm.GetNamespace())); err != nil {
 		return nil
 	}

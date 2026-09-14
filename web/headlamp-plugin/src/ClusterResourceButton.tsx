@@ -15,7 +15,7 @@
  */
 
 // Jumps to Headlamp's own generic detail view for a workload this plugin's
-// controllers create (a topology's server/worker Deployment, its embedded
+// controllers create (a deployment's server/worker Deployment, its embedded
 // postgres StatefulSet, a Burn test case's k6 Deployment) - on whichever
 // cluster it actually runs on, which is frequently not the one currently
 // selected in Headlamp (bench CRs always live on the management cluster;

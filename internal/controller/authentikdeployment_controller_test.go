@@ -34,16 +34,16 @@ import (
 	"github.com/goauthentik/authentik-bench/internal/render"
 )
 
-var _ = Describe("AuthentikTopology Controller", func() {
+var _ = Describe("AuthentikDeployment Controller", func() {
 	Context("Embedded postgres, Default placement (M1 scope)", func() {
-		const resourceName = "topology-embedded"
+		const resourceName = "deployment-embedded"
 		var typeNamespacedName types.NamespacedName
 
 		BeforeEach(func() {
 			typeNamespacedName = types.NamespacedName{Name: resourceName, Namespace: "default"}
-			topo := &benchv1alpha1.AuthentikTopology{
+			topo := &benchv1alpha1.AuthentikDeployment{
 				ObjectMeta: metav1.ObjectMeta{Name: resourceName, Namespace: "default"},
-				Spec: benchv1alpha1.AuthentikTopologySpec{
+				Spec: benchv1alpha1.AuthentikDeploymentSpec{
 					Namespace: "authentik-" + resourceName,
 					Server:    benchv1alpha1.WorkloadSpec{Replicas: 2},
 					Worker:    benchv1alpha1.WorkloadSpec{Replicas: 1},
@@ -54,11 +54,11 @@ var _ = Describe("AuthentikTopology Controller", func() {
 		})
 
 		AfterEach(func() {
-			forceDelete(ctx, &benchv1alpha1.AuthentikTopology{ObjectMeta: metav1.ObjectMeta{Name: resourceName, Namespace: "default"}})
+			forceDelete(ctx, &benchv1alpha1.AuthentikDeployment{ObjectMeta: metav1.ObjectMeta{Name: resourceName, Namespace: "default"}})
 		})
 
-		It("renders a HelmRepository and a HelmRelease with the topology's values", func() {
-			r := &AuthentikTopologyReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Recorder: record.NewFakeRecorder(100)}
+		It("renders a HelmRepository and a HelmRelease with the deployment's values", func() {
+			r := &AuthentikDeploymentReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Recorder: record.NewFakeRecorder(100)}
 			_, err := r.Reconcile(context.Background(), reconcile.Request{NamespacedName: typeNamespacedName})
 			Expect(err).NotTo(HaveOccurred())
 
@@ -66,15 +66,15 @@ var _ = Describe("AuthentikTopology Controller", func() {
 			Expect(k8sClient.Get(context.Background(), typeNamespacedName, &hr)).To(Succeed())
 			Expect(hr.Spec.TargetNamespace).To(Equal("authentik-" + resourceName))
 			Expect(hr.Spec.Chart.Spec.Chart).To(Equal("authentik"))
-			Expect(hr.Spec.KubeConfig).To(BeNil(), "M1 topologies deploy to the local cluster")
+			Expect(hr.Spec.KubeConfig).To(BeNil(), "M1 deployments deploy to the local cluster")
 
-			var values render.AuthentikTopologyHelmValues
+			var values render.AuthentikDeploymentHelmValues
 			Expect(hr.Spec.Values).NotTo(BeNil())
 			Expect(json.Unmarshal(hr.Spec.Values.Raw, &values)).To(Succeed())
 			Expect(values.Server["replicas"]).To(BeNumerically("==", 2))
 			Expect(values.Postgres["enabled"]).To(BeTrue())
 
-			var topo benchv1alpha1.AuthentikTopology
+			var topo benchv1alpha1.AuthentikDeployment
 			Expect(k8sClient.Get(context.Background(), typeNamespacedName, &topo)).To(Succeed())
 			postgresReady := meta.FindStatusCondition(topo.Status.Conditions, benchv1alpha1.ConditionPostgresReady)
 			Expect(postgresReady).NotTo(BeNil())
@@ -89,14 +89,14 @@ var _ = Describe("AuthentikTopology Controller", func() {
 	})
 
 	Context("Dedicated placement", func() {
-		const resourceName = "topology-dedicated"
+		const resourceName = "deployment-dedicated"
 		var typeNamespacedName types.NamespacedName
 
 		BeforeEach(func() {
 			typeNamespacedName = types.NamespacedName{Name: resourceName, Namespace: "default"}
-			topo := &benchv1alpha1.AuthentikTopology{
+			topo := &benchv1alpha1.AuthentikDeployment{
 				ObjectMeta: metav1.ObjectMeta{Name: resourceName, Namespace: "default"},
-				Spec: benchv1alpha1.AuthentikTopologySpec{
+				Spec: benchv1alpha1.AuthentikDeploymentSpec{
 					Namespace: "authentik-" + resourceName,
 					Server:    benchv1alpha1.WorkloadSpec{Replicas: 1},
 					Worker:    benchv1alpha1.WorkloadSpec{Replicas: 1},
@@ -108,23 +108,23 @@ var _ = Describe("AuthentikTopology Controller", func() {
 		})
 
 		AfterEach(func() {
-			forceDelete(ctx, &benchv1alpha1.AuthentikTopology{ObjectMeta: metav1.ObjectMeta{Name: resourceName, Namespace: "default"}})
+			forceDelete(ctx, &benchv1alpha1.AuthentikDeployment{ObjectMeta: metav1.ObjectMeta{Name: resourceName, Namespace: "default"}})
 		})
 
 		It("renders a required pod anti-affinity directly on server/worker", func() {
-			r := &AuthentikTopologyReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Recorder: record.NewFakeRecorder(100)}
+			r := &AuthentikDeploymentReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Recorder: record.NewFakeRecorder(100)}
 			_, err := r.Reconcile(context.Background(), reconcile.Request{NamespacedName: typeNamespacedName})
 			Expect(err).NotTo(HaveOccurred())
 
 			var hr helmv2.HelmRelease
 			Expect(k8sClient.Get(context.Background(), typeNamespacedName, &hr)).To(Succeed())
-			var values render.AuthentikTopologyHelmValues
+			var values render.AuthentikDeploymentHelmValues
 			Expect(json.Unmarshal(hr.Spec.Values.Raw, &values)).To(Succeed())
 			// server.affinity/worker.affinity, not global.affinity.podAntiAffinity:
 			// the chart's own preset mechanism is no longer used at all -
 			// ServerWorkerAffinity renders the equivalent required
 			// anti-affinity directly, alongside the always-present
-			// cross-topology term (see its own doc comment for why the two
+			// cross-deployment term (see its own doc comment for why the two
 			// can't be mixed: server.affinity/worker.affinity being set to
 			// anything makes the chart skip its preset entirely).
 			raw, err := json.Marshal(values.Server["affinity"])
@@ -133,12 +133,12 @@ var _ = Describe("AuthentikTopology Controller", func() {
 			Expect(json.Unmarshal(raw, &affinity)).To(Succeed())
 			podAntiAffinity, _ := affinity["podAntiAffinity"].(map[string]any)
 			terms, _ := podAntiAffinity["requiredDuringSchedulingIgnoredDuringExecution"].([]any)
-			Expect(terms).To(HaveLen(2), "want cross-topology + own-release required terms")
+			Expect(terms).To(HaveLen(2), "want cross-deployment + own-release required terms")
 		})
 	})
 
 	Context("External postgres", func() {
-		const resourceName = "topology-external"
+		const resourceName = "deployment-external"
 		var typeNamespacedName types.NamespacedName
 
 		BeforeEach(func() {
@@ -152,9 +152,9 @@ var _ = Describe("AuthentikTopology Controller", func() {
 					"username": "authentik", "password": "s3cret",
 				},
 			})).To(Succeed())
-			topo := &benchv1alpha1.AuthentikTopology{
+			topo := &benchv1alpha1.AuthentikDeployment{
 				ObjectMeta: metav1.ObjectMeta{Name: resourceName, Namespace: "default"},
-				Spec: benchv1alpha1.AuthentikTopologySpec{
+				Spec: benchv1alpha1.AuthentikDeploymentSpec{
 					Namespace: targetNs,
 					Server:    benchv1alpha1.WorkloadSpec{Replicas: 1},
 					Worker:    benchv1alpha1.WorkloadSpec{Replicas: 1},
@@ -168,25 +168,25 @@ var _ = Describe("AuthentikTopology Controller", func() {
 		})
 
 		AfterEach(func() {
-			forceDelete(ctx, &benchv1alpha1.AuthentikTopology{ObjectMeta: metav1.ObjectMeta{Name: resourceName, Namespace: "default"}})
+			forceDelete(ctx, &benchv1alpha1.AuthentikDeployment{ObjectMeta: metav1.ObjectMeta{Name: resourceName, Namespace: "default"}})
 			forceDelete(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "authentik-" + resourceName}})
 		})
 
 		It("wires the referenced secret's connection into the chart values without touching CNPG", func() {
-			r := &AuthentikTopologyReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Recorder: record.NewFakeRecorder(100)}
+			r := &AuthentikDeploymentReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Recorder: record.NewFakeRecorder(100)}
 			_, err := r.Reconcile(context.Background(), reconcile.Request{NamespacedName: typeNamespacedName})
 			Expect(err).NotTo(HaveOccurred())
 
 			var hr helmv2.HelmRelease
 			Expect(k8sClient.Get(context.Background(), typeNamespacedName, &hr)).To(Succeed())
-			var values render.AuthentikTopologyHelmValues
+			var values render.AuthentikDeploymentHelmValues
 			Expect(json.Unmarshal(hr.Spec.Values.Raw, &values)).To(Succeed())
 			Expect(values.Postgres["enabled"]).To(BeFalse())
 			pg, _ := values.Authentik["postgresql"].(map[string]any)
 			Expect(pg["host"]).To(Equal("pg.example.com"))
 			Expect(pg["password"]).To(Equal("s3cret"))
 
-			var topo benchv1alpha1.AuthentikTopology
+			var topo benchv1alpha1.AuthentikDeployment
 			Expect(k8sClient.Get(context.Background(), typeNamespacedName, &topo)).To(Succeed())
 			postgresReady := meta.FindStatusCondition(topo.Status.Conditions, benchv1alpha1.ConditionPostgresReady)
 			Expect(postgresReady).NotTo(BeNil())
@@ -196,11 +196,11 @@ var _ = Describe("AuthentikTopology Controller", func() {
 
 	Context("clusterRef set without a multicluster tracker wired up", func() {
 		It("reports DependencyNotReady and requeues instead of touching a remote cluster", func() {
-			topo := &benchv1alpha1.AuthentikTopology{
-				ObjectMeta: metav1.ObjectMeta{Name: "topology-remote", Namespace: "default"},
-				Spec: benchv1alpha1.AuthentikTopologySpec{
+			topo := &benchv1alpha1.AuthentikDeployment{
+				ObjectMeta: metav1.ObjectMeta{Name: "deployment-remote", Namespace: "default"},
+				Spec: benchv1alpha1.AuthentikDeploymentSpec{
 					ClusterRef: corev1.LocalObjectReference{Name: "some-workload-cluster"},
-					Namespace:  "authentik-topology-remote",
+					Namespace:  "authentik-deployment-remote",
 					Server:     benchv1alpha1.WorkloadSpec{Replicas: 1},
 					Worker:     benchv1alpha1.WorkloadSpec{Replicas: 1},
 					Postgres:   benchv1alpha1.PostgresSpec{Mode: benchv1alpha1.PostgresEmbedded},
@@ -212,7 +212,7 @@ var _ = Describe("AuthentikTopology Controller", func() {
 			// No Tracker configured (this suite only unit-tests reconcile
 			// logic directly, without a running manager/ClusterCache) -
 			// resolveClient must report this as "not ready yet", not panic.
-			r := &AuthentikTopologyReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Recorder: record.NewFakeRecorder(100)}
+			r := &AuthentikDeploymentReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Recorder: record.NewFakeRecorder(100)}
 			key := types.NamespacedName{Name: topo.Name, Namespace: topo.Namespace}
 			result, err := r.Reconcile(context.Background(), reconcile.Request{NamespacedName: key})
 			Expect(err).NotTo(HaveOccurred())

@@ -10,9 +10,9 @@ import (
 )
 
 func TestCNPGClusterDefaults(t *testing.T) {
-	topo := &benchv1alpha1.AuthentikTopology{
+	topo := &benchv1alpha1.AuthentikDeployment{
 		ObjectMeta: metav1.ObjectMeta{Name: "authentik-1"},
-		Spec: benchv1alpha1.AuthentikTopologySpec{
+		Spec: benchv1alpha1.AuthentikDeploymentSpec{
 			Namespace: "authentik-1",
 			Postgres:  benchv1alpha1.PostgresSpec{Mode: benchv1alpha1.PostgresCNPG},
 		},
@@ -36,9 +36,9 @@ func TestCNPGClusterDefaults(t *testing.T) {
 }
 
 func TestCNPGClusterHonorsSpec(t *testing.T) {
-	topo := &benchv1alpha1.AuthentikTopology{
+	topo := &benchv1alpha1.AuthentikDeployment{
 		ObjectMeta: metav1.ObjectMeta{Name: "authentik-1"},
-		Spec: benchv1alpha1.AuthentikTopologySpec{
+		Spec: benchv1alpha1.AuthentikDeploymentSpec{
 			Postgres: benchv1alpha1.PostgresSpec{
 				Mode: benchv1alpha1.PostgresCNPG,
 				CNPG: &benchv1alpha1.CNPGPostgresSpec{Instances: 5, StorageSize: "50Gi", StorageClassName: "fast"},
@@ -61,10 +61,10 @@ func TestCNPGClusterHonorsSpec(t *testing.T) {
 	}
 }
 
-func TestCNPGClusterCrossTopologyIsolation(t *testing.T) {
-	topo := &benchv1alpha1.AuthentikTopology{
+func TestCNPGClusterCrossDeploymentIsolation(t *testing.T) {
+	topo := &benchv1alpha1.AuthentikDeployment{
 		ObjectMeta: metav1.ObjectMeta{Name: "authentik-1"},
-		Spec: benchv1alpha1.AuthentikTopologySpec{
+		Spec: benchv1alpha1.AuthentikDeploymentSpec{
 			Namespace: "authentik-1",
 			Postgres:  benchv1alpha1.PostgresSpec{Mode: benchv1alpha1.PostgresCNPG},
 		},
@@ -72,8 +72,8 @@ func TestCNPGClusterCrossTopologyIsolation(t *testing.T) {
 	u := CNPGCluster(topo)
 
 	labels, _, _ := unstructured.NestedStringMap(u.Object, "spec", "inheritedMetadata", "labels")
-	if labels["bench.goauthentik.io/topology"] != "authentik-1" {
-		t.Errorf("spec.inheritedMetadata.labels = %v, want bench.goauthentik.io/topology=authentik-1", labels)
+	if labels["bench.goauthentik.io/deployment"] != "authentik-1" {
+		t.Errorf("spec.inheritedMetadata.labels = %v, want bench.goauthentik.io/deployment=authentik-1", labels)
 	}
 
 	terms, _, _ := unstructured.NestedSlice(u.Object, "spec", "affinity", "additionalPodAntiAffinity", "requiredDuringSchedulingIgnoredDuringExecution")

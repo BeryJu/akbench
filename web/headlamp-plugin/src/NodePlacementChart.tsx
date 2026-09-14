@@ -14,10 +14,10 @@
  * limitations under the License.
  */
 
-// Visualizes, across every cluster a topology can run on, which node each
-// topology's pods actually landed on - the same bench.goauthentik.io/topology
-// label internal/render/isolation.go's cross-topology pod anti-affinity
-// matches on (every topology's server/worker/postgres pods, and its k6
+// Visualizes, across every cluster a deployment can run on, which node each
+// deployment's pods actually landed on - the same bench.goauthentik.io/deployment
+// label internal/render/isolation.go's cross-deployment pod anti-affinity
+// matches on (every deployment's server/worker/postgres pods, and its k6
 // runner, carry it) is what this reads, via Headlamp's own K8s.Pod.useList
 // rather than cmd/apiserver: cmd/apiserver only ever talks to the
 // management cluster's own API (api.ts pins { cluster: MANAGEMENT_CLUSTER }
@@ -29,9 +29,9 @@
 // Reuses this plugin's existing chart stack (recharts, the same
 // SectionBox/EmptyContent/colorFor/useTheme pattern MetricsChart.tsx
 // already uses) rather than a new charting approach - a stacked bar per
-// node (one segment per topology present on it) is the natural shape for
-// "how many of this topology's pods are on this node", and immediately
-// shows a bar with more than one color as a same-node cross-topology
+// node (one segment per deployment present on it) is the natural shape for
+// "how many of this deployment's pods are on this node", and immediately
+// shows a bar with more than one color as a same-node cross-deployment
 // collision, which should never happen once the anti-affinity is in place.
 import { K8s } from '@kinvolk/headlamp-plugin/lib';
 import { EmptyContent, SectionBox } from '@kinvolk/headlamp-plugin/lib/CommonComponents';
@@ -42,7 +42,7 @@ import { api, headlampClusterName, MANAGEMENT_CLUSTER } from './api';
 import { colorFor } from './format';
 import { useResource } from './useResource';
 
-const TOPOLOGY_LABEL = 'bench.goauthentik.io/topology';
+const DEPLOYMENT_LABEL = 'bench.goauthentik.io/deployment';
 
 /** displayCluster undoes headlampClusterName's "<name>-admin@<name>" form
  * for the chart's own labels - the raw context name is correct for Headlamp
@@ -57,48 +57,48 @@ function displayCluster(cluster: string): string {
 
 export function NodePlacementChart() {
   const theme = useTheme();
-  const topologies = useResource(() => api.topologies(), [], 30000);
+  const deployments = useResource(() => api.deployments(), [], 30000);
 
   const clusters = useMemo(() => {
     const names = new Set<string>();
-    for (const t of topologies.data ?? []) {
+    for (const t of deployments.data ?? []) {
       names.add(headlampClusterName(t.spec.clusterRef?.name));
     }
     return Array.from(names);
-  }, [topologies.data]);
+  }, [deployments.data]);
 
   const [pods, podsError] = K8s.ResourceClasses.Pod.useList({
     clusters,
-    labelSelector: TOPOLOGY_LABEL,
+    labelSelector: DEPLOYMENT_LABEL,
   });
 
-  const { rows, topologyNames } = useMemo(() => {
+  const { rows, deploymentNames } = useMemo(() => {
     const byNode = new Map<string, Record<string, number | string>>();
-    const seenTopologies = new Set<string>();
+    const seenDeployments = new Set<string>();
     for (const pod of pods ?? []) {
       const node = pod.jsonData.spec?.nodeName;
-      const topology = pod.jsonData.metadata?.labels?.[TOPOLOGY_LABEL];
-      if (!node || !topology) {
+      const deployment = pod.jsonData.metadata?.labels?.[DEPLOYMENT_LABEL];
+      if (!node || !deployment) {
         continue;
       }
-      seenTopologies.add(topology);
+      seenDeployments.add(deployment);
       const key = `${pod.cluster}/${node}`;
       const row = byNode.get(key) ?? { key, cluster: displayCluster(pod.cluster ?? ''), node };
-      row[topology] = ((row[topology] as number) ?? 0) + 1;
+      row[deployment] = ((row[deployment] as number) ?? 0) + 1;
       byNode.set(key, row);
     }
     return {
       rows: Array.from(byNode.values()).sort((a, b) => (a.key as string).localeCompare(b.key as string)),
-      topologyNames: Array.from(seenTopologies).sort(),
+      deploymentNames: Array.from(seenDeployments).sort(),
     };
   }, [pods]);
 
-  const error = topologies.error ?? podsError?.message;
+  const error = deployments.error ?? podsError?.message;
 
   return (
     <SectionBox
       title="Node placement"
-      subtitle="Which node each topology's pods are running on, across every cluster - more than one color in a bar means two topologies are sharing a node."
+      subtitle="Which node each deployment's pods are running on, across every cluster - more than one color in a bar means two deployments are sharing a node."
     >
       {error && (
         <Alert severity="error" sx={{ mb: 2 }}>
@@ -106,7 +106,7 @@ export function NodePlacementChart() {
         </Alert>
       )}
       {rows.length === 0 ? (
-        <EmptyContent>No topology pods found yet.</EmptyContent>
+        <EmptyContent>No deployment pods found yet.</EmptyContent>
       ) : (
         <ResponsiveContainer width="100%" height={Math.max(220, rows.length * 36)}>
           <BarChart data={rows} layout="vertical" margin={{ top: 4, right: 24, left: 0, bottom: 0 }}>
@@ -128,8 +128,8 @@ export function NodePlacementChart() {
               }}
             />
             <Legend wrapperStyle={{ fontSize: 12 }} />
-            {topologyNames.map((name, i) => (
-              <Bar key={name} dataKey={name} name={name} stackId="topologies" fill={colorFor(i)} />
+            {deploymentNames.map((name, i) => (
+              <Bar key={name} dataKey={name} name={name} stackId="deployments" fill={colorFor(i)} />
             ))}
           </BarChart>
         </ResponsiveContainer>

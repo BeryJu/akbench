@@ -36,15 +36,15 @@ var _ = Describe("TestRun Controller", func() {
 	const resourceName = "quick-run-1"
 	typeNamespacedName := types.NamespacedName{Name: resourceName, Namespace: "default"}
 
-	var topo *benchv1alpha1.AuthentikTopology
+	var topo *benchv1alpha1.AuthentikDeployment
 	var tc *benchv1alpha1.TestCase
 
 	BeforeEach(func() {
-		topo = createReadyTopology(context.Background(), "testrun-topology", "authentik-1", "authentik-1-server.ns.svc.cluster.local", 80)
+		topo = createReadyDeployment(context.Background(), "testrun-deployment", "authentik-1", "authentik-1-server.ns.svc.cluster.local", 80)
 		tc = &benchv1alpha1.TestCase{
 			ObjectMeta: metav1.ObjectMeta{Name: "quick-login", Namespace: "default"},
 			Spec: benchv1alpha1.TestCaseSpec{
-				TopologyRef: corev1.LocalObjectReference{Name: topo.Name},
+				DeploymentRef: corev1.LocalObjectReference{Name: topo.Name},
 				Profile:     benchv1alpha1.ProfileQuick,
 				VUs:         4,
 				Iterations:  100,

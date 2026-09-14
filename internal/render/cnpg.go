@@ -23,27 +23,27 @@ const (
 
 	// cnpgDatabase/cnpgOwner match the embedded chart's own defaults
 	// (postgresql.auth.username/database: authentik), so the generated app
-	// user looks the same regardless of which Postgres mode a topology uses.
+	// user looks the same regardless of which Postgres mode a deployment uses.
 	cnpgDatabase = "authentik"
 	cnpgOwner    = "authentik"
 )
 
-// CNPGClusterName is deterministic from the topology name.
-func CNPGClusterName(t *benchv1alpha1.AuthentikTopology) string {
+// CNPGClusterName is deterministic from the deployment name.
+func CNPGClusterName(t *benchv1alpha1.AuthentikDeployment) string {
 	return t.Name + "-postgres"
 }
 
 // CNPGAppSecretName is the connection Secret CNPG generates for the
 // bootstrapped app user/database, named "<cluster-name>-app" by convention.
-func CNPGAppSecretName(t *benchv1alpha1.AuthentikTopology) string {
+func CNPGAppSecretName(t *benchv1alpha1.AuthentikDeployment) string {
 	return CNPGClusterName(t) + "-app"
 }
 
-// CNPGCluster builds the CloudNativePG Cluster CR for a topology in CNPG
+// CNPGCluster builds the CloudNativePG Cluster CR for a deployment in CNPG
 // postgres mode: instances (>1 for HA) and storage sized/classed from
 // spec.postgres.cnpg, bootstrapped with an "authentik" database/owner so its
 // generated app secret matches the embedded mode's own username/database.
-func CNPGCluster(t *benchv1alpha1.AuthentikTopology) *unstructured.Unstructured {
+func CNPGCluster(t *benchv1alpha1.AuthentikDeployment) *unstructured.Unstructured {
 	cnpg := t.Spec.Postgres.CNPG
 	instances := int64(3)
 	if cnpg != nil && cnpg.Instances > 0 {
@@ -72,10 +72,10 @@ func CNPGCluster(t *benchv1alpha1.AuthentikTopology) *unstructured.Unstructured 
 	// this cluster (its real Go API, cluster_types.go's
 	// Cluster.Spec.InheritedMetadata *EmbeddedObjectMetadata - built as a
 	// plain map here to keep this file's existing no-typed-CNPG-API-import
-	// approach), which is what lets the cross-topology anti-affinity below
-	// find these pods from another topology's own affinity rule the same
+	// approach), which is what lets the cross-deployment anti-affinity below
+	// find these pods from another deployment's own affinity rule the same
 	// way it finds server/worker/embedded-postgres pods.
-	_ = unstructured.SetNestedStringMap(u.Object, TopologyLabels(t.Name), "spec", "inheritedMetadata", "labels")
+	_ = unstructured.SetNestedStringMap(u.Object, DeploymentLabels(t.Name), "spec", "inheritedMetadata", "labels")
 	// additionalPodAntiAffinity (Cluster.Spec.Affinity.AdditionalPodAntiAffinity)
 	// is additive - it doesn't disturb CNPG's own built-in same-cluster
 	// instance-spreading (EnablePodAntiAffinity/PodAntiAffinityType), unlike
@@ -85,7 +85,7 @@ func CNPGCluster(t *benchv1alpha1.AuthentikTopology) *unstructured.Unstructured 
 	// (isolation.go) rather than a second hand-written copy of its shape.
 	antiAffinity := &corev1.PodAntiAffinity{
 		RequiredDuringSchedulingIgnoredDuringExecution: []corev1.PodAffinityTerm{
-			crossTopologyAntiAffinityTerm(t.Name),
+			crossDeploymentAntiAffinityTerm(t.Name),
 		},
 	}
 	antiAffinityMap, err := runtime.DefaultUnstructuredConverter.ToUnstructured(antiAffinity)

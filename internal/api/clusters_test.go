@@ -30,7 +30,7 @@ import (
 )
 
 // Without Cluster API installed the picker still needs one entry, or the UI
-// cannot offer anywhere to deploy a topology.
+// cannot offer anywhere to deploy a deployment.
 func TestListClustersWithoutCAPI(t *testing.T) {
 	s, _ := newServer(t, Config{})
 	rec := do(t, s, http.MethodGet, "/api/v1/clusters", nil)

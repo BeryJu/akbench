@@ -131,7 +131,7 @@ func TestCompare(t *testing.T) {
 	}
 }
 
-// TestMetricsResolvesPerClusterPrometheus: a testid whose Topology has a
+// TestMetricsResolvesPerClusterPrometheus: a testid whose Deployment has a
 // clusterRef must be queried against that WorkloadCluster's own
 // status.prometheusURL, not the management cluster's Config.PrometheusURL -
 // and a testid with no clusterRef (the management cluster) must still use
@@ -157,8 +157,8 @@ func TestMetricsResolvesPerClusterPrometheus(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "wc1", Namespace: testNamespace},
 		Status:     benchv1alpha1.WorkloadClusterStatus{PrometheusURL: wcProm.URL},
 	}
-	topoMgmt := sampleTopology("topo-mgmt")
-	topoWC := sampleTopology("topo-wc")
+	topoMgmt := sampleDeployment("topo-mgmt")
+	topoWC := sampleDeployment("topo-wc")
 	topoWC.Spec.ClusterRef = corev1.LocalObjectReference{Name: "wc1"}
 	tcMgmt := sampleTestCase("login-mgmt", "topo-mgmt", benchv1alpha1.ProfileBurn)
 	tcWC := sampleTestCase("login-wc", "topo-wc", benchv1alpha1.ProfileBurn)

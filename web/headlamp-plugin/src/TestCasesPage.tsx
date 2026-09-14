@@ -30,10 +30,10 @@ export function TestCasesPage() {
   const testCases = useResource(() => api.testCases());
   // Only needed to resolve which cluster a Burn test case's k6 Deployment
   // runs on - TestCaseSpec has no clusterRef of its own, it inherits the
-  // topology's (or an explicit runnerClusterRef override).
-  const topologies = useResource(() => api.topologies(), [], 0);
-  const clusterByTopology = new Map(
-    (topologies.data ?? []).map(topology => [topology.metadata.name, topology.spec.clusterRef?.name])
+  // deployment's (or an explicit runnerClusterRef override).
+  const deployments = useResource(() => api.deployments(), [], 0);
+  const clusterByDeployment = new Map(
+    (deployments.data ?? []).map(deployment => [deployment.metadata.name, deployment.spec.clusterRef?.name])
   );
 
   async function remove(name: string) {
@@ -79,7 +79,7 @@ export function TestCasesPage() {
               </Link>
             ),
           },
-          { label: 'Topology', getter: testCase => testCase.spec.topologyRef.name },
+          { label: 'Deployment', getter: testCase => testCase.spec.deploymentRef.name },
           {
             label: 'Profile',
             getter: testCase => (
@@ -97,7 +97,7 @@ export function TestCasesPage() {
                 cluster={MANAGEMENT_CLUSTER}
                 phase={testCase.status?.phase}
                 conditions={testCase.status?.conditions}
-                links={[{ label: 'Topology', routeName: 'authentik-bench-topologies-edit', params: { name: testCase.spec.topologyRef.name } }]}
+                links={[{ label: 'Deployment', routeName: 'authentik-bench-deployments-edit', params: { name: testCase.spec.deploymentRef.name } }]}
               />
             ),
           },
@@ -109,7 +109,7 @@ export function TestCasesPage() {
                 return null;
               }
               const cluster = headlampClusterName(
-                testCase.spec.runnerClusterRef?.name ?? clusterByTopology.get(testCase.spec.topologyRef.name)
+                testCase.spec.runnerClusterRef?.name ?? clusterByDeployment.get(testCase.spec.deploymentRef.name)
               );
               return (
                 <ClusterResourceButton
@@ -142,7 +142,7 @@ export function TestCasesPage() {
         emptyMessage="No test cases yet."
       />
       {testCases.data?.length === 0 && (
-        <EmptyContent>Create a test case to drive load against one of your topologies.</EmptyContent>
+        <EmptyContent>Create a test case to drive load against one of your deployments.</EmptyContent>
       )}
     </SectionBox>
   );

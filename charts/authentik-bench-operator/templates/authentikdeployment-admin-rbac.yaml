@@ -1,19 +1,19 @@
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: {{ include "authentik-bench-operator.fullname" . }}-authentiktopology-admin-role
+  name: {{ include "authentik-bench-operator.fullname" . }}-authentikdeployment-admin-role
   labels:
   {{- include "authentik-bench-operator.labels" . | nindent 4 }}
 rules:
 - apiGroups:
   - bench.goauthentik.io
   resources:
-  - authentiktopologies
+  - authentikdeployments
   verbs:
   - '*'
 - apiGroups:
   - bench.goauthentik.io
   resources:
-  - authentiktopologies/status
+  - authentikdeployments/status
   verbs:
   - get

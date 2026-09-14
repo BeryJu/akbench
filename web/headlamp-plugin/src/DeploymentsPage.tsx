@@ -14,10 +14,10 @@
  * limitations under the License.
  */
 
-// List + create/edit views for AuthentikTopology, mirroring the deleted
-// web/frontend's /topologies pages. Headlamp's own generic CRD browser can
+// List + create/edit views for AuthentikDeployment, mirroring the deleted
+// web/frontend's /deployments pages. Headlamp's own generic CRD browser can
 // list/edit these too (as raw YAML), but this page is what actually exposes
-// the guided form (TopologyForm) the standalone UI had.
+// the guided form (DeploymentForm) the standalone UI had.
 import { EmptyContent, Link, SectionBox, SimpleTable } from '@kinvolk/headlamp-plugin/lib/CommonComponents';
 import { Alert, Button, Stack } from '@mui/material';
 import { useParams } from 'react-router-dom';
@@ -25,19 +25,19 @@ import { api, ApiError, headlampClusterName, MANAGEMENT_CLUSTER } from './api';
 import { ClusterResourceButton } from './ClusterResourceButton';
 import { PrimaryLinkButton } from './PrimaryLinkButton';
 import { StatusChip } from './StatusPopover';
-import { TopologyForm } from './TopologyForm';
+import { DeploymentForm } from './DeploymentForm';
 import { useResource } from './useResource';
 
-export function TopologiesPage() {
-  const topologies = useResource(() => api.topologies());
+export function DeploymentsPage() {
+  const deployments = useResource(() => api.deployments());
 
   async function remove(name: string) {
-    if (!window.confirm(`Delete topology "${name}"? This tears down its Helm release.`)) {
+    if (!window.confirm(`Delete deployment "${name}"? This tears down its Helm release.`)) {
       return;
     }
     try {
-      await api.deleteTopology(name);
-      topologies.reload();
+      await api.deleteDeployment(name);
+      deployments.reload();
     } catch (err) {
       window.alert(err instanceof ApiError ? err.message : String(err));
     }
@@ -45,46 +45,46 @@ export function TopologiesPage() {
 
   return (
     <SectionBox
-      title="Topologies"
+      title="Deployments"
       headerProps={{
-        actions: [<PrimaryLinkButton key="new" routeName="authentik-bench-topologies-new" label="New topology" />],
+        actions: [<PrimaryLinkButton key="new" routeName="authentik-bench-deployments-new" label="New deployment" />],
       }}
     >
-      {topologies.error && (
+      {deployments.error && (
         <Alert severity="error" sx={{ mb: 2 }}>
-          {topologies.error}
+          {deployments.error}
         </Alert>
       )}
       <SimpleTable
         columns={[
           {
             label: 'Name',
-            getter: topology => {
-              const cluster = headlampClusterName(topology.spec.clusterRef?.name);
+            getter: deployment => {
+              const cluster = headlampClusterName(deployment.spec.clusterRef?.name);
               return <Link
                   routeName="Namespace"
-                  params={{name: topology.spec.namespace}}
+                  params={{name: deployment.spec.namespace}}
                   activeCluster={cluster}>
-                    {topology.metadata.name}
+                    {deployment.metadata.name}
                 </Link>
             },
           },
-          { label: 'Target', getter: topology => topology.spec.targetName || topology.metadata.name },
-          { label: 'Cluster', getter: topology => topology.spec.clusterRef?.name ?? 'management' },
-          { label: 'Postgres', getter: topology => topology.spec.postgres.mode },
+          { label: 'Target', getter: deployment => deployment.spec.targetName || deployment.metadata.name },
+          { label: 'Cluster', getter: deployment => deployment.spec.clusterRef?.name ?? 'management' },
+          { label: 'Postgres', getter: deployment => deployment.spec.postgres.mode },
           {
             label: 'Status',
-            getter: topology => {
-              const cluster = headlampClusterName(topology.spec.clusterRef?.name);
-              const links = [{ label: 'Namespace', routeName: 'Namespace', params: { name: topology.spec.namespace }, activeCluster: cluster }];
+            getter: deployment => {
+              const cluster = headlampClusterName(deployment.spec.clusterRef?.name);
+              const links = [{ label: 'Namespace', routeName: 'Namespace', params: { name: deployment.spec.namespace }, activeCluster: cluster }];
               return (
                 <StatusChip
-                  kind="AuthentikTopology"
-                  name={topology.metadata.name}
-                  namespace={topology.metadata.namespace ?? 'default'}
+                  kind="AuthentikDeployment"
+                  name={deployment.metadata.name}
+                  namespace={deployment.metadata.namespace ?? 'default'}
                   cluster={MANAGEMENT_CLUSTER}
-                  phase={topology.status?.phase}
-                  conditions={topology.status?.conditions}
+                  phase={deployment.status?.phase}
+                  conditions={deployment.status?.conditions}
                   links={links}
                 />
               );
@@ -92,30 +92,30 @@ export function TopologiesPage() {
           },
           {
             label: 'Resources',
-            getter: topology => {
-              const cluster = headlampClusterName(topology.spec.clusterRef?.name);
+            getter: deployment => {
+              const cluster = headlampClusterName(deployment.spec.clusterRef?.name);
               return (
                 <Stack direction="row" spacing={1} flexWrap="wrap">
                   <ClusterResourceButton
                     kind="Deployment"
                     cluster={cluster}
-                    namespace={topology.spec.namespace}
-                    name={`${topology.metadata.name}-authentik-server`}
+                    namespace={deployment.spec.namespace}
+                    name={`${deployment.metadata.name}-authentik-server`}
                     label="Server"
                   />
                   <ClusterResourceButton
                     kind="Deployment"
                     cluster={cluster}
-                    namespace={topology.spec.namespace}
-                    name={`${topology.metadata.name}-authentik-worker`}
+                    namespace={deployment.spec.namespace}
+                    name={`${deployment.metadata.name}-authentik-worker`}
                     label="Worker"
                   />
-                  {topology.spec.postgres.mode === 'Embedded' && (
+                  {deployment.spec.postgres.mode === 'Embedded' && (
                     <ClusterResourceButton
                       kind="StatefulSet"
                       cluster={cluster}
-                      namespace={topology.spec.namespace}
-                      name={`${topology.metadata.name}-postgresql`}
+                      namespace={deployment.spec.namespace}
+                      name={`${deployment.metadata.name}-postgresql`}
                       label="Postgres"
                     />
                   )}
@@ -125,44 +125,44 @@ export function TopologiesPage() {
           },
           {
             label: '',
-            getter: topology => (
+            getter: deployment => (
               <>
-                <Link routeName="authentik-bench-topologies-edit" params={{ name: topology.metadata.name }}>
+                <Link routeName="authentik-bench-deployments-edit" params={{ name: deployment.metadata.name }}>
                   Edit
                 </Link>
-                <Button color="error" onClick={() => void remove(topology.metadata.name)}>
+                <Button color="error" onClick={() => void remove(deployment.metadata.name)}>
                   Delete
                 </Button>
               </>
             ),
           },
         ]}
-        data={topologies.data ?? []}
-        emptyMessage="No topologies yet."
+        data={deployments.data ?? []}
+        emptyMessage="No deployments yet."
       />
-      {topologies.data?.length === 0 && (
-        <EmptyContent>Create a topology to deploy an authentik install to benchmark.</EmptyContent>
+      {deployments.data?.length === 0 && (
+        <EmptyContent>Create a deployment to deploy an authentik install to benchmark.</EmptyContent>
       )}
     </SectionBox>
   );
 }
 
-export function TopologyCreatePage() {
-  return <TopologyForm />;
+export function DeploymentCreatePage() {
+  return <DeploymentForm />;
 }
 
-export function TopologyEditPage() {
+export function DeploymentEditPage() {
   const { name } = useParams<{ name: string }>();
-  const existing = useResource(() => api.topology(name), [name]);
+  const existing = useResource(() => api.deployment(name), [name]);
   if (existing.loading) {
     return null;
   }
   if (existing.error) {
     return (
-      <SectionBox title="Edit topology">
+      <SectionBox title="Edit deployment">
         <Alert severity="error">{existing.error}</Alert>
       </SectionBox>
     );
   }
-  return <TopologyForm existing={existing.data} />;
+  return <DeploymentForm existing={existing.data} />;
 }

@@ -16,7 +16,7 @@ limitations under the License.
 
 // Package multicluster resolves a bench.goauthentik.io clusterRef/
 // runnerClusterRef (a cluster.x-k8s.io Cluster name) to a live client for
-// that workload cluster, so AuthentikTopology/TestCase/TestRun can deploy
+// that workload cluster, so AuthentikDeployment/TestCase/TestRun can deploy
 // onto any Cluster API-provisioned cluster and not just the management
 // cluster the operator itself runs on.
 package multicluster

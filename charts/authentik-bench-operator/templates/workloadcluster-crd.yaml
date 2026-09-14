@@ -51,7 +51,7 @@ spec:
             description: |-
               WorkloadClusterSpec describes a Kubernetes cluster this operator asks
               Cluster API to provision through the selected infrastructure provider, so
-              AuthentikTopology/TestCase can target it via clusterRef instead of the
+              AuthentikDeployment/TestCase can target it via clusterRef instead of the
               management cluster.
             properties:
               controlPlane:
@@ -247,6 +247,15 @@ spec:
                 x-kubernetes-list-type: map
               controlPlaneReady:
                 type: boolean
+              grafanaURL:
+                description: |-
+                  GrafanaURL is where this cluster's own Grafana (installed by
+                  WorkloadClusterReconciler's ensureGrafana) is reachable *from the
+                  management cluster* - a node's InternalIP plus the fixed NodePort
+                  render.GrafanaNodePort exposes. cmd/apiserver's own reverse proxy
+                  (internal/api/grafana_proxy.go) connects to this to embed a
+                  dashboard in Headlamp's Grafana tab.
+                type: string
               infrastructureReady:
                 type: boolean
               kubeconfigSecretRef:
@@ -273,6 +282,16 @@ spec:
                 description: |-
                   phase mirrors the CAPI Cluster's own status.phase (Provisioning,
                   Provisioned, Deleting...).
+                type: string
+              prometheusURL:
+                description: |-
+                  PrometheusURL is where this cluster's own Prometheus (installed by
+                  WorkloadClusterReconciler's ensurePrometheus) is reachable *from the
+                  management cluster* - a node's InternalIP plus the fixed NodePort
+                  render.PrometheusNodePort exposes, not the cluster-relative DNS name
+                  k6 workloads push metrics to (that only resolves from inside this
+                  same cluster). cmd/apiserver reads this to query per-testid metrics
+                  without a central receiver.
                 type: string
             type: object
         required:

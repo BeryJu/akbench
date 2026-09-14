@@ -22,7 +22,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 )
 
-// PlacementMode decides how an AuthentikTopology's pods are scheduled, which
+// PlacementMode decides how an AuthentikDeployment's pods are scheduled, which
 // is the "alone on nodes vs shared nodes vs packed together" knob the
 // benchmark compares.
 // +kubebuilder:validation:Enum=Default;Dedicated;Packed
@@ -45,7 +45,7 @@ const (
 	PlacementPacked PlacementMode = "Packed"
 )
 
-// PlacementSpec controls pod scheduling for an AuthentikTopology's server and
+// PlacementSpec controls pod scheduling for an AuthentikDeployment's server and
 // worker pods.
 type PlacementSpec struct {
 	// mode selects Default (shared nodes) or Dedicated (one pod per node).
@@ -62,14 +62,14 @@ type PlacementSpec struct {
 	// +optional
 	Tolerations []corev1.Toleration `json:"tolerations,omitempty"`
 
-	// topologyKey is the anti-affinity topology key used in Dedicated mode.
+	// topologyKey is the anti-affinity deployment key used in Dedicated mode.
 	// +kubebuilder:default=kubernetes.io/hostname
 	// +optional
 	TopologyKey string `json:"topologyKey,omitempty"`
 }
 
 // PostgresMode selects which of the three benchmarked Postgres backends an
-// AuthentikTopology uses.
+// AuthentikDeployment uses.
 // +kubebuilder:validation:Enum=Embedded;CNPG;External
 type PostgresMode string
 
@@ -95,7 +95,7 @@ type EmbeddedPostgresSpec struct {
 }
 
 // CNPGPostgresSpec configures a CloudNativePG Cluster provisioned for this
-// topology.
+// deployment.
 type CNPGPostgresSpec struct {
 	// instances is the number of CNPG cluster instances (>1 for HA).
 	// +kubebuilder:validation:Minimum=1
@@ -177,7 +177,7 @@ type AuthentikSpec struct {
 }
 
 // ChartSpec pins the authentik Helm chart source used to install this
-// topology.
+// deployment.
 type ChartSpec struct {
 	// +kubebuilder:default="https://charts.goauthentik.io"
 	// +optional
@@ -186,11 +186,11 @@ type ChartSpec struct {
 	Version string `json:"version,omitempty"`
 }
 
-// AuthentikTopologySpec defines one benchmarkable authentik deployment shape:
+// AuthentikDeploymentSpec defines one benchmarkable authentik deployment shape:
 // which cluster it runs on, how many server/worker replicas, how its pods are
 // scheduled, and which of the three Postgres backends it uses.
-type AuthentikTopologySpec struct {
-	// clusterRef names a cluster.x-k8s.io/v1beta1 Cluster this topology is
+type AuthentikDeploymentSpec struct {
+	// clusterRef names a cluster.x-k8s.io/v1beta1 Cluster this deployment is
 	// deployed onto. Empty means the cluster the operator itself runs on.
 	// +optional
 	ClusterRef corev1.LocalObjectReference `json:"clusterRef,omitempty"`
@@ -201,7 +201,7 @@ type AuthentikTopologySpec struct {
 	// +optional
 	TargetName string `json:"targetName,omitempty"`
 
-	// namespace is the namespace this topology is installed into on the
+	// namespace is the namespace this deployment is installed into on the
 	// target cluster.
 	Namespace string `json:"namespace"`
 
@@ -220,8 +220,8 @@ type AuthentikTopologySpec struct {
 	Authentik AuthentikSpec `json:"authentik,omitempty"`
 }
 
-// AuthentikTopologyStatus defines the observed state of AuthentikTopology.
-type AuthentikTopologyStatus struct {
+// AuthentikDeploymentStatus defines the observed state of AuthentikDeployment.
+type AuthentikDeploymentStatus struct {
 	// conditions report Ready, PostgresReady and HelmReleaseReady.
 	// +listType=map
 	// +listMapKey=type
@@ -252,32 +252,32 @@ type AuthentikTopologyStatus struct {
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
 // +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=="Ready")].status`
 
-// AuthentikTopology is the Schema for the authentiktopologies API
-type AuthentikTopology struct {
+// AuthentikDeployment is the Schema for the authentikdeployments API
+type AuthentikDeployment struct {
 	metav1.TypeMeta `json:",inline"`
 
 	// +optional
 	metav1.ObjectMeta `json:"metadata,omitzero"`
 
 	// +required
-	Spec AuthentikTopologySpec `json:"spec"`
+	Spec AuthentikDeploymentSpec `json:"spec"`
 
 	// +optional
-	Status AuthentikTopologyStatus `json:"status,omitzero"`
+	Status AuthentikDeploymentStatus `json:"status,omitzero"`
 }
 
 // +kubebuilder:object:root=true
 
-// AuthentikTopologyList contains a list of AuthentikTopology
-type AuthentikTopologyList struct {
+// AuthentikDeploymentList contains a list of AuthentikDeployment
+type AuthentikDeploymentList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitzero"`
-	Items           []AuthentikTopology `json:"items"`
+	Items           []AuthentikDeployment `json:"items"`
 }
 
 func init() {
 	SchemeBuilder.Register(func(s *runtime.Scheme) error {
-		s.AddKnownTypes(SchemeGroupVersion, &AuthentikTopology{}, &AuthentikTopologyList{})
+		s.AddKnownTypes(SchemeGroupVersion, &AuthentikDeployment{}, &AuthentikDeploymentList{})
 		return nil
 	})
 }

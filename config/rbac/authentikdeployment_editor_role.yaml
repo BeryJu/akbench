@@ -11,12 +11,12 @@ metadata:
   labels:
     app.kubernetes.io/name: authentik-bench
     app.kubernetes.io/managed-by: kustomize
-  name: authentiktopology-editor-role
+  name: authentikdeployment-editor-role
 rules:
 - apiGroups:
   - bench.goauthentik.io
   resources:
-  - authentiktopologies
+  - authentikdeployments
   verbs:
   - create
   - delete
@@ -28,6 +28,6 @@ rules:
 - apiGroups:
   - bench.goauthentik.io
   resources:
-  - authentiktopologies/status
+  - authentikdeployments/status
   verbs:
   - get

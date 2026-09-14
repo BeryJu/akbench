@@ -9,10 +9,10 @@ import (
 	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
 )
 
-func exampleTopology() *benchv1alpha1.AuthentikTopology {
-	return &benchv1alpha1.AuthentikTopology{
+func exampleDeployment() *benchv1alpha1.AuthentikDeployment {
+	return &benchv1alpha1.AuthentikDeployment{
 		ObjectMeta: metav1.ObjectMeta{Name: "authentik-1"},
-		Spec: benchv1alpha1.AuthentikTopologySpec{
+		Spec: benchv1alpha1.AuthentikDeploymentSpec{
 			Namespace: "authentik-1",
 			Server:    benchv1alpha1.WorkloadSpec{Replicas: 2},
 			Worker:    benchv1alpha1.WorkloadSpec{Replicas: 1},
@@ -21,9 +21,9 @@ func exampleTopology() *benchv1alpha1.AuthentikTopology {
 	}
 }
 
-func decodeValues(t *testing.T, raw json.RawMessage) AuthentikTopologyHelmValues {
+func decodeValues(t *testing.T, raw json.RawMessage) AuthentikDeploymentHelmValues {
 	t.Helper()
-	var v AuthentikTopologyHelmValues
+	var v AuthentikDeploymentHelmValues
 	if err := json.Unmarshal(raw, &v); err != nil {
 		t.Fatalf("unmarshal values: %v", err)
 	}
@@ -31,7 +31,7 @@ func decodeValues(t *testing.T, raw json.RawMessage) AuthentikTopologyHelmValues
 }
 
 func TestHelmValuesEmbedded(t *testing.T) {
-	topo := exampleTopology()
+	topo := exampleDeployment()
 	raw, err := HelmValues(topo, "the-secret-key", &PostgresConnection{Password: "pw"}, "http://pyroscope.example:4040", "http://tempo.example:4318", false)
 	if err != nil {
 		t.Fatalf("HelmValues: %v", err)
@@ -91,11 +91,11 @@ func affinityOf(t *testing.T, w map[string]any) map[string]any {
 // TestHelmValuesDedicatedSetsServerWorkerAffinity guards that Dedicated mode
 // now renders server.affinity/worker.affinity directly (a required
 // anti-affinity term for this release's own pods, plus the
-// always-present cross-topology term) instead of the chart's own
+// always-present cross-deployment term) instead of the chart's own
 // global.affinity.podAntiAffinity preset, which server.affinity/
 // worker.affinity being set at all makes the chart skip entirely.
 func TestHelmValuesDedicatedSetsServerWorkerAffinity(t *testing.T) {
-	topo := exampleTopology()
+	topo := exampleDeployment()
 	topo.Spec.Placement = benchv1alpha1.PlacementSpec{Mode: benchv1alpha1.PlacementDedicated}
 	raw, err := HelmValues(topo, "secret", &PostgresConnection{Password: "pw"}, "http://pyroscope.example:4040", "http://tempo.example:4318", false)
 	if err != nil {
@@ -107,8 +107,8 @@ func TestHelmValuesDedicatedSetsServerWorkerAffinity(t *testing.T) {
 		t.Error("global.affinity must not be set any more - the chart's preset mechanism is no longer used")
 	}
 	additionalLabels, _ := values.Global["additionalLabels"].(map[string]any)
-	if additionalLabels["bench.goauthentik.io/topology"] != topo.Name {
-		t.Errorf("global.additionalLabels[topology] = %v, want %q", additionalLabels, topo.Name)
+	if additionalLabels["bench.goauthentik.io/deployment"] != topo.Name {
+		t.Errorf("global.additionalLabels[deployment] = %v, want %q", additionalLabels, topo.Name)
 	}
 	for _, name := range []string{"server", "worker"} {
 		w := values.Server
@@ -119,16 +119,16 @@ func TestHelmValuesDedicatedSetsServerWorkerAffinity(t *testing.T) {
 		podAntiAffinity, _ := decoded["podAntiAffinity"].(map[string]any)
 		terms, _ := podAntiAffinity["requiredDuringSchedulingIgnoredDuringExecution"].([]any)
 		if len(terms) != 2 {
-			t.Errorf("%s.affinity: got %d required anti-affinity terms, want 2 (cross-topology + own-release)", name, len(terms))
+			t.Errorf("%s.affinity: got %d required anti-affinity terms, want 2 (cross-deployment + own-release)", name, len(terms))
 		}
 	}
 }
 
 // TestHelmValuesPacked guards that Packed mode's own pack-together
-// affinity coexists with the always-present cross-topology anti-affinity
+// affinity coexists with the always-present cross-deployment anti-affinity
 // term in the same server.affinity/worker.affinity value.
 func TestHelmValuesPacked(t *testing.T) {
-	topo := exampleTopology()
+	topo := exampleDeployment()
 	topo.Spec.Placement = benchv1alpha1.PlacementSpec{Mode: benchv1alpha1.PlacementPacked}
 	raw, err := HelmValues(topo, "secret", &PostgresConnection{Password: "pw"}, "http://pyroscope.example:4040", "http://tempo.example:4318", false)
 	if err != nil {
@@ -145,18 +145,18 @@ func TestHelmValuesPacked(t *testing.T) {
 		podAntiAffinity, _ := decoded["podAntiAffinity"].(map[string]any)
 		terms, _ := podAntiAffinity["requiredDuringSchedulingIgnoredDuringExecution"].([]any)
 		if len(terms) != 1 {
-			t.Errorf("%s.affinity: got %d required anti-affinity terms, want 1 (cross-topology only)", name, len(terms))
+			t.Errorf("%s.affinity: got %d required anti-affinity terms, want 1 (cross-deployment only)", name, len(terms))
 		}
 	}
 }
 
-// TestHelmValuesEmbeddedPostgresGetsCrossTopologyAffinity guards that the
-// bundled postgresql subchart also gets the topology label and
-// cross-topology anti-affinity - it's part of a topology's own footprint
+// TestHelmValuesEmbeddedPostgresGetsCrossDeploymentAffinity guards that the
+// bundled postgresql subchart also gets the deployment label and
+// cross-deployment anti-affinity - it's part of a deployment's own footprint
 // just as much as server/worker, so it must never share a node with
-// another topology's pods either.
-func TestHelmValuesEmbeddedPostgresGetsCrossTopologyAffinity(t *testing.T) {
-	topo := exampleTopology()
+// another deployment's pods either.
+func TestHelmValuesEmbeddedPostgresGetsCrossDeploymentAffinity(t *testing.T) {
+	topo := exampleDeployment()
 	raw, err := HelmValues(topo, "secret", &PostgresConnection{Password: "pw"}, "http://pyroscope.example:4040", "http://tempo.example:4318", false)
 	if err != nil {
 		t.Fatalf("HelmValues: %v", err)
@@ -164,8 +164,8 @@ func TestHelmValuesEmbeddedPostgresGetsCrossTopologyAffinity(t *testing.T) {
 	values := decodeValues(t, raw.Raw)
 
 	commonLabels, _ := values.Postgres["commonLabels"].(map[string]any)
-	if commonLabels["bench.goauthentik.io/topology"] != topo.Name {
-		t.Errorf("postgresql.commonLabels[topology] = %v, want %q", commonLabels, topo.Name)
+	if commonLabels["bench.goauthentik.io/deployment"] != topo.Name {
+		t.Errorf("postgresql.commonLabels[deployment] = %v, want %q", commonLabels, topo.Name)
 	}
 	primary, _ := values.Postgres["primary"].(map[string]any)
 	decoded := affinityOf(t, primary)
@@ -177,7 +177,7 @@ func TestHelmValuesEmbeddedPostgresGetsCrossTopologyAffinity(t *testing.T) {
 }
 
 func TestHelmValuesExternalDisablesBundledPostgres(t *testing.T) {
-	topo := exampleTopology()
+	topo := exampleDeployment()
 	topo.Spec.Postgres = benchv1alpha1.PostgresSpec{
 		Mode:     benchv1alpha1.PostgresExternal,
 		External: &benchv1alpha1.ExternalPostgresSpec{},
@@ -203,7 +203,7 @@ func TestHelmValuesExternalDisablesBundledPostgres(t *testing.T) {
 }
 
 func TestHelmReleaseUsesExplicitReleaseName(t *testing.T) {
-	topo := exampleTopology()
+	topo := exampleDeployment()
 	raw, err := HelmValues(topo, "secret", nil, "http://pyroscope.example:4040", "http://tempo.example:4318", false)
 	if err != nil {
 		t.Fatalf("HelmValues: %v", err)
@@ -246,7 +246,7 @@ func envValue(t *testing.T, w map[string]any, name string) (string, bool) {
 // workloads, unconditionally (no separate "pyroscope enabled" toggle exists,
 // matching the Ansible harness this project replaces).
 func TestHelmValuesPyroscopeAlwaysSet(t *testing.T) {
-	topo := exampleTopology()
+	topo := exampleDeployment()
 	raw, err := HelmValues(topo, "secret", &PostgresConnection{Password: "pw"}, "http://pyroscope.example:4040", "http://tempo.example:4318", false)
 	if err != nil {
 		t.Fatalf("HelmValues: %v", err)
@@ -268,7 +268,7 @@ func TestHelmValuesPyroscopeAlwaysSet(t *testing.T) {
 // authentik_error_reporting %} guard in the Ansible harness this project
 // replaces.
 func TestHelmValuesTracingOnlyWhenErrorReportingEnabled(t *testing.T) {
-	topo := exampleTopology()
+	topo := exampleDeployment()
 	if _, ok := envValue(t, mustValues(t, topo).Server, "AUTHENTIK_ERROR_REPORTING__OTEL_ENDPOINT"); ok {
 		t.Error("AUTHENTIK_ERROR_REPORTING__OTEL_ENDPOINT must not be set when errorReporting.enabled is false")
 	}
@@ -281,7 +281,7 @@ func TestHelmValuesTracingOnlyWhenErrorReportingEnabled(t *testing.T) {
 		t.Errorf("authentik.error_reporting.enabled = %v, want true", er["enabled"])
 	}
 	if er["environment"] != "authentik-1" {
-		t.Errorf("authentik.error_reporting.environment = %v, want the topology's target name", er["environment"])
+		t.Errorf("authentik.error_reporting.environment = %v, want the deployment's target name", er["environment"])
 	}
 	for name, w := range map[string]map[string]any{"server": values.Server, "worker": values.Worker} {
 		if got, ok := envValue(t, w, "AUTHENTIK_ERROR_REPORTING__OTEL_ENDPOINT"); !ok || got != "http://tempo.example:4318" {
@@ -293,7 +293,7 @@ func TestHelmValuesTracingOnlyWhenErrorReportingEnabled(t *testing.T) {
 	}
 }
 
-func mustValues(t *testing.T, topo *benchv1alpha1.AuthentikTopology) AuthentikTopologyHelmValues {
+func mustValues(t *testing.T, topo *benchv1alpha1.AuthentikDeployment) AuthentikDeploymentHelmValues {
 	t.Helper()
 	raw, err := HelmValues(topo, "secret", &PostgresConnection{Password: "pw"}, "http://pyroscope.example:4040", "http://tempo.example:4318", false)
 	if err != nil {
@@ -306,10 +306,10 @@ func mustValues(t *testing.T, topo *benchv1alpha1.AuthentikTopology) AuthentikTo
 // live: a freshly provisioned csi-incus block volume is root:root-owned
 // (standard mkfs default), so the authentik container's non-root user
 // (uid/gid 1000) can't write into it without an explicit fsGroup - without
-// this, AuthentikTopologyReconciler.ApplyBlueprint's exec fails with
+// this, AuthentikDeploymentReconciler.ApplyBlueprint's exec fails with
 // "Permission denied" writing the fixtures blueprint.
 func TestHelmValuesBlueprintVolumeSetsFsGroup(t *testing.T) {
-	topo := exampleTopology()
+	topo := exampleDeployment()
 	raw, err := HelmValues(topo, "secret", &PostgresConnection{Password: "pw"}, "http://pyroscope.example:4040", "http://tempo.example:4318", true)
 	if err != nil {
 		t.Fatalf("HelmValues: %v", err)

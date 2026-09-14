@@ -82,7 +82,7 @@ var _ = BeforeSuite(func() {
 	testEnv = &envtest.Environment{
 		CRDDirectoryPaths: []string{
 			filepath.Join("..", "..", "config", "crd", "bases"),
-			// Flux's HelmRelease/HelmRepository CRDs (AuthentikTopologyReconciler),
+			// Flux's HelmRelease/HelmRepository CRDs (AuthentikDeploymentReconciler),
 			// Cluster API core/kubeadm bootstrap+control-plane CRDs, and the Incus
 			// infrastructure provider's LXCCluster/LXCMachineTemplate CRDs
 			// (WorkloadClusterReconciler) - envtest's apiserver needs to know

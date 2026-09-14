@@ -61,7 +61,7 @@ func envOrDefault(key, def string) string {
 
 // TestCaseReconciler reconciles a TestCase object.
 //
-// The k6 workload runs on spec.runnerClusterRef if set, else the topology's
+// The k6 workload runs on spec.runnerClusterRef if set, else the deployment's
 // own spec.clusterRef, else the management cluster - resolved fresh every
 // reconcile via Tracker, since a workload cluster's reachability can change
 // over time.
@@ -75,7 +75,7 @@ type TestCaseReconciler struct {
 // +kubebuilder:rbac:groups=bench.goauthentik.io,resources=testcases,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=bench.goauthentik.io,resources=testcases/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=bench.goauthentik.io,resources=testcases/finalizers,verbs=update
-// +kubebuilder:rbac:groups=bench.goauthentik.io,resources=authentiktopologies,verbs=get;list;watch
+// +kubebuilder:rbac:groups=bench.goauthentik.io,resources=authentikdeployments,verbs=get;list;watch
 // +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=core,resources=configmaps,verbs=get;list;watch;create;update;patch;delete
 
@@ -97,28 +97,28 @@ func (r *TestCaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		}
 	}
 
-	topo, targetName, host, port, err := resolveReadyTopology(ctx, r.Client, tc.Namespace, tc.Spec.TopologyRef.Name)
+	topo, targetName, host, port, err := resolveReadyDeployment(ctx, r.Client, tc.Namespace, tc.Spec.DeploymentRef.Name)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
-			setCondition(r.Recorder, &tc, &tc.Status.Conditions, tc.Generation, benchv1alpha1.ConditionTopologyReady, metav1.ConditionFalse,
-				benchv1alpha1.ReasonDependencyNotReady, fmt.Sprintf("AuthentikTopology %q not found", tc.Spec.TopologyRef.Name))
+			setCondition(r.Recorder, &tc, &tc.Status.Conditions, tc.Generation, benchv1alpha1.ConditionDeploymentReady, metav1.ConditionFalse,
+				benchv1alpha1.ReasonDependencyNotReady, fmt.Sprintf("AuthentikDeployment %q not found", tc.Spec.DeploymentRef.Name))
 			setCondition(r.Recorder, &tc, &tc.Status.Conditions, tc.Generation, benchv1alpha1.ConditionReady, metav1.ConditionFalse,
-				benchv1alpha1.ReasonDependencyNotReady, "waiting for topology")
+				benchv1alpha1.ReasonDependencyNotReady, "waiting for deployment")
 			tc.Status.Phase = benchv1alpha1.PhaseFor(tc.Status.Conditions)
 			return ctrl.Result{}, r.Status().Update(ctx, &tc)
 		}
-		if errors.Is(err, errTopologyNotReady) {
-			setCondition(r.Recorder, &tc, &tc.Status.Conditions, tc.Generation, benchv1alpha1.ConditionTopologyReady, metav1.ConditionFalse,
-				benchv1alpha1.ReasonDependencyNotReady, "AuthentikTopology is not Ready yet")
+		if errors.Is(err, errDeploymentNotReady) {
+			setCondition(r.Recorder, &tc, &tc.Status.Conditions, tc.Generation, benchv1alpha1.ConditionDeploymentReady, metav1.ConditionFalse,
+				benchv1alpha1.ReasonDependencyNotReady, "AuthentikDeployment is not Ready yet")
 			setCondition(r.Recorder, &tc, &tc.Status.Conditions, tc.Generation, benchv1alpha1.ConditionReady, metav1.ConditionFalse,
-				benchv1alpha1.ReasonDependencyNotReady, "waiting for topology")
+				benchv1alpha1.ReasonDependencyNotReady, "waiting for deployment")
 			tc.Status.Phase = benchv1alpha1.PhaseFor(tc.Status.Conditions)
 			return ctrl.Result{}, r.Status().Update(ctx, &tc)
 		}
-		return ctrl.Result{}, fmt.Errorf("resolve topology: %w", err)
+		return ctrl.Result{}, fmt.Errorf("resolve deployment: %w", err)
 	}
-	setCondition(r.Recorder, &tc, &tc.Status.Conditions, tc.Generation, benchv1alpha1.ConditionTopologyReady, metav1.ConditionTrue,
-		benchv1alpha1.ReasonReady, "topology is Ready")
+	setCondition(r.Recorder, &tc, &tc.Status.Conditions, tc.Generation, benchv1alpha1.ConditionDeploymentReady, metav1.ConditionTrue,
+		benchv1alpha1.ReasonReady, "deployment is Ready")
 
 	rc, remote, err := resolveRunnerClient(ctx, r.Tracker, r.Client, tc.Namespace, tc.Spec.RunnerClusterRef, topo.Spec.ClusterRef)
 	if err != nil {
@@ -195,12 +195,12 @@ func (r *TestCaseReconciler) reconcileDelete(ctx context.Context, tc *benchv1alp
 
 	// Resolve the runner cluster the same way Reconcile does, so a Burn
 	// Deployment on a remote cluster gets cleaned up there too. If the
-	// topology or its cluster is already gone, skip remote cleanup rather
+	// deployment or its cluster is already gone, skip remote cleanup rather
 	// than block finalizer removal forever on a cluster that may never come
 	// back.
 	rc := r.Client
-	var topo benchv1alpha1.AuthentikTopology
-	if err := r.Get(ctx, types.NamespacedName{Name: tc.Spec.TopologyRef.Name, Namespace: tc.Namespace}, &topo); err == nil {
+	var topo benchv1alpha1.AuthentikDeployment
+	if err := r.Get(ctx, types.NamespacedName{Name: tc.Spec.DeploymentRef.Name, Namespace: tc.Namespace}, &topo); err == nil {
 		resolved, _, err := resolveRunnerClient(ctx, r.Tracker, r.Client, tc.Namespace, tc.Spec.RunnerClusterRef, topo.Spec.ClusterRef)
 		if err != nil {
 			logf.FromContext(ctx).Info("runner cluster unreachable during delete, skipping remote cleanup", "error", err.Error())
@@ -315,7 +315,7 @@ func findCondition(conditions []metav1.Condition, condType string) *metav1.Condi
 	return nil
 }
 
-// splitServiceEndpoint parses an AuthentikTopology's "host:port" status
+// splitServiceEndpoint parses an AuthentikDeployment's "host:port" status
 // field.
 func splitServiceEndpoint(endpoint string) (string, int32, error) {
 	host, portStr, found := strings.Cut(endpoint, ":")
@@ -336,28 +336,28 @@ func (r *TestCaseReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&appsv1.Deployment{}).
 		Owns(&corev1.ConfigMap{}).
 		// Without this, a TestCase left in DependencyNotReady only
-		// re-checks its topology on its own next unrelated reconcile (a
+		// re-checks its deployment on its own next unrelated reconcile (a
 		// spec edit, an owned object changing, or the informer's resync
-		// period) - the topology later becoming Ready doesn't trigger
+		// period) - the deployment later becoming Ready doesn't trigger
 		// anything on its own, so the stale condition can sit for a long
 		// time even though the real dependency is satisfied.
-		Watches(&benchv1alpha1.AuthentikTopology{}, handler.EnqueueRequestsFromMapFunc(r.testCasesForTopology)).
+		Watches(&benchv1alpha1.AuthentikDeployment{}, handler.EnqueueRequestsFromMapFunc(r.testCasesForDeployment)).
 		Named("testcase").
 		Complete(r)
 }
 
-// testCasesForTopology maps an AuthentikTopology change to every TestCase in
+// testCasesForDeployment maps an AuthentikDeployment change to every TestCase in
 // the same namespace referencing it, so its controller re-checks readiness
-// as soon as the topology's own status changes instead of waiting for an
+// as soon as the deployment's own status changes instead of waiting for an
 // unrelated trigger.
-func (r *TestCaseReconciler) testCasesForTopology(ctx context.Context, topo client.Object) []reconcile.Request {
+func (r *TestCaseReconciler) testCasesForDeployment(ctx context.Context, topo client.Object) []reconcile.Request {
 	var list benchv1alpha1.TestCaseList
 	if err := r.List(ctx, &list, client.InNamespace(topo.GetNamespace())); err != nil {
 		return nil
 	}
 	var reqs []reconcile.Request
 	for _, tc := range list.Items {
-		if tc.Spec.TopologyRef.Name == topo.GetName() {
+		if tc.Spec.DeploymentRef.Name == topo.GetName() {
 			reqs = append(reqs, reconcile.Request{NamespacedName: types.NamespacedName{Name: tc.Name, Namespace: tc.Namespace}})
 		}
 	}

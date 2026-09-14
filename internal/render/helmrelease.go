@@ -16,7 +16,7 @@ import (
 	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
 )
 
-// HelmRepositoryName is shared across every AuthentikTopology, since they all
+// HelmRepositoryName is shared across every AuthentikDeployment, since they all
 // install from the same chart repository.
 const HelmRepositoryName = "authentik"
 
@@ -38,7 +38,7 @@ const defaultChartRepo = "https://charts.goauthentik.io"
 
 // HelmRepository returns the (singleton, namespace-scoped) HelmRepository
 // pointing at the authentik chart repo. Callers apply it once per namespace
-// and share it across topologies.
+// and share it across deployments.
 func HelmRepository(namespace string, spec benchv1alpha1.ChartSpec) *sourcev1.HelmRepository {
 	url := spec.Repo
 	if url == "" {
@@ -60,10 +60,10 @@ const helmRepoInterval = 10 * time.Minute
 
 const helmInstallTimeout = 15 * time.Minute
 
-// AuthentikTopologyHelmValues is what AuthentikTopologyHelmRelease renders
+// AuthentikDeploymentHelmValues is what AuthentikDeploymentHelmRelease renders
 // into spec.values. Exported so unit/contract tests can assert on the
 // concrete shape without re-parsing JSON.
-type AuthentikTopologyHelmValues struct {
+type AuthentikDeploymentHelmValues struct {
 	Global    map[string]any `json:"global,omitempty"`
 	Server    map[string]any `json:"server"`
 	Worker    map[string]any `json:"worker"`
@@ -71,7 +71,7 @@ type AuthentikTopologyHelmValues struct {
 	Postgres  map[string]any `json:"postgresql"`
 }
 
-// HelmValues builds the authentik chart values for a topology, per the
+// HelmValues builds the authentik chart values for a deployment, per the
 // chart's actual schema (charts.goauthentik.io/authentik, values.yaml):
 // global.{image,affinity}, server/worker.{replicas,resources,nodeSelector,
 // tolerations}, authentik.{secret_key,log_level,error_reporting,
@@ -86,7 +86,7 @@ type AuthentikTopologyHelmValues struct {
 // auth.password so both sides agree on the same value); for CNPG/External
 // modes the full connection is set and the bundled subchart stays disabled.
 // pyroscopeHost/tracingEndpoint are the caller's already-defaulted-or-
-// overridden values (see AuthentikTopologyReconciler's
+// overridden values (see AuthentikDeploymentReconciler's
 // defaultPyroscopeHost/defaultTracingEndpoint) - neither has a values.yaml
 // hook in the chart (verified against the chart's actual values.yaml: no
 // pyroscope key at all, and error_reporting only has enabled/environment/
@@ -94,7 +94,7 @@ type AuthentikTopologyHelmValues struct {
 // AUTHENTIK_* env vars, the same names the Ansible harness this project
 // replaces used (roles/authentik/templates/env.j2).
 // withBlueprintVolume, if true, mounts a PVC (BlueprintPVCName) into the
-// server pod at BlueprintMountPath so AuthentikTopologyReconciler's
+// server pod at BlueprintMountPath so AuthentikDeploymentReconciler's
 // ApplyBlueprint can write a fixtures blueprint into it and exec
 // `ak apply_blueprint` against it once the release is Ready. A volume at
 // all (rather than exec writing straight into the image's own filesystem)
@@ -105,9 +105,9 @@ type AuthentikTopologyHelmValues struct {
 // live). A PVC rather than a ConfigMap volume specifically because a
 // benchmark-scale blueprint (thousands of synthetic users) can exceed a
 // ConfigMap's ~1MiB etcd-backed size limit.
-func HelmValues(t *benchv1alpha1.AuthentikTopology, secretKey string, pgConn *PostgresConnection, pyroscopeHost, tracingEndpoint string, withBlueprintVolume bool) (*apiextensionsv1.JSON, error) {
+func HelmValues(t *benchv1alpha1.AuthentikDeployment, secretKey string, pgConn *PostgresConnection, pyroscopeHost, tracingEndpoint string, withBlueprintVolume bool) (*apiextensionsv1.JSON, error) {
 	embedded := t.Spec.Postgres.Mode == benchv1alpha1.PostgresEmbedded
-	values := AuthentikTopologyHelmValues{
+	values := AuthentikDeploymentHelmValues{
 		Server: map[string]any{
 			valuesKeyReplicas: t.Spec.Server.Replicas,
 		},
@@ -135,16 +135,16 @@ func HelmValues(t *benchv1alpha1.AuthentikTopology, secretKey string, pgConn *Po
 		// $podLabels), and primary.affinity is the same
 		// mutually-exclusive-with-its-own-preset raw override server.affinity/
 		// worker.affinity is - confirmed against that subchart's own
-		// templates. Only the cross-topology term is needed here: embedded
+		// templates. Only the cross-deployment term is needed here: embedded
 		// mode is always a single instance, so there's no intra-postgres
 		// spreading/packing to replicate the way ServerWorkerAffinity does
 		// for Dedicated/Packed.
-		values.Postgres["commonLabels"] = TopologyLabels(t.Name)
+		values.Postgres["commonLabels"] = DeploymentLabels(t.Name)
 		values.Postgres["primary"] = map[string]any{
 			"affinity": &corev1.Affinity{
 				PodAntiAffinity: &corev1.PodAntiAffinity{
 					RequiredDuringSchedulingIgnoredDuringExecution: []corev1.PodAffinityTerm{
-						crossTopologyAntiAffinityTerm(t.Name),
+						crossDeploymentAntiAffinityTerm(t.Name),
 					},
 				},
 			},
@@ -156,14 +156,14 @@ func HelmValues(t *benchv1alpha1.AuthentikTopology, secretKey string, pgConn *Po
 		// (authentik.labels, used at server/worker's
 		// template.metadata.labels - confirmed against the chart's own
 		// templates/{server,worker}/deployment.yaml), which is what lets
-		// ServerWorkerAffinity's cross-topology anti-affinity term
-		// (applyPlacement below) find these pods from another topology's own
+		// ServerWorkerAffinity's cross-deployment anti-affinity term
+		// (applyPlacement below) find these pods from another deployment's own
 		// affinity rule. Replaces this value's former use for
 		// global.affinity.podAntiAffinity (the chart's own preset
 		// mechanism) - applyPlacement now renders server.affinity/
 		// worker.affinity directly for every mode instead (see
 		// ServerWorkerAffinity's doc comment for why the two can't be mixed).
-		"additionalLabels": TopologyLabels(t.Name),
+		"additionalLabels": DeploymentLabels(t.Name),
 	}
 	if img := t.Spec.Authentik.Image; img != "" {
 		values.Global["image"] = map[string]any{
@@ -193,8 +193,8 @@ func HelmValues(t *benchv1alpha1.AuthentikTopology, secretKey string, pgConn *Po
 	if t.Spec.Authentik.ErrorReporting.Enabled {
 		values.Authentik["error_reporting"] = map[string]any{
 			"enabled": true,
-			// deployment.environment carries this topology's target name, so
-			// spans from two topologies sharing one Tempo can be told apart.
+			// deployment.environment carries this deployment's target name, so
+			// spans from two deployments sharing one Tempo can be told apart.
 			"environment": targetName,
 		}
 		sampleRate := t.Spec.Authentik.ErrorReporting.SampleRate
@@ -217,7 +217,7 @@ func HelmValues(t *benchv1alpha1.AuthentikTopology, secretKey string, pgConn *Po
 			{valuesKeyName: volumeName, "persistentVolumeClaim": map[string]any{"claimName": BlueprintPVCName(t)}},
 		}
 		values.Server["volumeMounts"] = []map[string]any{
-			// Not read-only: AuthentikTopologyReconciler writes the blueprint
+			// Not read-only: AuthentikDeploymentReconciler writes the blueprint
 			// file into this mount itself (see ApplyBlueprint), rather than
 			// the content coming from a mounted ConfigMap - a benchmark-scale
 			// fixture set (thousands of synthetic users) can exceed a
@@ -247,7 +247,7 @@ func HelmValues(t *benchv1alpha1.AuthentikTopology, secretKey string, pgConn *Po
 			w["tolerations"] = tol
 		}
 		// Always set, not just in Packed mode: ServerWorkerAffinity now
-		// always includes the cross-topology anti-affinity term, on top of
+		// always includes the cross-deployment anti-affinity term, on top of
 		// whatever (if anything) the placement mode itself adds.
 		w["affinity"] = ServerWorkerAffinity(t.Spec.Placement, HelmReleaseName(t), t.Name)
 	}
@@ -291,10 +291,10 @@ type PostgresConnection struct {
 	Password string
 }
 
-// HelmReleaseName is deterministic from the topology name, so the operator
+// HelmReleaseName is deterministic from the deployment name, so the operator
 // can look it up without storing it, though it's still recorded in
 // status.helmReleaseRef for clarity.
-func HelmReleaseName(t *benchv1alpha1.AuthentikTopology) string {
+func HelmReleaseName(t *benchv1alpha1.AuthentikDeployment) string {
 	return t.Name
 }
 
@@ -304,21 +304,21 @@ func HelmReleaseName(t *benchv1alpha1.AuthentikTopology) string {
 // "/blueprints"), since ak apply_blueprint rejects any path outside it.
 const BlueprintMountPath = "/blueprints/custom"
 
-// BlueprintFileName is the file AuthentikTopologyReconciler.ApplyBlueprint
+// BlueprintFileName is the file AuthentikDeploymentReconciler.ApplyBlueprint
 // writes the blueprint content into, under BlueprintMountPath.
 const BlueprintFileName = "bench-fixtures.yaml"
 
-// BlueprintPVCName is deterministic from the topology name, mirroring
+// BlueprintPVCName is deterministic from the deployment name, mirroring
 // HelmReleaseName, so the operator can look it up without storing it.
-func BlueprintPVCName(t *benchv1alpha1.AuthentikTopology) string {
+func BlueprintPVCName(t *benchv1alpha1.AuthentikDeployment) string {
 	return t.Name + "-bench-fixtures"
 }
 
 // BlueprintPVC is the (small - a benchmark-scale blueprint is at most a few
-// MB of YAML) PVC AuthentikTopologyReconciler applies onto the runner
+// MB of YAML) PVC AuthentikDeploymentReconciler applies onto the runner
 // cluster before installing the chart, so the server pod has somewhere
 // writable to receive the fixtures blueprint ApplyBlueprint execs in.
-func BlueprintPVC(t *benchv1alpha1.AuthentikTopology) *corev1.PersistentVolumeClaim {
+func BlueprintPVC(t *benchv1alpha1.AuthentikDeployment) *corev1.PersistentVolumeClaim {
 	return &corev1.PersistentVolumeClaim{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      BlueprintPVCName(t),
@@ -334,11 +334,11 @@ func BlueprintPVC(t *benchv1alpha1.AuthentikTopology) *corev1.PersistentVolumeCl
 }
 
 // HelmRelease builds the Flux HelmRelease that installs the authentik chart
-// for this topology. kubeConfigSecretName is empty for a topology on the
+// for this deployment. kubeConfigSecretName is empty for a deployment on the
 // management cluster itself (M1-M3); from M4 on it names the
 // "<clusterRef>-kubeconfig" Secret CAPI produces, so Flux's helm-controller
 // installs remotely.
-func HelmRelease(t *benchv1alpha1.AuthentikTopology, kubeConfigSecretName string, values *apiextensionsv1.JSON) *helmv2.HelmRelease {
+func HelmRelease(t *benchv1alpha1.AuthentikDeployment, kubeConfigSecretName string, values *apiextensionsv1.JSON) *helmv2.HelmRelease {
 	version := t.Spec.Chart.Version
 	if version == "" {
 		version = "*"
@@ -392,6 +392,6 @@ func HelmRelease(t *benchv1alpha1.AuthentikTopology, kubeConfigSecretName string
 // chart's server.service.servicePortHttp (default 80). Confirmed against a
 // live install of chart version 2026.8.0 - the chart's fullname template
 // always includes "-authentik-", it isn't just the release name.
-func ServiceEndpoint(t *benchv1alpha1.AuthentikTopology) string {
+func ServiceEndpoint(t *benchv1alpha1.AuthentikDeployment) string {
 	return fmt.Sprintf("%s-authentik-server.%s.svc.cluster.local:80", HelmReleaseName(t), t.Spec.Namespace)
 }

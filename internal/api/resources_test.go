@@ -33,12 +33,12 @@ func TestAuthentication(t *testing.T) {
 
 	t.Run("rejects a request with no token", func(t *testing.T) {
 		rec := httptest.NewRecorder()
-		s.Router().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/topologies", nil))
+		s.Router().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/deployments", nil))
 		requireStatus(t, rec, http.StatusUnauthorized)
 	})
 
 	t.Run("rejects a wrong token", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/api/v1/topologies", nil)
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/deployments", nil)
 		req.Header.Set("Authorization", "Bearer nope")
 		rec := httptest.NewRecorder()
 		s.Router().ServeHTTP(rec, req)
@@ -52,11 +52,11 @@ func TestAuthentication(t *testing.T) {
 	})
 }
 
-func TestTopologyCRUD(t *testing.T) {
+func TestDeploymentCRUD(t *testing.T) {
 	s, c := newServer(t, Config{})
 
 	created := decodeBody[map[string]any](t, func() *httptest.ResponseRecorder {
-		rec := do(t, s, http.MethodPost, "/api/v1/topologies", map[string]any{
+		rec := do(t, s, http.MethodPost, "/api/v1/deployments", map[string]any{
 			"metadata": map[string]any{"name": "single-node"},
 			"spec": map[string]any{
 				"namespace": "ak-single-node",
@@ -68,21 +68,21 @@ func TestTopologyCRUD(t *testing.T) {
 		requireStatus(t, rec, http.StatusCreated)
 		return rec
 	}())
-	if created["kind"] != "AuthentikTopology" {
+	if created["kind"] != "AuthentikDeployment" {
 		t.Fatalf("created object has kind %v", created["kind"])
 	}
 
-	var stored benchv1alpha1.AuthentikTopology
+	var stored benchv1alpha1.AuthentikDeployment
 	key := types.NamespacedName{Name: "single-node", Namespace: testNamespace}
 	if err := c.Get(context.Background(), key, &stored); err != nil {
-		t.Fatalf("topology was not created: %v", err)
+		t.Fatalf("deployment was not created: %v", err)
 	}
 	if stored.Spec.Server.Replicas != 2 {
 		t.Fatalf("got %d server replicas, want 2", stored.Spec.Server.Replicas)
 	}
 
 	t.Run("list returns it", func(t *testing.T) {
-		rec := do(t, s, http.MethodGet, "/api/v1/topologies", nil)
+		rec := do(t, s, http.MethodGet, "/api/v1/deployments", nil)
 		requireStatus(t, rec, http.StatusOK)
 		body := decodeBody[struct {
 			Items []map[string]any `json:"items"`
@@ -93,7 +93,7 @@ func TestTopologyCRUD(t *testing.T) {
 	})
 
 	t.Run("put replaces the spec", func(t *testing.T) {
-		rec := do(t, s, http.MethodPut, "/api/v1/topologies/single-node", map[string]any{
+		rec := do(t, s, http.MethodPut, "/api/v1/deployments/single-node", map[string]any{
 			"spec": map[string]any{
 				"namespace": "ak-single-node",
 				"server":    map[string]any{"replicas": 5},
@@ -103,7 +103,7 @@ func TestTopologyCRUD(t *testing.T) {
 		})
 		requireStatus(t, rec, http.StatusOK)
 
-		var updated benchv1alpha1.AuthentikTopology
+		var updated benchv1alpha1.AuthentikDeployment
 		if err := c.Get(context.Background(), key, &updated); err != nil {
 			t.Fatalf("get after update: %v", err)
 		}
@@ -116,10 +116,10 @@ func TestTopologyCRUD(t *testing.T) {
 	})
 
 	t.Run("delete removes it", func(t *testing.T) {
-		rec := do(t, s, http.MethodDelete, "/api/v1/topologies/single-node", nil)
+		rec := do(t, s, http.MethodDelete, "/api/v1/deployments/single-node", nil)
 		requireStatus(t, rec, http.StatusNoContent)
 
-		var gone benchv1alpha1.AuthentikTopology
+		var gone benchv1alpha1.AuthentikDeployment
 		err := c.Get(context.Background(), key, &gone)
 		if !apierrors.IsNotFound(err) {
 			t.Fatalf("got error %v, want NotFound", err)
@@ -131,7 +131,7 @@ func TestTopologyCRUD(t *testing.T) {
 // be able to fake readiness the operator never reported.
 func TestCreateIgnoresSubmittedStatus(t *testing.T) {
 	s, c := newServer(t, Config{})
-	rec := do(t, s, http.MethodPost, "/api/v1/topologies", map[string]any{
+	rec := do(t, s, http.MethodPost, "/api/v1/deployments", map[string]any{
 		"metadata": map[string]any{"name": "faked", "namespace": "somewhere-else"},
 		"spec": map[string]any{
 			"namespace": "ak-faked",
@@ -143,10 +143,10 @@ func TestCreateIgnoresSubmittedStatus(t *testing.T) {
 	})
 	requireStatus(t, rec, http.StatusCreated)
 
-	var stored benchv1alpha1.AuthentikTopology
+	var stored benchv1alpha1.AuthentikDeployment
 	key := types.NamespacedName{Name: "faked", Namespace: testNamespace}
 	if err := c.Get(context.Background(), key, &stored); err != nil {
-		t.Fatalf("topology was not created in the server's namespace: %v", err)
+		t.Fatalf("deployment was not created in the server's namespace: %v", err)
 	}
 	if stored.Status.ServiceEndpoint != "" {
 		t.Fatalf("submitted status was persisted: %q", stored.Status.ServiceEndpoint)
@@ -154,8 +154,8 @@ func TestCreateIgnoresSubmittedStatus(t *testing.T) {
 }
 
 func TestGetStatusSubresource(t *testing.T) {
-	s, _ := newServer(t, Config{}, sampleTopology("ready-topo"))
-	rec := do(t, s, http.MethodGet, "/api/v1/topologies/ready-topo/status", nil)
+	s, _ := newServer(t, Config{}, sampleDeployment("ready-topo"))
+	rec := do(t, s, http.MethodGet, "/api/v1/deployments/ready-topo/status", nil)
 	requireStatus(t, rec, http.StatusOK)
 
 	status := decodeBody[map[string]any](t, rec)

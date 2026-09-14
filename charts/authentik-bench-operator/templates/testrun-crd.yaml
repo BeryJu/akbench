@@ -186,6 +186,21 @@ spec:
                     description: burnDuration caps a Burn run - effectively unlimited
                       by default.
                     type: string
+                  deploymentRef:
+                    description: deploymentRef names the AuthentikDeployment this test
+                      drives.
+                    properties:
+                      name:
+                        default: ""
+                        description: |-
+                          Name of the referent.
+                          This field is effectively required, but due to backwards compatibility is
+                          allowed to be empty. Instances of this type with an empty value here are
+                          almost certainly wrong.
+                          More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                        type: string
+                    type: object
+                    x-kubernetes-map-type: atomic
                   extraTags:
                     additionalProperties:
                       type: string
@@ -217,7 +232,7 @@ spec:
                   runnerClusterRef:
                     description: |-
                       runnerClusterRef names the cluster.x-k8s.io/v1beta1 Cluster the k6
-                      workload itself runs on. Defaults to the topology's clusterRef.
+                      workload itself runs on. Defaults to the deployment's clusterRef.
                     properties:
                       name:
                         default: ""
@@ -251,20 +266,6 @@ spec:
                         type: string
                     type: object
                     x-kubernetes-map-type: atomic
-                  topologyRef:
-                    description: topologyRef names the AuthentikTopology this test drives.
-                    properties:
-                      name:
-                        default: ""
-                        description: |-
-                          Name of the referent.
-                          This field is effectively required, but due to backwards compatibility is
-                          allowed to be empty. Instances of this type with an empty value here are
-                          almost certainly wrong.
-                          More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
-                        type: string
-                    type: object
-                    x-kubernetes-map-type: atomic
                   traceSampleRate:
                     default: "0.01"
                     description: |-
@@ -277,8 +278,8 @@ spec:
                     minimum: 1
                     type: integer
                 required:
+                - deploymentRef
                 - profile
-                - topologyRef
                 type: object
               startTime:
                 format: date-time

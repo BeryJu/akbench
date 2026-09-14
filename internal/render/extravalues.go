@@ -26,7 +26,7 @@ import (
 )
 
 // MergeExtraValues overlays extraValuesYAML - a "values.yaml"-shaped
-// document, from AuthentikTopologySpec.Authentik.ExtraValuesRef - on top of
+// document, from AuthentikDeploymentSpec.Authentik.ExtraValuesRef - on top of
 // base, deep-merging nested maps and letting the overlay win on conflicts.
 // This is the escape hatch for chart values the CRD doesn't model directly,
 // so the web UI's YAML editor doesn't need a dedicated field for every

@@ -18,13 +18,13 @@ import (
 // the chart skip its own preset entirely (`{{- with .component.affinity -}}
 // ... {{- else -}} <preset> {{- end -}}` - confirmed against the chart's
 // actual template source) - once any mode needs a custom term here (the
-// cross-topology one below, needed unconditionally), every mode has to
+// cross-deployment one below, needed unconditionally), every mode has to
 // render its own affinity fully rather than mixing the two mechanisms.
 //
 // Always includes a required anti-affinity term against any *other*
-// topology's pods (crossTopologyAntiAffinityTerm) so two topologies never
+// deployment's pods (crossDeploymentAntiAffinityTerm) so two deployments never
 // share a node regardless of mode - a guarantee PlacementMode itself never
-// provided, since it only ever governed scheduling within one topology.
+// provided, since it only ever governed scheduling within one deployment.
 // Additionally, by mode:
 //   - Dedicated: a required anti-affinity term against this release's own
 //     other pods (one pod of this release per node - previously the
@@ -35,22 +35,22 @@ import (
 //   - Packed: a required *affinity* term for this release's own pods (they
 //     must land together) - unchanged from this function's previous
 //     Packed-only form.
-//   - Default: no extra term - a topology's own pods may share nodes with
+//   - Default: no extra term - a deployment's own pods may share nodes with
 //     each other (the noisy-neighbor case the benchmark compares against),
-//     just never with another topology's.
+//     just never with another deployment's.
 //
 // The own-release terms match on app.kubernetes.io/instance, a label every
 // pod the authentik chart or its bundled postgresql subchart produces
 // carries (confirmed against both charts' own label helpers), so Dedicated/
 // Packed still reach the bundled postgres pod too, not just server/worker.
-func ServerWorkerAffinity(spec benchv1alpha1.PlacementSpec, releaseName, topologyName string) *corev1.Affinity {
+func ServerWorkerAffinity(spec benchv1alpha1.PlacementSpec, releaseName, deploymentName string) *corev1.Affinity {
 	ownReleaseSelector := &metav1.LabelSelector{
 		MatchLabels: map[string]string{"app.kubernetes.io/instance": releaseName},
 	}
 	aff := &corev1.Affinity{
 		PodAntiAffinity: &corev1.PodAntiAffinity{
 			RequiredDuringSchedulingIgnoredDuringExecution: []corev1.PodAffinityTerm{
-				crossTopologyAntiAffinityTerm(topologyName),
+				crossDeploymentAntiAffinityTerm(deploymentName),
 			},
 		},
 	}

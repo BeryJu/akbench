@@ -1,5 +1,5 @@
 apiVersion: bench.goauthentik.io/v1alpha1
-kind: AuthentikTopology
+kind: AuthentikDeployment
 metadata:
   labels:
     app.kubernetes.io/name: authentik-bench

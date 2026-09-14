@@ -32,10 +32,10 @@ import (
 	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
 )
 
-// extraValuesConfigMapName is deterministic from the topology name, so the
+// extraValuesConfigMapName is deterministic from the deployment name, so the
 // UI never has to invent or remember one.
-func extraValuesConfigMapName(topologyName string) string {
-	return topologyName + "-extra-values"
+func extraValuesConfigMapName(deploymentName string) string {
+	return deploymentName + "-extra-values"
 }
 
 // extraValuesBody is both the request and response shape: a single raw YAML
@@ -46,7 +46,7 @@ type extraValuesBody struct {
 	ValuesYAML string `json:"valuesYAML"`
 }
 
-// getExtraValues returns the topology's current extra-values YAML, or an
+// getExtraValues returns the deployment's current extra-values YAML, or an
 // empty string if none is set - not a 404, since "no extra values" is a
 // normal, common state rather than a missing resource.
 func (s *Server) getExtraValues(w http.ResponseWriter, r *http.Request) {
@@ -64,11 +64,11 @@ func (s *Server) getExtraValues(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, r, http.StatusOK, extraValuesBody{ValuesYAML: cm.Data["values.yaml"]})
 }
 
-// putExtraValues upserts the topology's extra-values ConfigMap and points
+// putExtraValues upserts the deployment's extra-values ConfigMap and points
 // spec.authentik.extraValuesRef at it, creating the reference the first time
-// this is called. It always writes the AuthentikTopology itself (touching an
+// this is called. It always writes the AuthentikDeployment itself (touching an
 // annotation even when extraValuesRef.name doesn't change) so
-// AuthentikTopologyReconciler - which does not separately watch this
+// AuthentikDeploymentReconciler - which does not separately watch this
 // ConfigMap - picks up the new content: editing the ConfigMap alone would
 // otherwise never re-trigger a reconcile.
 func (s *Server) putExtraValues(w http.ResponseWriter, r *http.Request) {
@@ -87,7 +87,7 @@ func (s *Server) putExtraValues(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	var topo benchv1alpha1.AuthentikTopology
+	var topo benchv1alpha1.AuthentikDeployment
 	if err := s.client.Get(r.Context(), types.NamespacedName{Name: name, Namespace: s.cfg.Namespace}, &topo); err != nil {
 		writeAPIError(w, r, err)
 		return
@@ -124,7 +124,7 @@ func (s *Server) putExtraValues(w http.ResponseWriter, r *http.Request) {
 		topo.Annotations = map[string]string{}
 	}
 	// Forces a spec-unrelated write every call, so the controller's watch on
-	// AuthentikTopology fires even when extraValuesRef.name is unchanged -
+	// AuthentikDeployment fires even when extraValuesRef.name is unchanged -
 	// this ConfigMap's content is the only thing that changed.
 	topo.Annotations["bench.goauthentik.io/extra-values-updated-at"] = time.Now().UTC().Format(time.RFC3339Nano)
 	if err := s.client.Update(r.Context(), &topo); err != nil {

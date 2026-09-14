@@ -27,7 +27,7 @@ import { useResource } from './useResource';
 
 function emptySpec(): TestCaseSpec {
   return {
-    topologyRef: { name: '' },
+    deploymentRef: { name: '' },
     script: 'login.ts',
     profile: 'Quick',
     vus: 8,
@@ -41,7 +41,7 @@ function emptySpec(): TestCaseSpec {
 
 export function TestCaseForm({ existing }: { existing?: TestCase }) {
   const history = useHistory();
-  const topologies = useResource(() => api.topologies(), [], 0);
+  const deployments = useResource(() => api.deployments(), [], 0);
   const [name, setName] = useState(existing?.metadata.name ?? '');
   const [spec, setSpec] = useState<TestCaseSpec>(existing?.spec ?? emptySpec());
   const [error, setError] = useState<string>();
@@ -95,16 +95,16 @@ export function TestCaseForm({ existing }: { existing?: TestCase }) {
               select
               fullWidth
               required
-              label="Topology to drive"
-              value={spec.topologyRef.name}
-              onChange={e => patch({ topologyRef: { name: e.target.value } })}
+              label="Deployment to drive"
+              value={spec.deploymentRef.name}
+              onChange={e => patch({ deploymentRef: { name: e.target.value } })}
             >
               <MenuItem value="">
-                <em>Choose a topology</em>
+                <em>Choose a deployment</em>
               </MenuItem>
-              {(topologies.data ?? []).map(topology => (
-                <MenuItem key={topology.metadata.name} value={topology.metadata.name}>
-                  {topology.metadata.name}
+              {(deployments.data ?? []).map(deployment => (
+                <MenuItem key={deployment.metadata.name} value={deployment.metadata.name}>
+                  {deployment.metadata.name}
                 </MenuItem>
               ))}
             </TextField>

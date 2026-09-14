@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-// registerDetailsViewSection sections attached to TestCase/AuthentikTopology
+// registerDetailsViewSection sections attached to TestCase/AuthentikDeployment
 // detail pages (Headlamp's own generic CRD detail view already renders
 // everything else - spec, status, events, YAML - these sections add exactly
 // the parts that are benchmark-specific).
@@ -31,7 +31,7 @@ import { useResource } from './useResource';
  * Burn already runs continuously as a self-healing Deployment), a link to
  * the actual k6 Deployment for a Burn test case (Quick has no persistent
  * workload to link to - it's a one-shot Job per TestRun), plus the same
- * metrics chart TopologySection renders, scoped to this one test.
+ * metrics chart DeploymentSection renders, scoped to this one test.
  */
 export function TestCaseSection({ name, profile }: { name: string; profile?: string }) {
   const [running, setRunning] = useState(false);
@@ -39,14 +39,14 @@ export function TestCaseSection({ name, profile }: { name: string; profile?: str
   const [ranAt, setRanAt] = useState<string>();
 
   const testCase = useResource(() => api.testCase(name), [name], 0);
-  const topologyName = testCase.data?.spec.topologyRef.name;
-  const topology = useResource(
-    () => (topologyName ? api.topology(topologyName) : Promise.resolve(undefined)),
-    [topologyName],
+  const deploymentName = testCase.data?.spec.deploymentRef.name;
+  const deployment = useResource(
+    () => (deploymentName ? api.deployment(deploymentName) : Promise.resolve(undefined)),
+    [deploymentName],
     0
   );
   const cluster = headlampClusterName(
-    testCase.data?.spec.runnerClusterRef?.name ?? topology.data?.spec.clusterRef?.name
+    testCase.data?.spec.runnerClusterRef?.name ?? deployment.data?.spec.clusterRef?.name
   );
   const namespace = testCase.data?.metadata.namespace;
   const burnDeployment = testCase.data?.status?.burnWorkloadRef?.name;
@@ -101,24 +101,24 @@ export function TestCaseSection({ name, profile }: { name: string; profile?: str
 }
 
 /**
- * TopologySection: links to the authentik chart's own server/worker
+ * DeploymentSection: links to the authentik chart's own server/worker
  * Deployments and (Embedded postgres only) its StatefulSet on whichever
- * cluster the topology actually runs on, plus metrics for every TestCase
- * currently pointed at this topology - the only way to see a Burn TestCase's
- * metrics scoped to "the topology it's hammering" rather than picking it
+ * cluster the deployment actually runs on, plus metrics for every TestCase
+ * currently pointed at this deployment - the only way to see a Burn TestCase's
+ * metrics scoped to "the deployment it's hammering" rather than picking it
  * manually on Compare, and the exact gap /metrics/range
- * (internal/api/metrics.go) was originally built to close for topologies
+ * (internal/api/metrics.go) was originally built to close for deployments
  * with no TestRun history at all.
  */
-export function TopologySection({ topologyName }: { topologyName: string }) {
-  const topology = useResource(() => api.topology(topologyName), [topologyName], 0);
+export function DeploymentSection({ deploymentName }: { deploymentName: string }) {
+  const deployment = useResource(() => api.deployment(deploymentName), [deploymentName], 0);
   const testCases = useResource(() => api.testCases(), [], 10000);
   const testids = (testCases.data ?? [])
-    .filter(tc => tc.spec.topologyRef.name === topologyName)
+    .filter(tc => tc.spec.deploymentRef.name === deploymentName)
     .map(tc => tc.metadata.name);
 
-  const cluster = headlampClusterName(topology.data?.spec.clusterRef?.name);
-  const namespace = topology.data?.spec.namespace;
+  const cluster = headlampClusterName(deployment.data?.spec.clusterRef?.name);
+  const namespace = deployment.data?.spec.namespace;
 
   return (
     <Box>
@@ -128,29 +128,29 @@ export function TopologySection({ topologyName }: { topologyName: string }) {
             kind="Deployment"
             cluster={cluster}
             namespace={namespace}
-            name={`${topologyName}-authentik-server`}
+            name={`${deploymentName}-authentik-server`}
             label={`View server Deployment on ${cluster}`}
           />
           <ClusterResourceButton
             kind="Deployment"
             cluster={cluster}
             namespace={namespace}
-            name={`${topologyName}-authentik-worker`}
+            name={`${deploymentName}-authentik-worker`}
             label={`View worker Deployment on ${cluster}`}
           />
-          {topology.data?.spec.postgres.mode === 'Embedded' && (
+          {deployment.data?.spec.postgres.mode === 'Embedded' && (
             <ClusterResourceButton
               kind="StatefulSet"
               cluster={cluster}
               namespace={namespace}
-              name={`${topologyName}-postgresql`}
+              name={`${deploymentName}-postgresql`}
               label={`View postgres StatefulSet on ${cluster}`}
             />
           )}
         </Stack>
       )}
       {testids.length === 0 ? (
-        <EmptyContent>No test cases reference this topology yet.</EmptyContent>
+        <EmptyContent>No test cases reference this deployment yet.</EmptyContent>
       ) : (
         <>
           <MetricsChart metric="http_reqs" testids={testids} />

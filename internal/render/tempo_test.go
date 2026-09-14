@@ -20,7 +20,7 @@ func TestTempoObjectsMatchesDefaultTracingEndpoint(t *testing.T) {
 			t.Errorf("expected a %s object in TempoObjects, found none", kind)
 		}
 	}
-	// Must match defaultTracingEndpoint in authentiktopology_controller.go
+	// Must match defaultTracingEndpoint in authentikdeployment_controller.go
 	// ("http://tempo.bench-system.svc.cluster.local:4318") exactly.
 	if TempoServiceName != "tempo" {
 		t.Errorf("TempoServiceName = %q, want %q", TempoServiceName, "tempo")

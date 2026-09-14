@@ -34,13 +34,13 @@ import (
 	"github.com/goauthentik/authentik-bench/internal/render"
 )
 
-// serverPodForExec finds the newest Running server pod for this topology's
+// serverPodForExec finds the newest Running server pod for this deployment's
 // release on rc - the target for ApplyBlueprint's exec. Readiness probes
 // passing isn't required (the blueprint write+apply command runs
 // standalone), but newest is: a rolling update can leave an old and a new
 // pod briefly Running at once, and the old one, from before whatever spec
 // change is in flight, may not have the fixtures volume mounted at all.
-func serverPodForExec(ctx context.Context, rc client.Client, topo *benchv1alpha1.AuthentikTopology) (*corev1.Pod, error) {
+func serverPodForExec(ctx context.Context, rc client.Client, topo *benchv1alpha1.AuthentikDeployment) (*corev1.Pod, error) {
 	var pods corev1.PodList
 	if err := rc.List(ctx, &pods, client.InNamespace(topo.Spec.Namespace), client.MatchingLabels{
 		"app.kubernetes.io/instance":  render.HelmReleaseName(topo),
@@ -67,11 +67,11 @@ func serverPodForExec(ctx context.Context, rc client.Client, topo *benchv1alpha1
 // cold-starts a full Django app before doing anything (observed several
 // minutes on a resource-starved dev cluster running multiple authentik
 // instances at once) - without a bound, a slow or wedged attempt blocks
-// this reconcile forever, and since AuthentikTopologyReconciler only runs
+// this reconcile forever, and since AuthentikDeploymentReconciler only runs
 // one reconcile at a time by default, that starves every *other*
-// topology's reconciles too (verified live via a goroutine dump: an exec's
+// deployment's reconciles too (verified live via a goroutine dump: an exec's
 // stdin/stdout/stderr copy goroutines parked indefinitely on a stream read,
-// and no other AuthentikTopology reconciled again as long as it sat there).
+// and no other AuthentikDeployment reconciled again as long as it sat there).
 const blueprintApplyTimeout = 5 * time.Minute
 
 // ApplyBlueprint writes blueprintYAML into the fixtures PVC HelmValues
@@ -80,7 +80,7 @@ const blueprintApplyTimeout = 5 * time.Minute
 // see the same content even if the operator's own copy changes between
 // reconciles. restConfig is whichever cluster topo actually runs on
 // (resolveRESTConfig) - always the same cluster rc itself talks to.
-func (r *AuthentikTopologyReconciler) ApplyBlueprint(ctx context.Context, restConfig *rest.Config, rc client.Client, topo *benchv1alpha1.AuthentikTopology, blueprintYAML []byte) error {
+func (r *AuthentikDeploymentReconciler) ApplyBlueprint(ctx context.Context, restConfig *rest.Config, rc client.Client, topo *benchv1alpha1.AuthentikDeployment, blueprintYAML []byte) error {
 	ctx, cancel := context.WithTimeout(ctx, blueprintApplyTimeout)
 	defer cancel()
 

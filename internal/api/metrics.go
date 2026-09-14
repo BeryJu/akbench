@@ -116,7 +116,7 @@ const promStatusSuccess = "success"
 
 // prometheusURLForTestID resolves which Prometheus actually has a given
 // testid's data: a TestCase's object name *is* its k6 testid, and every
-// TestCase drives a Topology that (via its own or the TestCase's
+// TestCase drives a Deployment that (via its own or the TestCase's
 // runnerClusterRef override) runs on either the management cluster
 // (s.cfg.PrometheusURL, unchanged from before) or a WorkloadCluster - which,
 // since WorkloadClusterReconciler's ensurePrometheus runs, has its own
@@ -125,7 +125,7 @@ const promStatusSuccess = "success"
 // reverse can't), which is what makes that URL usable from here at all.
 //
 // Falls back to s.cfg.PrometheusURL on any resolution failure (the TestCase/
-// Topology/WorkloadCluster was deleted, or the WorkloadCluster hasn't
+// Deployment/WorkloadCluster was deleted, or the WorkloadCluster hasn't
 // reconciled a PrometheusURL yet) rather than erroring outright - historical
 // data for a since-deleted test is still worth trying to show, and an
 // empty fallback surfaces the same "no Prometheus configured" 502 a caller
@@ -138,8 +138,8 @@ func (s *Server) prometheusURLForTestID(ctx context.Context, testid string) stri
 
 	clusterRef := tc.Spec.RunnerClusterRef
 	if clusterRef == nil {
-		var topo benchv1alpha1.AuthentikTopology
-		key := types.NamespacedName{Name: tc.Spec.TopologyRef.Name, Namespace: s.cfg.Namespace}
+		var topo benchv1alpha1.AuthentikDeployment
+		key := types.NamespacedName{Name: tc.Spec.DeploymentRef.Name, Namespace: s.cfg.Namespace}
 		if err := s.client.Get(ctx, key, &topo); err != nil {
 			return s.cfg.PrometheusURL
 		}

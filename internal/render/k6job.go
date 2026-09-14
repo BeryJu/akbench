@@ -36,7 +36,7 @@ const (
 type K6WorkloadParams struct {
 	TestCase   *benchv1alpha1.TestCase
 	TargetName string
-	// BenchHost/BenchPort are the AuthentikTopology's in-cluster service
+	// BenchHost/BenchPort are the AuthentikDeployment's in-cluster service
 	// endpoint this run drives.
 	BenchHost string
 	BenchPort int32
@@ -144,16 +144,16 @@ func (p K6WorkloadParams) volumes() ([]corev1.Volume, []corev1.VolumeMount) {
 // Burn Deployment.
 func (p K6WorkloadParams) PodTemplate() corev1.PodTemplateSpec {
 	volumes, mounts := p.volumes()
-	// The real AuthentikTopology object name (spec.topologyRef.name), not
+	// The real AuthentikDeployment object name (spec.deploymentRef.name), not
 	// TargetName - TargetName is only the target/metric label and can be
-	// overridden to something else, but the topology's own pods are labeled
-	// by object name (TopologyLabels), so the runner's anti-affinity below
+	// overridden to something else, but the deployment's own pods are labeled
+	// by object name (DeploymentLabels), so the runner's anti-affinity below
 	// has to match on that same value to find them.
-	topologyName := p.TestCase.Spec.TopologyRef.Name
+	deploymentName := p.TestCase.Spec.DeploymentRef.Name
 	labels := map[string]string{
 		benchv1alpha1.LabelTestCase: p.TestCase.Name,
 		benchv1alpha1.LabelProfile:  k6ProfileValue(p.TestCase.Spec.Profile),
-		benchv1alpha1.LabelTopology: topologyName,
+		benchv1alpha1.LabelDeployment: deploymentName,
 	}
 	return corev1.PodTemplateSpec{
 		ObjectMeta: metav1.ObjectMeta{Labels: labels},
@@ -170,7 +170,7 @@ func (p K6WorkloadParams) PodTemplate() corev1.PodTemplateSpec {
 			},
 			Volumes: volumes,
 			// The load generator must never land on the same node as the
-			// topology it's driving - otherwise it competes with the very
+			// deployment it's driving - otherwise it competes with the very
 			// system it's measuring for that node's CPU, skewing the
 			// numbers it produces. Required, not preferred: a soft
 			// preference could still be overridden by the scheduler under
@@ -178,7 +178,7 @@ func (p K6WorkloadParams) PodTemplate() corev1.PodTemplateSpec {
 			Affinity: &corev1.Affinity{
 				PodAntiAffinity: &corev1.PodAntiAffinity{
 					RequiredDuringSchedulingIgnoredDuringExecution: []corev1.PodAffinityTerm{
-						sameTopologyAntiAffinityTerm(topologyName),
+						sameDeploymentAntiAffinityTerm(deploymentName),
 					},
 				},
 			},

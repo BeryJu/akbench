@@ -26,7 +26,7 @@ import (
 )
 
 // PyroscopeServiceName/PyroscopePort must match defaultPyroscopeHost
-// (internal/controller/authentiktopology_controller.go:
+// (internal/controller/authentikdeployment_controller.go:
 // "http://pyroscope.bench-system.svc.cluster.local:4040") exactly - that's
 // the cluster-relative address every authentik pod pushes continuous
 // profiles to regardless of which cluster it runs on, so each workload

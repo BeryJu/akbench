@@ -41,7 +41,7 @@ type resourceKind struct {
 
 // resourceKinds maps /api/v1/<path> onto the kind it serves.
 var resourceKinds = map[string]resourceKind{
-	"topologies":       {kind: "AuthentikTopology", listKind: "AuthentikTopologyList"},
+	"deployments":       {kind: "AuthentikDeployment", listKind: "AuthentikDeploymentList"},
 	"testcases":        {kind: "TestCase", listKind: "TestCaseList"},
 	"testruns":         {kind: "TestRun", listKind: "TestRunList"},
 	"workloadclusters": {kind: "WorkloadCluster", listKind: "WorkloadClusterList"},
@@ -95,7 +95,7 @@ func (s *Server) getResource(k resourceKind) http.HandlerFunc {
 }
 
 // getResourceStatus serves just .status, which is all the UI's polling
-// components need - a topology's status is small and changes far more often
+// components need - a deployment's status is small and changes far more often
 // than its spec.
 func (s *Server) getResourceStatus(k resourceKind) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {

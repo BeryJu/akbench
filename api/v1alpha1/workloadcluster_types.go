@@ -116,7 +116,7 @@ type WorkerPoolSpec struct {
 
 // WorkloadClusterSpec describes a Kubernetes cluster this operator asks
 // Cluster API to provision through the selected infrastructure provider, so
-// AuthentikTopology/TestCase can target it via clusterRef instead of the
+// AuthentikDeployment/TestCase can target it via clusterRef instead of the
 // management cluster.
 type WorkloadClusterSpec struct {
 	// kubernetesVersion is the version kubeadm installs, e.g. "v1.36.1".

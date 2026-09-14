@@ -15,7 +15,7 @@
  */
 
 // A single reusable "status at a glance" popover for any bench.goauthentik.io
-// CRD instance (AuthentikTopology/TestCase/TestRun/WorkloadCluster): a
+// CRD instance (AuthentikDeployment/TestCase/TestRun/WorkloadCluster): a
 // clickable phase/ready chip that opens a popover with the object's own
 // conditions, its real Kubernetes Events (fetched live - the same Events
 // internal/controller/conditions.go's setCondition now emits via
@@ -47,7 +47,7 @@ export interface StatusLink {
 }
 
 interface StatusPopoverProps {
-  /** The CRD's own Kind, e.g. "AuthentikTopology" - must match involvedObject.kind
+  /** The CRD's own Kind, e.g. "AuthentikDeployment" - must match involvedObject.kind
    * on the Events this object's controller emits. */
   kind: string;
   name: string;
@@ -82,7 +82,7 @@ function conditionColor(status: string): 'success' | 'error' | 'default' {
 }
 
 /** StatusChip is the clickable trigger - a small phase/ready badge, matching
- * this plugin's existing ReadyChip/PhaseChip look (TopologiesPage.tsx,
+ * this plugin's existing ReadyChip/PhaseChip look (DeploymentsPage.tsx,
  * TestRunsPage.tsx) so swapping it in doesn't change a table's visual
  * density. */
 export function StatusChip(props: StatusPopoverProps) {

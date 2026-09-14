@@ -28,7 +28,7 @@ import (
 
 func TestCreateRun(t *testing.T) {
 	s, c := newServer(t, Config{},
-		sampleTopology("single-node"),
+		sampleDeployment("single-node"),
 		sampleTestCase("login-quick", "single-node", benchv1alpha1.ProfileQuick),
 	)
 
@@ -57,7 +57,7 @@ func TestCreateRun(t *testing.T) {
 
 func TestCreateRunWithOverrides(t *testing.T) {
 	s, c := newServer(t, Config{},
-		sampleTopology("single-node"),
+		sampleDeployment("single-node"),
 		sampleTestCase("login-quick", "single-node", benchv1alpha1.ProfileQuick),
 	)
 
@@ -91,7 +91,7 @@ func TestCreateRunWithOverrides(t *testing.T) {
 // a user error worth an explanation rather than a TestRun that fails later.
 func TestCreateRunRejectsBurnProfile(t *testing.T) {
 	s, c := newServer(t, Config{},
-		sampleTopology("single-node"),
+		sampleDeployment("single-node"),
 		sampleTestCase("login-burn", "single-node", benchv1alpha1.ProfileBurn),
 	)
 

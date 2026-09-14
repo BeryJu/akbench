@@ -49,7 +49,7 @@ export interface WorkloadSpec {
   resources?: ResourceRequirements;
 }
 
-export interface TopologySpec {
+export interface AuthentikDeploymentSpec {
   clusterRef?: { name: string };
   targetName?: string;
   namespace: string;
@@ -77,7 +77,7 @@ export interface TopologySpec {
   };
 }
 
-export interface TopologyStatus {
+export interface AuthentikDeploymentStatus {
   conditions?: Condition[];
   phase?: string;
   serviceEndpoint?: string;
@@ -85,14 +85,14 @@ export interface TopologyStatus {
   cnpgClusterRef?: { name: string };
 }
 
-export interface Topology {
+export interface AuthentikDeployment {
   metadata: ObjectMeta;
-  spec: TopologySpec;
-  status?: TopologyStatus;
+  spec: AuthentikDeploymentSpec;
+  status?: AuthentikDeploymentStatus;
 }
 
 export interface TestCaseSpec {
-  topologyRef: { name: string };
+  deploymentRef: { name: string };
   runnerClusterRef?: { name: string };
   script?: string;
   profile: TestProfile;

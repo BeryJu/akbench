@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-// Ported from the deleted web/frontend/components/topology-form.tsx, on MUI +
+// Ported from the deleted web/frontend/components/deployment-form.tsx, on MUI +
 // Headlamp's own SectionBox instead of PatternFly/Next.js's router.
 import { Router } from '@kinvolk/headlamp-plugin/lib';
 import { SectionBox } from '@kinvolk/headlamp-plugin/lib/CommonComponents';
@@ -23,7 +23,7 @@ import { Alert, Box, Button, Checkbox, FormControlLabel, Grid, MenuItem, TextFie
 import { useEffect, useState } from 'react';
 import { useHistory } from 'react-router-dom';
 import { api, ApiError } from './api';
-import { PlacementMode, PostgresMode, Topology, TopologySpec } from './types';
+import { PlacementMode, PostgresMode, AuthentikDeployment, AuthentikDeploymentSpec } from './types';
 import { useResource } from './useResource';
 
 /**
@@ -31,7 +31,7 @@ import { useResource } from './useResource';
  * the form show what will actually be created rather than a set of blanks the
  * API server fills in invisibly.
  */
-function emptySpec(): TopologySpec {
+function emptySpec(): AuthentikDeploymentSpec {
   return {
     namespace: '',
     server: { replicas: 1 },
@@ -43,7 +43,7 @@ function emptySpec(): TopologySpec {
   };
 }
 
-/** slugify turns a topology name into a Kubernetes-namespace-safe default:
+/** slugify turns a deployment name into a Kubernetes-namespace-safe default:
  * lowercase, non-alphanumeric runs collapsed to a single dash, no leading/
  * trailing dash. */
 function slugify(value: string): string {
@@ -53,12 +53,12 @@ function slugify(value: string): string {
     .replace(/^-+|-+$/g, '');
 }
 
-export function TopologyForm({ existing }: { existing?: Topology }) {
+export function DeploymentForm({ existing }: { existing?: AuthentikDeployment }) {
   const history = useHistory();
   const theme = useTheme();
   const clusters = useResource(() => api.clusters(), [], 0);
   const [name, setName] = useState(existing?.metadata.name ?? '');
-  const [spec, setSpec] = useState<TopologySpec>(existing?.spec ?? emptySpec());
+  const [spec, setSpec] = useState<AuthentikDeploymentSpec>(existing?.spec ?? emptySpec());
   const [extraValuesYAML, setExtraValuesYAML] = useState('');
   const [error, setError] = useState<string>();
   const [saving, setSaving] = useState(false);
@@ -66,9 +66,9 @@ export function TopologyForm({ existing }: { existing?: Topology }) {
   // name field should stop clobbering their choice.
   const [namespaceEdited, setNamespaceEdited] = useState(Boolean(existing));
 
-  const patch = (changes: Partial<TopologySpec>) => setSpec(current => ({ ...current, ...changes }));
+  const patch = (changes: Partial<AuthentikDeploymentSpec>) => setSpec(current => ({ ...current, ...changes }));
 
-  // Extra values live in a separate ConfigMap, so a new topology has nothing
+  // Extra values live in a separate ConfigMap, so a new deployment has nothing
   // to load and an existing one is fetched once on mount.
   useEffect(() => {
     if (!existing) {
@@ -84,7 +84,7 @@ export function TopologyForm({ existing }: { existing?: Topology }) {
       })
       .catch(() => {
         // Not fatal to the form - the field just starts blank, same as a new
-        // topology, and the error surfaces properly if the user tries to save.
+        // deployment, and the error surfaces properly if the user tries to save.
       });
     return () => {
       cancelled = true;
@@ -98,12 +98,12 @@ export function TopologyForm({ existing }: { existing?: Topology }) {
     try {
       const savedName = existing?.metadata.name ?? name;
       if (existing) {
-        await api.updateTopology(existing.metadata.name, { spec });
+        await api.updateDeployment(existing.metadata.name, { spec });
       } else {
-        await api.createTopology({ metadata: { name }, spec });
+        await api.createDeployment({ metadata: { name }, spec });
       }
       await api.setExtraValues(savedName, extraValuesYAML);
-      history.push(Router.createRouteURL('authentik-bench-topologies'));
+      history.push(Router.createRouteURL('authentik-bench-deployments'));
     } catch (err) {
       setError(err instanceof ApiError ? err.message : String(err));
       setSaving(false);
@@ -111,7 +111,7 @@ export function TopologyForm({ existing }: { existing?: Topology }) {
   }
 
   return (
-    <SectionBox title={existing ? `Edit ${existing.metadata.name}` : 'New topology'}>
+    <SectionBox title={existing ? `Edit ${existing.metadata.name}` : 'New deployment'}>
       <Box component="form" onSubmit={submit}>
         {error && (
           <Alert severity="error" sx={{ mb: 2 }}>
@@ -339,7 +339,7 @@ export function TopologyForm({ existing }: { existing?: Topology }) {
         </Grid>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
           Tolerations aren&apos;t exposed here (a structured list, not a simple field) - set them by
-          editing this Topology&apos;s YAML directly from its own detail page once created.
+          editing this AuthentikDeployment's YAML directly from its own detail page once created.
         </Typography>
 
         <Typography variant="h6" gutterBottom>
@@ -491,9 +491,9 @@ export function TopologyForm({ existing }: { existing?: Topology }) {
 
         <Box sx={{ display: 'flex', gap: 2 }}>
           <Button type="submit" variant="contained" disabled={saving}>
-            {saving ? 'Saving…' : existing ? 'Save changes' : 'Create topology'}
+            {saving ? 'Saving…' : existing ? 'Save changes' : 'Create deployment'}
           </Button>
-          <Button onClick={() => history.push(Router.createRouteURL('authentik-bench-topologies'))}>Cancel</Button>
+          <Button onClick={() => history.push(Router.createRouteURL('authentik-bench-deployments'))}>Cancel</Button>
         </Box>
       </Box>
     </SectionBox>

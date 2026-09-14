@@ -16,9 +16,9 @@
 
 // Ported from the deleted web/frontend/app/page.tsx, on Headlamp's own
 // SectionBox/SimpleTable/EmptyContent instead of PatternFly. The full
-// Topologies table from that version is dropped here - Headlamp's own
+// Deployments table from that version is dropped here - Headlamp's own
 // generic CRD browser (sidebar -> Custom Resources) already lists/links
-// every AuthentikTopology for free, so duplicating that table would just be
+// every AuthentikDeployment for free, so duplicating that table would just be
 // a second, un-synced way to see the same thing. This page keeps only
 // what's genuinely benchmark-specific: at-a-glance counts, live metrics for
 // whatever's actively Burn-testing, and recent runs.
@@ -47,7 +47,7 @@ function StatCard({ value, label }: { value: number | string; label: string }) {
 }
 
 export function DashboardPage() {
-  const topologies = useResource(() => api.topologies());
+  const deployments = useResource(() => api.deployments());
   const testCases = useResource(() => api.testCases());
   const runs = useResource(() => api.testRuns());
 
@@ -58,15 +58,15 @@ export function DashboardPage() {
     .slice(0, 8);
 
   return (
-    <SectionBox title="authentik-bench" subtitle="authentik load-test topologies, test cases and runs.">
-      {(topologies.error || testCases.error || runs.error) && (
+    <SectionBox title="authentik-bench" subtitle="authentik load-test deployments, test cases and runs.">
+      {(deployments.error || testCases.error || runs.error) && (
         <Alert severity="error" sx={{ mb: 2 }}>
-          {topologies.error ?? testCases.error ?? runs.error}
+          {deployments.error ?? testCases.error ?? runs.error}
         </Alert>
       )}
 
       <Grid container spacing={2} sx={{ mb: 3 }}>
-        <StatCard value={topologies.data?.length ?? '-'} label="Topologies" />
+        <StatCard value={deployments.data?.length ?? '-'} label="Deployments" />
         <StatCard value={testCases.data?.length ?? '-'} label="Test cases" />
         <StatCard value={burning.length} label="Burn tests running" />
         <StatCard value={runs.data?.length ?? '-'} label="Test runs" />

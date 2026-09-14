@@ -6,7 +6,7 @@ metadata:
     app.kubernetes.io/managed-by: kustomize
   name: login-baseline
 spec:
-  topologyRef:
+  deploymentRef:
     name: authentik-1
   profile: Quick
   vus: 8

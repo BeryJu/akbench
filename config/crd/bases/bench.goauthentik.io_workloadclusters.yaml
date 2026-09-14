@@ -50,7 +50,7 @@ spec:
             description: |-
               WorkloadClusterSpec describes a Kubernetes cluster this operator asks
               Cluster API to provision through the selected infrastructure provider, so
-              AuthentikTopology/TestCase can target it via clusterRef instead of the
+              AuthentikDeployment/TestCase can target it via clusterRef instead of the
               management cluster.
             properties:
               controlPlane:

@@ -22,7 +22,7 @@ import (
 )
 
 // ReconcilePhase summarizes an ongoing, declaratively-reconciled resource's
-// status at a glance (AuthentikTopology, TestCase) - distinct from
+// status at a glance (AuthentikDeployment, TestCase) - distinct from
 // TestRunPhase (a one-shot job's terminal outcome) and WorkloadCluster's
 // own Phase field (a verbatim mirror of CAPI's external vocabulary), which
 // each already have their own field and aren't affected by this type.

@@ -4,14 +4,14 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.21.0
-  name: authentiktopologies.bench.goauthentik.io
+  name: authentikdeployments.bench.goauthentik.io
 spec:
   group: bench.goauthentik.io
   names:
-    kind: AuthentikTopology
-    listKind: AuthentikTopologyList
-    plural: authentiktopologies
-    singular: authentiktopology
+    kind: AuthentikDeployment
+    listKind: AuthentikDeploymentList
+    plural: authentikdeployments
+    singular: authentikdeployment
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
@@ -30,7 +30,8 @@ spec:
     name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: AuthentikTopology is the Schema for the authentiktopologies API
+        description: AuthentikDeployment is the Schema for the authentikdeployments
+          API
         properties:
           apiVersion:
             description: |-
@@ -51,7 +52,7 @@ spec:
             type: object
           spec:
             description: |-
-              AuthentikTopologySpec defines one benchmarkable authentik deployment shape:
+              AuthentikDeploymentSpec defines one benchmarkable authentik deployment shape:
               which cluster it runs on, how many server/worker replicas, how its pods are
               scheduled, and which of the three Postgres backends it uses.
             properties:
@@ -108,7 +109,7 @@ spec:
               chart:
                 description: |-
                   ChartSpec pins the authentik Helm chart source used to install this
-                  topology.
+                  deployment.
                 properties:
                   repo:
                     default: https://charts.goauthentik.io
@@ -118,7 +119,7 @@ spec:
                 type: object
               clusterRef:
                 description: |-
-                  clusterRef names a cluster.x-k8s.io/v1beta1 Cluster this topology is
+                  clusterRef names a cluster.x-k8s.io/v1beta1 Cluster this deployment is
                   deployed onto. Empty means the cluster the operator itself runs on.
                 properties:
                   name:
@@ -134,12 +135,12 @@ spec:
                 x-kubernetes-map-type: atomic
               namespace:
                 description: |-
-                  namespace is the namespace this topology is installed into on the
+                  namespace is the namespace this deployment is installed into on the
                   target cluster.
                 type: string
               placement:
                 description: |-
-                  PlacementSpec controls pod scheduling for an AuthentikTopology's server and
+                  PlacementSpec controls pod scheduling for an AuthentikDeployment's server and
                   worker pods.
                 properties:
                   mode:
@@ -201,7 +202,7 @@ spec:
                     type: array
                   topologyKey:
                     default: kubernetes.io/hostname
-                    description: topologyKey is the anti-affinity topology key used
+                    description: topologyKey is the anti-affinity deployment key used
                       in Dedicated mode.
                     type: string
                 type: object
@@ -213,7 +214,7 @@ spec:
                   cnpg:
                     description: |-
                       CNPGPostgresSpec configures a CloudNativePG Cluster provisioned for this
-                      topology.
+                      deployment.
                     properties:
                       instances:
                         default: 3
@@ -267,7 +268,7 @@ spec:
                     default: Embedded
                     description: |-
                       PostgresMode selects which of the three benchmarked Postgres backends an
-                      AuthentikTopology uses.
+                      AuthentikDeployment uses.
                     enum:
                     - Embedded
                     - CNPG
@@ -429,7 +430,7 @@ spec:
             - worker
             type: object
           status:
-            description: AuthentikTopologyStatus defines the observed state of AuthentikTopology.
+            description: AuthentikDeploymentStatus defines the observed state of AuthentikDeployment.
             properties:
               cnpgClusterRef:
                 description: |-

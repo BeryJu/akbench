@@ -78,7 +78,7 @@ func applyOwned(ctx context.Context, c client.Client, scheme *runtime.Scheme, ow
 		// (this function always sets one on obj before the initial Create) -
 		// re-asserting it here would error out when existing is a shared
 		// object (e.g. one HelmRepository per namespace, reused by every
-		// AuthentikTopology in it) already owned by a different owner.
+		// AuthentikDeployment in it) already owned by a different owner.
 		return updateSpecWithConflictRetry(ctx, c, types.NamespacedName{Name: obj.GetName(), Namespace: obj.GetNamespace()}, existing, obj)
 	}
 	return nil

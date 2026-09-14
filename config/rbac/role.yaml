@@ -86,7 +86,7 @@ rules:
 - apiGroups:
   - bench.goauthentik.io
   resources:
-  - authentiktopologies
+  - authentikdeployments
   - testcases
   - testruns
   - workloadclusters
@@ -101,7 +101,7 @@ rules:
 - apiGroups:
   - bench.goauthentik.io
   resources:
-  - authentiktopologies/finalizers
+  - authentikdeployments/finalizers
   - testcases/finalizers
   - testruns/finalizers
   - workloadclusters/finalizers
@@ -110,7 +110,7 @@ rules:
 - apiGroups:
   - bench.goauthentik.io
   resources:
-  - authentiktopologies/status
+  - authentikdeployments/status
   - testcases/status
   - testruns/status
   - workloadclusters/status

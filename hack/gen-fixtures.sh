@@ -24,8 +24,8 @@ kubectl create secret generic "$SECRET_NAME" -n "$NAMESPACE" \
     --from-file=users.json="$WORKDIR/users.json" \
     --dry-run=client -o yaml | kubectl apply -f -
 
-# AuthentikTopologyReconciler reads this and mirrors+applies it onto each
-# topology's own runner cluster - see fixturesBlueprintConfigMapName in
+# AuthentikDeploymentReconciler reads this and mirrors+applies it onto each
+# deployment's own runner cluster - see fixturesBlueprintConfigMapName in
 # internal/controller/fixtures.go.
 kubectl create configmap "$BLUEPRINT_CONFIGMAP_NAME" -n "$NAMESPACE" \
     --from-file=blueprint.yaml="$BLUEPRINT_OUT" \

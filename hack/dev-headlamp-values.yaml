@@ -30,7 +30,7 @@ config:
 # The official Flux plugin (github.com/headlamp-k8s/plugins/tree/main/flux)
 # is installed the same way, from its own prebuilt image rather than a
 # build step of ours - this project already runs Flux's helm-controller/
-# source-controller to reconcile every AuthentikTopology's HelmRelease, so
+# source-controller to reconcile every AuthentikDeployment's HelmRelease, so
 # seeing their status natively in Headlamp's sidebar (Kustomizations, Helm
 # Releases, sources) is directly useful here. Confirmed against that
 # plugin's own README: its image ships the built plugin at /plugins/ (one

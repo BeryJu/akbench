@@ -113,7 +113,7 @@ export function ClustersPage() {
         data={clusters.data ?? []}
         emptyMessage="No clusters yet."
       />
-      {clusters.data?.length === 0 && <EmptyContent>Register a cluster to deploy topologies onto it.</EmptyContent>}
+      {clusters.data?.length === 0 && <EmptyContent>Register a cluster to deploy deployments onto it.</EmptyContent>}
     </SectionBox>
   );
 }

@@ -54,16 +54,16 @@ func forceDelete(ctx context.Context, obj client.Object) {
 	}).Should(Succeed())
 }
 
-// createReadyTopology creates an AuthentikTopology and directly patches its
-// status to Ready, bypassing AuthentikTopologyReconciler. TestCase/TestRun
-// reconciliation only needs a Ready topology's targetName/serviceEndpoint -
-// exercising the real AuthentikTopologyReconciler (which needs a live
-// helm-controller to ever reach Ready) belongs to authentiktopology_controller_test.go
+// createReadyDeployment creates an AuthentikDeployment and directly patches its
+// status to Ready, bypassing AuthentikDeploymentReconciler. TestCase/TestRun
+// reconciliation only needs a Ready deployment's targetName/serviceEndpoint -
+// exercising the real AuthentikDeploymentReconciler (which needs a live
+// helm-controller to ever reach Ready) belongs to authentikdeployment_controller_test.go
 // alone.
-func createReadyTopology(ctx context.Context, name, targetName, host string, port int32) *benchv1alpha1.AuthentikTopology {
-	topo := &benchv1alpha1.AuthentikTopology{
+func createReadyDeployment(ctx context.Context, name, targetName, host string, port int32) *benchv1alpha1.AuthentikDeployment {
+	topo := &benchv1alpha1.AuthentikDeployment{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
-		Spec: benchv1alpha1.AuthentikTopologySpec{
+		Spec: benchv1alpha1.AuthentikDeploymentSpec{
 			TargetName: targetName,
 			Namespace:  "authentik-" + name,
 			Server:     benchv1alpha1.WorkloadSpec{Replicas: 1},

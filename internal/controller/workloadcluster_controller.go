@@ -282,7 +282,7 @@ func (r *WorkloadClusterReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 // addon applies (ensurePrometheus, ensurePyroscope, ensureTempo - the
 // project-authored addons with no upstream Helm chart worth depending on),
 // not the long-lived cached/watching connection Tracker exists for (that's
-// what AuthentikTopology/TestCase/TestRun use once they actually deploy onto
+// what AuthentikDeployment/TestCase/TestRun use once they actually deploy onto
 // this cluster via clusterRef). ensureCNI/ensureCSIIncus/ensureMetricsServer
 // install via their own official Helm charts instead (Flux HelmRelease
 // applied locally with spec.kubeConfig), so they never need this.
@@ -321,7 +321,7 @@ func (r *WorkloadClusterReconciler) ensureCNI(ctx context.Context, wc *benchv1al
 // workload cluster via its own published Helm chart - a Flux
 // HelmRepository + HelmRelease applied here on the management cluster with
 // spec.kubeConfig pointing helm-controller at the workload cluster,
-// mirroring exactly how AuthentikTopologyReconciler installs the authentik
+// mirroring exactly how AuthentikDeploymentReconciler installs the authentik
 // chart remotely (internal/render/helmrelease.go). Chart values are built
 // by remapping this WorkloadCluster's own Incus/LXC connection Secret
 // (spec.incus.lxcSecretRef) into the shape the chart expects (see
@@ -427,7 +427,7 @@ func (r *WorkloadClusterReconciler) ensurePrometheus(ctx context.Context, wc *be
 // workload cluster if it isn't there already. No cross-cluster
 // reachability needed - authentik's own AUTHENTIK_PYROSCOPE_HOST already
 // points at this exact in-cluster DNS name (defaultPyroscopeHost in
-// authentiktopology_controller.go), and nothing outside this cluster reads
+// authentikdeployment_controller.go), and nothing outside this cluster reads
 // its data (yet).
 func (r *WorkloadClusterReconciler) ensurePyroscope(ctx context.Context, wc *benchv1alpha1.WorkloadCluster) error {
 	remoteClient, err := r.remoteAddonClient(ctx, wc)

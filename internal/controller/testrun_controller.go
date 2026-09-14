@@ -45,7 +45,7 @@ const testRunFinalizer = "bench.goauthentik.io/remote-cleanup"
 // TestRunReconciler executes one bounded (Quick) run of a TestCase.
 //
 // The Job runs on the same cluster TestCaseReconciler resolves for its
-// TestCase (spec.runnerClusterRef, else the topology's own clusterRef, else
+// TestCase (spec.runnerClusterRef, else the deployment's own clusterRef, else
 // local), resolved fresh via Tracker. Grafana annotations are posted only
 // when internal/grafana.FromEnv reports Enabled().
 type TestRunReconciler struct {
@@ -123,14 +123,14 @@ func (r *TestRunReconciler) start(ctx context.Context, run *benchv1alpha1.TestRu
 	resolvedTC := tc.DeepCopy()
 	resolvedTC.Spec = *resolved
 
-	topo, targetName, host, port, err := resolveReadyTopology(ctx, r.Client, tc.Namespace, tc.Spec.TopologyRef.Name)
+	topo, targetName, host, port, err := resolveReadyDeployment(ctx, r.Client, tc.Namespace, tc.Spec.DeploymentRef.Name)
 	if err != nil {
-		if errors.Is(err, errTopologyNotReady) {
+		if errors.Is(err, errDeploymentNotReady) {
 			setCondition(r.Recorder, run, &run.Status.Conditions, run.Generation, benchv1alpha1.ConditionReady, metav1.ConditionFalse,
-				benchv1alpha1.ReasonDependencyNotReady, "AuthentikTopology is not Ready yet")
+				benchv1alpha1.ReasonDependencyNotReady, "AuthentikDeployment is not Ready yet")
 			return ctrl.Result{RequeueAfter: 5 * time.Second}, r.Status().Update(ctx, run)
 		}
-		return ctrl.Result{}, fmt.Errorf("resolve topology: %w", err)
+		return ctrl.Result{}, fmt.Errorf("resolve deployment: %w", err)
 	}
 
 	rc, remote, err := resolveRunnerClient(ctx, r.Tracker, r.Client, run.Namespace, tc.Spec.RunnerClusterRef, topo.Spec.ClusterRef)
@@ -206,9 +206,9 @@ func (r *TestRunReconciler) resolveRunRunnerClient(ctx context.Context, run *ben
 	if run.Status.ResolvedSpec == nil {
 		return r.Client, nil
 	}
-	var topo benchv1alpha1.AuthentikTopology
+	var topo benchv1alpha1.AuthentikDeployment
 	var topoClusterRef corev1.LocalObjectReference
-	if err := r.Get(ctx, types.NamespacedName{Name: run.Status.ResolvedSpec.TopologyRef.Name, Namespace: run.Namespace}, &topo); err == nil {
+	if err := r.Get(ctx, types.NamespacedName{Name: run.Status.ResolvedSpec.DeploymentRef.Name, Namespace: run.Namespace}, &topo); err == nil {
 		topoClusterRef = topo.Spec.ClusterRef
 	}
 	rc, _, err := resolveRunnerClient(ctx, r.Tracker, r.Client, run.Namespace, run.Status.ResolvedSpec.RunnerClusterRef, topoClusterRef)
@@ -255,7 +255,7 @@ func (r *TestRunReconciler) finish(ctx context.Context, run *benchv1alpha1.TestR
 		targetName := ""
 		testName := run.Spec.TestCaseRef.Name
 		if run.Status.ResolvedSpec != nil {
-			targetName = run.Status.ResolvedSpec.TopologyRef.Name
+			targetName = run.Status.ResolvedSpec.DeploymentRef.Name
 		}
 		if _, err := r.Grafana.Annotate(ctx, run.Status.StartTime.Time, now.Time,
 			[]string{"k6", "quick", "test:" + testName, "target:" + targetName}, message); err != nil {

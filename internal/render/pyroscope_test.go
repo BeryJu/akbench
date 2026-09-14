@@ -16,7 +16,7 @@ func TestPyroscopeObjectsMatchesDefaultPyroscopeHost(t *testing.T) {
 			t.Errorf("expected a %s object in PyroscopeObjects, found none", kind)
 		}
 	}
-	// Must match defaultPyroscopeHost in authentiktopology_controller.go
+	// Must match defaultPyroscopeHost in authentikdeployment_controller.go
 	// ("http://pyroscope.bench-system.svc.cluster.local:4040") exactly.
 	if PyroscopeServiceName != "pyroscope" {
 		t.Errorf("PyroscopeServiceName = %q, want %q", PyroscopeServiceName, "pyroscope")

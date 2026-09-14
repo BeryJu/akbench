@@ -22,10 +22,10 @@
 // in-cluster (hack/dev-apiserver.yaml) rather than through a Next.js
 // server-side proxy the old UI used.
 //
-// Guided create/edit forms for the three CRDs (Topologies/TestCases/
+// Guided create/edit forms for the three CRDs (Deployments/TestCases/
 // Clusters) live alongside this - Headlamp's own generic CRD browser only
 // offers raw-YAML editing, and the standalone UI this plugin replaces had
-// proper forms for all three (TopologyForm/TestCaseForm/ClusterForm).
+// proper forms for all three (DeploymentForm/TestCaseForm/ClusterForm).
 //
 // Top-level, cluster-independent by design: every route below sets
 // useClusterURL: false. This plugin's content genuinely doesn't depend on
@@ -40,7 +40,7 @@
 // - lib/router/getRoutePath.js: a route's actual matched path only gets the
 //   /c/:cluster/ prefix when getRouteUseClusterURL(route) is true (the
 //   route's own useClusterURL, defaulting true) - set it false and the raw
-//   path (e.g. /authentik-bench/topologies) is both registered and what
+//   path (e.g. /authentik-bench/deployments) is both registered and what
 //   Router.createRouteURL returns, no cluster param involved anywhere.
 // - components/Sidebar/SidebarItem.js: a *sidebar entry's* own useClusterURL
 //   independently defaults to false (not true) - it already used our url
@@ -68,12 +68,12 @@ import { SectionBox } from '@kinvolk/headlamp-plugin/lib/CommonComponents';
 import { ClusterCreatePage, ClusterEditPage, ClustersPage } from './ClustersPage';
 import { ComparePage } from './ComparePage';
 import { DashboardPage } from './DashboardPage';
-import { TestCaseSection, TopologySection } from './DetailSections';
+import { TestCaseSection, DeploymentSection } from './DetailSections';
 import { GrafanaPage } from './GrafanaPage';
 import { registerAuthentikIcon } from "./icon";
 import { TestCaseCreatePage, TestCaseEditPage, TestCasesPage } from './TestCasesPage';
 import { TestRunsPage } from './TestRunsPage';
-import { TopologiesPage,TopologyCreatePage, TopologyEditPage } from './TopologiesPage';
+import { DeploymentsPage,DeploymentCreatePage, DeploymentEditPage } from './DeploymentsPage';
 
 const HOME_SIDEBAR = 'HOME';
 
@@ -99,36 +99,36 @@ registerRoute({
 
 registerSidebarEntry({
   parent: 'authentik-bench',
-  name: 'authentik-bench-topologies',
-  label: 'Topologies',
-  url: '/authentik-bench/topologies',
+  name: 'authentik-bench-deployments',
+  label: 'Deployments',
+  url: '/authentik-bench/deployments',
 });
 registerRoute({
-  path: '/authentik-bench/topologies',
-  sidebar: { item: 'authentik-bench-topologies', sidebar: HOME_SIDEBAR },
-  name: 'authentik-bench-topologies',
+  path: '/authentik-bench/deployments',
+  sidebar: { item: 'authentik-bench-deployments', sidebar: HOME_SIDEBAR },
+  name: 'authentik-bench-deployments',
   exact: true,
   useClusterURL: false,
   noAuthRequired: true,
-  component: () => <TopologiesPage />,
+  component: () => <DeploymentsPage />,
 });
 registerRoute({
-  path: '/authentik-bench/topologies/new',
-  sidebar: { item: 'authentik-bench-topologies', sidebar: HOME_SIDEBAR },
-  name: 'authentik-bench-topologies-new',
+  path: '/authentik-bench/deployments/new',
+  sidebar: { item: 'authentik-bench-deployments', sidebar: HOME_SIDEBAR },
+  name: 'authentik-bench-deployments-new',
   exact: true,
   useClusterURL: false,
   noAuthRequired: true,
-  component: () => <TopologyCreatePage />,
+  component: () => <DeploymentCreatePage />,
 });
 registerRoute({
-  path: '/authentik-bench/topologies/:name/edit',
-  sidebar: { item: 'authentik-bench-topologies', sidebar: HOME_SIDEBAR },
-  name: 'authentik-bench-topologies-edit',
+  path: '/authentik-bench/deployments/:name/edit',
+  sidebar: { item: 'authentik-bench-deployments', sidebar: HOME_SIDEBAR },
+  name: 'authentik-bench-deployments-edit',
   exact: true,
   useClusterURL: false,
   noAuthRequired: true,
-  component: () => <TopologyEditPage />,
+  component: () => <DeploymentEditPage />,
 });
 
 registerSidebarEntry({
@@ -259,12 +259,12 @@ registerDetailsViewSection(resource => {
 });
 
 registerDetailsViewSection(resource => {
-  if (resource?.kind !== 'AuthentikTopology') {
+  if (resource?.kind !== 'AuthentikDeployment') {
     return null;
   }
   return (
     <SectionBox title="Benchmark metrics">
-      <TopologySection topologyName={resource.metadata.name} />
+      <DeploymentSection deploymentName={resource.metadata.name} />
     </SectionBox>
   );
 });

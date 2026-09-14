@@ -43,8 +43,8 @@ import {
   TestCase,
   TestCaseSpec,
   TestRun,
-  Topology,
-  TopologySpec,
+  AuthentikDeployment,
+  AuthentikDeploymentSpec,
   WorkloadCluster,
   WorkloadClusterSpec,
 } from './types';
@@ -54,7 +54,7 @@ import {
 export const MANAGEMENT_CLUSTER = 'management';
 
 // headlampClusterName maps a WorkloadCluster's own object name (what
-// AuthentikTopology.spec.clusterRef/TestCase.spec.runnerClusterRef actually
+// AuthentikDeployment.spec.clusterRef/TestCase.spec.runnerClusterRef actually
 // store) to the cluster identifier Headlamp shows in its own switcher and
 // expects in a route's `cluster` param. These differ: CAPI's generated
 // kubeconfig (internal/render/headlampkubeconfig.go merges it in verbatim,
@@ -149,17 +149,17 @@ export const api = {
       body: JSON.stringify(obj),
     }),
 
-  // -- Topologies
-  topologies: () => request<List<Topology>>('/api/v1/topologies').then(r => r.items ?? []),
-  topology: (name: string) => request<Topology>(`/api/v1/topologies/${name}`),
-  createTopology: (obj: ObjectInput<TopologySpec>) =>
-    request<Topology>('/api/v1/topologies', { method: 'POST', body: JSON.stringify(obj) }),
-  updateTopology: (name: string, obj: { spec: TopologySpec }) =>
-    request<Topology>(`/api/v1/topologies/${name}`, { method: 'PUT', body: JSON.stringify(obj) }),
-  deleteTopology: (name: string) => request<void>(`/api/v1/topologies/${name}`, { method: 'DELETE' }),
-  getExtraValues: (name: string) => request<{ valuesYAML: string }>(`/api/v1/topologies/${name}/extra-values`),
+  // -- Deployments
+  deployments: () => request<List<AuthentikDeployment>>('/api/v1/deployments').then(r => r.items ?? []),
+  deployment: (name: string) => request<AuthentikDeployment>(`/api/v1/deployments/${name}`),
+  createDeployment: (obj: ObjectInput<AuthentikDeploymentSpec>) =>
+    request<AuthentikDeployment>('/api/v1/deployments', { method: 'POST', body: JSON.stringify(obj) }),
+  updateDeployment: (name: string, obj: { spec: AuthentikDeploymentSpec }) =>
+    request<AuthentikDeployment>(`/api/v1/deployments/${name}`, { method: 'PUT', body: JSON.stringify(obj) }),
+  deleteDeployment: (name: string) => request<void>(`/api/v1/deployments/${name}`, { method: 'DELETE' }),
+  getExtraValues: (name: string) => request<{ valuesYAML: string }>(`/api/v1/deployments/${name}/extra-values`),
   setExtraValues: (name: string, valuesYAML: string) =>
-    request<{ valuesYAML: string }>(`/api/v1/topologies/${name}/extra-values`, {
+    request<{ valuesYAML: string }>(`/api/v1/deployments/${name}/extra-values`, {
       method: 'PUT',
       body: JSON.stringify({ valuesYAML }),
     }),

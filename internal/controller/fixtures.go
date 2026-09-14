@@ -69,11 +69,11 @@ func ensureFixturesSecret(ctx context.Context, c client.Client, rc client.Client
 // fixturesBlueprintConfigMapName is the ConfigMap `make fixtures` also
 // writes (same script, same management-cluster namespace as
 // fixturesSecretName) holding the authentik blueprint that creates the
-// synthetic users users.json has credentials for. AuthentikTopologyReconciler
-// reads this once a topology's HelmRelease is Ready, mirrors it onto the
+// synthetic users users.json has credentials for. AuthentikDeploymentReconciler
+// reads this once a deployment's HelmRelease is Ready, mirrors it onto the
 // runner cluster as a ConfigMap the chart mounts into the server pod, and
-// execs `ak apply_blueprint` against it before marking the topology Ready -
-// optional (a topology with no ConfigMap by this name just skips the step),
+// execs `ak apply_blueprint` against it before marking the deployment Ready -
+// optional (a deployment with no ConfigMap by this name just skips the step),
 // since fixtures are a dev/benchmark convenience, not a hard dependency.
 const (
 	fixturesBlueprintConfigMapName = "bench-fixtures-blueprint"

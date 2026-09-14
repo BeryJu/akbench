@@ -29,14 +29,14 @@ import (
 
 // ManagementClusterName is the name the UI's cluster picker shows for "the
 // cluster the operator itself runs on", which is what an empty
-// AuthentikTopology.spec.clusterRef selects.
+// AuthentikDeployment.spec.clusterRef selects.
 const ManagementClusterName = "management"
 
 // capiClusterGVK is the Cluster API kind the operator resolves clusterRef
 // against from M4 on.
 var capiClusterGVK = schema.GroupVersionKind{Group: "cluster.x-k8s.io", Version: "v1beta2", Kind: "Cluster"}
 
-// Cluster is the UI's view of somewhere a topology can be deployed.
+// Cluster is the UI's view of somewhere a deployment can be deployed.
 type Cluster struct {
 	Name string `json:"name"`
 	// Management marks the cluster the operator runs on - the implicit
@@ -60,7 +60,7 @@ func managementCluster() Cluster {
 	}
 }
 
-// listClusters returns every place a topology can be deployed. Until the
+// listClusters returns every place a deployment can be deployed. Until the
 // multi-cluster milestone installs Cluster API, that is exactly one entry:
 // the management cluster itself.
 func (s *Server) listClusters(w http.ResponseWriter, r *http.Request) {

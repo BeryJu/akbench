@@ -59,7 +59,7 @@ func newServer(t *testing.T, cfg Config, objects ...client.Object) (*Server, cli
 	c := fake.NewClientBuilder().
 		WithScheme(testScheme(t)).
 		WithObjects(objects...).
-		WithStatusSubresource(&benchv1alpha1.AuthentikTopology{}, &benchv1alpha1.TestCase{}, &benchv1alpha1.TestRun{}).
+		WithStatusSubresource(&benchv1alpha1.AuthentikDeployment{}, &benchv1alpha1.TestCase{}, &benchv1alpha1.TestRun{}).
 		Build()
 	if cfg.Namespace == "" {
 		cfg.Namespace = testNamespace
@@ -108,18 +108,18 @@ func requireStatus(t *testing.T, rec *httptest.ResponseRecorder, want int) {
 	}
 }
 
-// sampleTopology is a Ready topology, since a TestCase referencing one that
+// sampleDeployment is a Ready deployment, since a TestCase referencing one that
 // is not Ready is the operator's problem rather than the API's.
-func sampleTopology(name string) *benchv1alpha1.AuthentikTopology {
-	return &benchv1alpha1.AuthentikTopology{
+func sampleDeployment(name string) *benchv1alpha1.AuthentikDeployment {
+	return &benchv1alpha1.AuthentikDeployment{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: testNamespace},
-		Spec: benchv1alpha1.AuthentikTopologySpec{
+		Spec: benchv1alpha1.AuthentikDeploymentSpec{
 			Namespace: "ak-" + name,
 			Server:    benchv1alpha1.WorkloadSpec{Replicas: 2},
 			Worker:    benchv1alpha1.WorkloadSpec{Replicas: 1},
 			Postgres:  benchv1alpha1.PostgresSpec{Mode: benchv1alpha1.PostgresEmbedded},
 		},
-		Status: benchv1alpha1.AuthentikTopologyStatus{
+		Status: benchv1alpha1.AuthentikDeploymentStatus{
 			ServiceEndpoint: "authentik-" + name + "-server.ak-" + name + ".svc.cluster.local:80",
 			Conditions: []metav1.Condition{{
 				Type:               benchv1alpha1.ConditionReady,
@@ -131,11 +131,11 @@ func sampleTopology(name string) *benchv1alpha1.AuthentikTopology {
 	}
 }
 
-func sampleTestCase(name, topology string, profile benchv1alpha1.TestProfile) *benchv1alpha1.TestCase {
+func sampleTestCase(name, deployment string, profile benchv1alpha1.TestProfile) *benchv1alpha1.TestCase {
 	return &benchv1alpha1.TestCase{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: testNamespace},
 		Spec: benchv1alpha1.TestCaseSpec{
-			TopologyRef: corev1.LocalObjectReference{Name: topology},
+			DeploymentRef: corev1.LocalObjectReference{Name: deployment},
 			Profile:     profile,
 			Script:      "login.ts",
 			VUs:         8,

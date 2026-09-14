@@ -21,19 +21,19 @@ const (
 	// ConditionReady is True once a resource has fully reconciled to its
 	// desired state.
 	ConditionReady = "Ready"
-	// ConditionPostgresReady is True once an AuthentikTopology's postgres
+	// ConditionPostgresReady is True once an AuthentikDeployment's postgres
 	// backend (embedded/CNPG/external) is reachable.
 	ConditionPostgresReady = "PostgresReady"
 	// ConditionHelmReleaseReady mirrors the status of the HelmRelease an
-	// AuthentikTopology owns.
+	// AuthentikDeployment owns.
 	ConditionHelmReleaseReady = "HelmReleaseReady"
 	// ConditionBlueprintApplied is True once the fixtures blueprint (if any
-	// is configured) has been applied against this topology's authentik
+	// is configured) has been applied against this deployment's authentik
 	// instance - True with no work done if none is configured.
 	ConditionBlueprintApplied = "BlueprintApplied"
-	// ConditionTopologyReady is True once a TestCase's AuthentikTopology is
+	// ConditionDeploymentReady is True once a TestCase's AuthentikDeployment is
 	// itself Ready.
-	ConditionTopologyReady = "TopologyReady"
+	ConditionDeploymentReady = "DeploymentReady"
 	// ConditionScriptReady is True once a TestCase's k6 script has been
 	// resolved and mirrored to the runner cluster.
 	ConditionScriptReady = "ScriptReady"

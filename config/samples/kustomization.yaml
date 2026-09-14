@@ -1,6 +1,6 @@
 ## Append samples of your project ##
 resources:
-- bench_v1alpha1_authentiktopology.yaml
+- bench_v1alpha1_authentikdeployment.yaml
 - bench_v1alpha1_testcase.yaml
 - bench_v1alpha1_testrun.yaml
 - bench_v1alpha1_workloadcluster.yaml

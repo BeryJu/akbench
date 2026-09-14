@@ -26,7 +26,7 @@ import (
 )
 
 // TempoServiceName/TempoOTLPHTTPPort must match defaultTracingEndpoint
-// (internal/controller/authentiktopology_controller.go:
+// (internal/controller/authentikdeployment_controller.go:
 // "http://tempo.bench-system.svc.cluster.local:4318") exactly - every
 // authentik pod with errorReporting.enabled exports traces there
 // regardless of which cluster it runs on, so each workload cluster's own

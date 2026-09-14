@@ -68,7 +68,7 @@ spec:
           image: authentik-bench-apiserver:dev
           imagePullPolicy: IfNotPresent
           env:
-            # Matches where this dev session's own AuthentikTopology/etc.
+            # Matches where this dev session's own AuthentikDeployment/etc.
             # objects actually live - see the namespace-mismatch bug this
             # session already hit once with the Next.js UI's own apiserver.
             - name: BENCH_NAMESPACE

@@ -20,6 +20,13 @@ rules:
 - apiGroups:
   - ""
   resources:
+  - events
+  verbs:
+  - create
+  - patch
+- apiGroups:
+  - ""
+  resources:
   - namespaces
   verbs:
   - create
@@ -30,6 +37,7 @@ rules:
 - apiGroups:
   - ""
   resources:
+  - persistentvolumeclaims
   - secrets
   verbs:
   - create
@@ -37,6 +45,21 @@ rules:
   - list
   - update
   - watch
+- apiGroups:
+  - ""
+  resources:
+  - pods
+  verbs:
+  - delete
+  - get
+  - list
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - pods/exec
+  verbs:
+  - create
 - apiGroups:
   - apps
   resources:
@@ -64,7 +87,7 @@ rules:
 - apiGroups:
   - bench.goauthentik.io
   resources:
-  - authentiktopologies
+  - authentikdeployments
   - testcases
   - testruns
   - workloadclusters
@@ -79,7 +102,7 @@ rules:
 - apiGroups:
   - bench.goauthentik.io
   resources:
-  - authentiktopologies/finalizers
+  - authentikdeployments/finalizers
   - testcases/finalizers
   - testruns/finalizers
   - workloadclusters/finalizers
@@ -88,7 +111,7 @@ rules:
 - apiGroups:
   - bench.goauthentik.io
   resources:
-  - authentiktopologies/status
+  - authentikdeployments/status
   - testcases/status
   - testruns/status
   - workloadclusters/status

@@ -16,7 +16,7 @@ phased delivery milestones (M1-M4).
 
 Implemented so far:
 
-- **CRDs** (`bench.goauthentik.io/v1alpha1`): `AuthentikTopology`, `TestCase`,
+- **CRDs** (`bench.goauthentik.io/v1alpha1`): `AuthentikDeployment`, `TestCase`,
   `TestRun`, `WorkloadCluster`.
 - **`WorkloadClusterReconciler`**: renders a full Cluster API cluster stack
   (`Cluster`/`LXCCluster`/`KubeadmControlPlane`/`MachineDeployment` plus their
@@ -26,7 +26,7 @@ Implemented so far:
   `<name>-kubeconfig` Secret) back onto its own status. Provisioning is
   create-once for now - no day-2 resize/upgrade of an existing
   `WorkloadCluster` yet.
-- **`clusterRef`/`runnerClusterRef`**: `AuthentikTopologyReconciler`,
+- **`clusterRef`/`runnerClusterRef`**: `AuthentikDeploymentReconciler`,
   `TestCaseReconciler`, and `TestRunReconciler` all resolve these to a live
   client via `internal/multicluster.Tracker` (wrapping Cluster API's
   `ClusterCache`), falling back to the management cluster when unset.
@@ -34,9 +34,9 @@ Implemented so far:
   Secrets) skip ownerReferences - a remote cluster's garbage collector can't
   recognize a UID from a different cluster's etcd - and clean up through each
   controller's finalizer instead.
-- **`AuthentikTopologyReconciler`**: renders a Flux `HelmRelease` +
+- **`AuthentikDeploymentReconciler`**: renders a Flux `HelmRelease` +
   `HelmRepository` installing the official authentik chart
-  (`charts.goauthentik.io`) with the topology's replica/resource/placement
+  (`charts.goauthentik.io`) with the deployment's replica/resource/placement
   values. All three Postgres modes work: `Embedded` (bundled subchart, with a
   generated password pinned on both sides so they agree), `CNPG` (renders a
   `postgresql.cnpg.io/v1 Cluster`, waits for it healthy, reads its generated
@@ -44,7 +44,7 @@ Implemented so far:
   `Dedicated` mode uses the chart's own `affinity.podAntiAffinity: hard`
   preset; `Default` explicitly sets `none` so pods can share a node (the
   chart's own root default is `soft`, which would already bias them apart).
-  Deleting a topology deletes its `HelmRelease` first and waits for
+  Deleting a deployment deletes its `HelmRelease` first and waits for
   helm-controller's own `helm uninstall` before sweeping the target
   namespace - required because the chart's `ClusterRole`/`ClusterRoleBinding`
   are cluster-scoped and a plain namespace delete can never reach them,

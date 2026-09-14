@@ -1,25 +1,21 @@
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: {{ include "authentik-bench-operator.fullname" . }}-authentiktopology-editor-role
+  name: {{ include "authentik-bench-operator.fullname" . }}-authentikdeployment-viewer-role
   labels:
   {{- include "authentik-bench-operator.labels" . | nindent 4 }}
 rules:
 - apiGroups:
   - bench.goauthentik.io
   resources:
-  - authentiktopologies
+  - authentikdeployments
   verbs:
-  - create
-  - delete
   - get
   - list
-  - patch
-  - update
   - watch
 - apiGroups:
   - bench.goauthentik.io
   resources:
-  - authentiktopologies/status
+  - authentikdeployments/status
   verbs:
   - get

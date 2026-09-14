@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-// A "New topology"/"Register cluster"-style primary action, styled like a
+// A "New deployment"/"Register cluster"-style primary action, styled like a
 // contained MUI Button but rendered as Headlamp's own CommonComponents Link
 // (routeName, no cluster/params needed - every route this plugin registers
 // is useClusterURL: false) instead of a Button + history.push. A real link

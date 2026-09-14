@@ -120,8 +120,8 @@ func (s *Server) Router() http.Handler {
 			r.Get("/"+path+"/{name}/status", s.getResourceStatus(kind))
 		}
 
-		r.Get("/topologies/{name}/extra-values", s.getExtraValues)
-		r.Put("/topologies/{name}/extra-values", s.putExtraValues)
+		r.Get("/deployments/{name}/extra-values", s.getExtraValues)
+		r.Put("/deployments/{name}/extra-values", s.putExtraValues)
 
 		r.Post("/testcases/{name}/runs", s.createRun)
 

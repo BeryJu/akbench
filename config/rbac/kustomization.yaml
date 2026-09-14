@@ -31,7 +31,7 @@ resources:
 - testcase_admin_role.yaml
 - testcase_editor_role.yaml
 - testcase_viewer_role.yaml
-- authentiktopology_admin_role.yaml
-- authentiktopology_editor_role.yaml
-- authentiktopology_viewer_role.yaml
+- authentikdeployment_admin_role.yaml
+- authentikdeployment_editor_role.yaml
+- authentikdeployment_viewer_role.yaml
 

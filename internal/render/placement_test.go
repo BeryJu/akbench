@@ -32,10 +32,10 @@ func TestNodeSelectorAndTolerationsOnlyApplyInDedicatedMode(t *testing.T) {
 	}
 }
 
-// TestServerWorkerAffinityAlwaysHasCrossTopologyTerm guards the actual
-// point of this function: regardless of PlacementMode, two topologies must
+// TestServerWorkerAffinityAlwaysHasCrossDeploymentTerm guards the actual
+// point of this function: regardless of PlacementMode, two deployments must
 // never be able to share a node.
-func TestServerWorkerAffinityAlwaysHasCrossTopologyTerm(t *testing.T) {
+func TestServerWorkerAffinityAlwaysHasCrossDeploymentTerm(t *testing.T) {
 	modes := []benchv1alpha1.PlacementMode{
 		benchv1alpha1.PlacementDefault, "", benchv1alpha1.PlacementDedicated, benchv1alpha1.PlacementPacked,
 	}
@@ -48,13 +48,13 @@ func TestServerWorkerAffinityAlwaysHasCrossTopologyTerm(t *testing.T) {
 				continue
 			}
 			exprs := term.LabelSelector.MatchExpressions
-			if len(exprs) == 2 && exprs[0].Key == "bench.goauthentik.io/topology" &&
+			if len(exprs) == 2 && exprs[0].Key == "bench.goauthentik.io/deployment" &&
 				exprs[1].Values != nil && len(exprs[1].Values) == 1 && exprs[1].Values[0] == "topo-a" {
 				found = true
 			}
 		}
 		if !found {
-			t.Errorf("mode=%q: no cross-topology required anti-affinity term found in %+v", mode, terms)
+			t.Errorf("mode=%q: no cross-deployment required anti-affinity term found in %+v", mode, terms)
 		}
 	}
 }
@@ -63,7 +63,7 @@ func TestServerWorkerAffinityDedicatedAddsOwnReleaseTerm(t *testing.T) {
 	aff := ServerWorkerAffinity(benchv1alpha1.PlacementSpec{Mode: benchv1alpha1.PlacementDedicated}, "demo", "topo-a")
 	terms := requiredAntiAffinityTerms(aff)
 	if len(terms) != 2 {
-		t.Fatalf("Dedicated mode: got %d required anti-affinity terms, want 2 (cross-topology + own-release)", len(terms))
+		t.Fatalf("Dedicated mode: got %d required anti-affinity terms, want 2 (cross-deployment + own-release)", len(terms))
 	}
 	found := false
 	for _, term := range terms {
@@ -91,18 +91,18 @@ func TestServerWorkerAffinityPackedAddsOwnReleasePodAffinity(t *testing.T) {
 	if terms[0].TopologyKey != "kubernetes.io/hostname" {
 		t.Errorf("required term topologyKey = %q, want kubernetes.io/hostname", terms[0].TopologyKey)
 	}
-	// Packed mode must still refuse to share a node with another topology.
+	// Packed mode must still refuse to share a node with another deployment.
 	if terms := requiredAntiAffinityTerms(aff); len(terms) != 1 {
-		t.Errorf("Packed mode: got %d required anti-affinity terms, want 1 (cross-topology only)", len(terms))
+		t.Errorf("Packed mode: got %d required anti-affinity terms, want 1 (cross-deployment only)", len(terms))
 	}
 }
 
-func TestServerWorkerAffinityDefaultHasOnlyCrossTopologyTerm(t *testing.T) {
+func TestServerWorkerAffinityDefaultHasOnlyCrossDeploymentTerm(t *testing.T) {
 	aff := ServerWorkerAffinity(benchv1alpha1.PlacementSpec{Mode: benchv1alpha1.PlacementDefault}, "demo", "topo-a")
 	if aff.PodAffinity != nil {
 		t.Errorf("Default mode: want no PodAffinity, got %+v", aff.PodAffinity)
 	}
 	if terms := requiredAntiAffinityTerms(aff); len(terms) != 1 {
-		t.Errorf("Default mode: got %d required anti-affinity terms, want 1 (cross-topology only)", len(terms))
+		t.Errorf("Default mode: got %d required anti-affinity terms, want 1 (cross-deployment only)", len(terms))
 	}
 }

@@ -37,15 +37,15 @@ const (
 	ProfileBurn TestProfile = "Burn"
 )
 
-// TestCaseSpec defines one k6 load test: which AuthentikTopology it drives,
+// TestCaseSpec defines one k6 load test: which AuthentikDeployment it drives,
 // which script/profile/load shape it uses, and which flow it walks. The
 // object's name is the k6 `testid` tag every dashboard splits on.
 type TestCaseSpec struct {
-	// topologyRef names the AuthentikTopology this test drives.
-	TopologyRef corev1.LocalObjectReference `json:"topologyRef"`
+	// deploymentRef names the AuthentikDeployment this test drives.
+	DeploymentRef corev1.LocalObjectReference `json:"deploymentRef"`
 
 	// runnerClusterRef names the cluster.x-k8s.io/v1beta1 Cluster the k6
-	// workload itself runs on. Defaults to the topology's clusterRef.
+	// workload itself runs on. Defaults to the deployment's clusterRef.
 	// +optional
 	RunnerClusterRef *corev1.LocalObjectReference `json:"runnerClusterRef,omitempty"`
 
@@ -98,7 +98,7 @@ type TestCaseSpec struct {
 
 // TestCaseStatus defines the observed state of TestCase.
 type TestCaseStatus struct {
-	// conditions report Ready, TopologyReady and ScriptReady.
+	// conditions report Ready, DeploymentReady and ScriptReady.
 	// +listType=map
 	// +listMapKey=type
 	// +optional
@@ -119,7 +119,7 @@ type TestCaseStatus struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:printcolumn:name="Topology",type=string,JSONPath=`.spec.topologyRef.name`
+// +kubebuilder:printcolumn:name="Deployment",type=string,JSONPath=`.spec.deploymentRef.name`
 // +kubebuilder:printcolumn:name="Profile",type=string,JSONPath=`.spec.profile`
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
 // +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=="Ready")].status`

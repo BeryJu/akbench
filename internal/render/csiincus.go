@@ -30,7 +30,7 @@ import (
 
 // csi-incus (github.com/BeryJu/csi-incus) publishes its own Helm chart to
 // GHCR as an OCI artifact on every vX.Y.Z release tag - installed the same
-// way AuthentikTopology's own chart is (internal/render/helmrelease.go): a
+// way AuthentikDeployment's own chart is (internal/render/helmrelease.go): a
 // Flux HelmRepository + HelmRelease applied on the management cluster, with
 // spec.kubeConfig.secretRef pointing helm-controller at the workload
 // cluster to install onto remotely. This replaced an earlier
@@ -44,7 +44,7 @@ const (
 	csiIncusChartName          = "csi-incus"
 	csiIncusOCIRepoURL         = "oci://ghcr.io/beryju/charts"
 
-	// csiIncusChartVersion is pinned rather than "*" (as AuthentikTopology's
+	// csiIncusChartVersion is pinned rather than "*" (as AuthentikDeployment's
 	// chart version defaults to) since this project doesn't yet expose a
 	// per-WorkloadCluster override for it - bump deliberately when
 	// csi-incus cuts a new chart release.
