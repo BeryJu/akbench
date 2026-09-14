@@ -68,12 +68,17 @@ import { SectionBox } from '@kinvolk/headlamp-plugin/lib/CommonComponents';
 import { ClusterCreatePage, ClusterEditPage, ClustersPage } from './ClustersPage';
 import { ComparePage } from './ComparePage';
 import { DashboardPage } from './DashboardPage';
-import { TestCaseSection, DeploymentSection } from './DetailSections';
+import { DeploymentCreatePage, DeploymentEditPage,DeploymentsPage } from './DeploymentsPage';
+import { DeploymentSection,TestCaseSection } from './DetailSections';
 import { GrafanaPage } from './GrafanaPage';
 import { registerAuthentikIcon } from "./icon";
 import { TestCaseCreatePage, TestCaseEditPage, TestCasesPage } from './TestCasesPage';
+import {
+  TestCaseTemplateCreatePage,
+  TestCaseTemplateEditPage,
+  TestCaseTemplatesPage,
+} from './TestCaseTemplatesPage';
 import { TestRunsPage } from './TestRunsPage';
-import { DeploymentsPage,DeploymentCreatePage, DeploymentEditPage } from './DeploymentsPage';
 
 const HOME_SIDEBAR = 'HOME';
 
@@ -163,6 +168,40 @@ registerRoute({
   useClusterURL: false,
   noAuthRequired: true,
   component: () => <TestCaseEditPage />,
+});
+
+registerSidebarEntry({
+  parent: 'authentik-bench',
+  name: 'authentik-bench-testcasetemplates',
+  label: 'Test case templates',
+  url: '/authentik-bench/testcasetemplates',
+});
+registerRoute({
+  path: '/authentik-bench/testcasetemplates',
+  sidebar: { item: 'authentik-bench-testcasetemplates', sidebar: HOME_SIDEBAR },
+  name: 'authentik-bench-testcasetemplates',
+  exact: true,
+  useClusterURL: false,
+  noAuthRequired: true,
+  component: () => <TestCaseTemplatesPage />,
+});
+registerRoute({
+  path: '/authentik-bench/testcasetemplates/new',
+  sidebar: { item: 'authentik-bench-testcasetemplates', sidebar: HOME_SIDEBAR },
+  name: 'authentik-bench-testcasetemplates-new',
+  exact: true,
+  useClusterURL: false,
+  noAuthRequired: true,
+  component: () => <TestCaseTemplateCreatePage />,
+});
+registerRoute({
+  path: '/authentik-bench/testcasetemplates/:name/edit',
+  sidebar: { item: 'authentik-bench-testcasetemplates', sidebar: HOME_SIDEBAR },
+  name: 'authentik-bench-testcasetemplates-edit',
+  exact: true,
+  useClusterURL: false,
+  noAuthRequired: true,
+  component: () => <TestCaseTemplateEditPage />,
 });
 
 registerSidebarEntry({

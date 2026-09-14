@@ -37,14 +37,16 @@
 // bug this session already hit once for a related reason).
 import { ApiProxy } from '@kinvolk/headlamp-plugin/lib';
 import {
+  AuthentikDeployment,
+  AuthentikDeploymentSpec,
   Cluster,
   CompareResponse,
   RangeResponse,
   TestCase,
   TestCaseSpec,
+  TestCaseTemplate,
+  TestCaseTemplateSpec,
   TestRun,
-  AuthentikDeployment,
-  AuthentikDeploymentSpec,
   WorkloadCluster,
   WorkloadClusterSpec,
 } from './types';
@@ -174,6 +176,20 @@ export const api = {
   deleteTestCase: (name: string) => request<void>(`/api/v1/testcases/${name}`, { method: 'DELETE' }),
   runTestCase: (name: string) =>
     request<TestRun>(`/api/v1/testcases/${name}/runs`, { method: 'POST', body: JSON.stringify({}) }),
+
+  // -- Test case templates
+  testCaseTemplates: () =>
+    request<List<TestCaseTemplate>>('/api/v1/testcasetemplates').then(r => r.items ?? []),
+  testCaseTemplate: (name: string) => request<TestCaseTemplate>(`/api/v1/testcasetemplates/${name}`),
+  createTestCaseTemplate: (obj: ObjectInput<TestCaseTemplateSpec>) =>
+    request<TestCaseTemplate>('/api/v1/testcasetemplates', { method: 'POST', body: JSON.stringify(obj) }),
+  updateTestCaseTemplate: (name: string, obj: { spec: TestCaseTemplateSpec }) =>
+    request<TestCaseTemplate>(`/api/v1/testcasetemplates/${name}`, {
+      method: 'PUT',
+      body: JSON.stringify(obj),
+    }),
+  deleteTestCaseTemplate: (name: string) =>
+    request<void>(`/api/v1/testcasetemplates/${name}`, { method: 'DELETE' }),
 
   // -- Test runs
   testRuns: (testCase?: string) =>

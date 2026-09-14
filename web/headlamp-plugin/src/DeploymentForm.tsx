@@ -23,7 +23,7 @@ import { Alert, Box, Button, Checkbox, FormControlLabel, Grid, MenuItem, TextFie
 import { useEffect, useState } from 'react';
 import { useHistory } from 'react-router-dom';
 import { api, ApiError } from './api';
-import { PlacementMode, PostgresMode, AuthentikDeployment, AuthentikDeploymentSpec } from './types';
+import { AuthentikDeployment, AuthentikDeploymentSpec,PlacementMode, PostgresMode } from './types';
 import { useResource } from './useResource';
 
 /**

@@ -17,7 +17,7 @@
 // Ported from the deleted web/frontend/components/testcase-form.tsx, on MUI +
 // Headlamp's own SectionBox instead of PatternFly/Next.js's router.
 import { Router } from '@kinvolk/headlamp-plugin/lib';
-import { SectionBox } from '@kinvolk/headlamp-plugin/lib/CommonComponents';
+import { Link, SectionBox } from '@kinvolk/headlamp-plugin/lib/CommonComponents';
 import Editor from '@monaco-editor/react';
 import { Alert, Box, Button, Grid, MenuItem, TextField, Typography, useTheme } from '@mui/material';
 import { useState } from 'react';
@@ -26,13 +26,6 @@ import { api, ApiError } from './api';
 import { TestCase, TestCaseSpec, TestProfile } from './types';
 import { useResource } from './useResource';
 
-// Matches internal/testtemplate's Registry - hardcoded here the same way
-// GrafanaPage.tsx hardcodes its dashboard list, since this is a small,
-// developer-curated catalog, not something to fetch from the API.
-const TEMPLATES = [
-  { name: 'login', label: 'Login - standard username/password (+ MFA) flow' },
-  { name: 'oauth-oidc', label: 'OAuth/OIDC - authorization-code flow via oidc-test-client' },
-];
 const INLINE_TEMPLATE = '__inline__';
 
 function emptySpec(): TestCaseSpec {
@@ -53,6 +46,7 @@ export function TestCaseForm({ existing }: { existing?: TestCase }) {
   const history = useHistory();
   const theme = useTheme();
   const deployments = useResource(() => api.deployments(), [], 0);
+  const templates = useResource(() => api.testCaseTemplates(), [], 0);
   const [name, setName] = useState(existing?.metadata.name ?? '');
   const [spec, setSpec] = useState<TestCaseSpec>(existing?.spec ?? emptySpec());
   const [error, setError] = useState<string>();
@@ -145,13 +139,17 @@ export function TestCaseForm({ existing }: { existing?: TestCase }) {
                 }
               }}
             >
-              {TEMPLATES.map(t => (
-                <MenuItem key={t.name} value={t.name}>
-                  {t.label}
+              {(templates.data ?? []).map(t => (
+                <MenuItem key={t.metadata.name} value={t.metadata.name}>
+                  {t.metadata.name}
+                  {t.spec.description ? ` - ${t.spec.description}` : ''}
                 </MenuItem>
               ))}
               <MenuItem value={INLINE_TEMPLATE}>Custom - inline k6 script</MenuItem>
             </TextField>
+          </Grid>
+          <Grid item xs={12}>
+            <Link routeName="authentik-bench-testcasetemplates">Manage test case templates</Link>
           </Grid>
           {scriptChoice === INLINE_TEMPLATE && (
             <Grid item xs={12}>

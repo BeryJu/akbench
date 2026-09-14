@@ -116,6 +116,21 @@ export interface TestCase {
   };
 }
 
+export interface TestCaseTemplateSpec {
+  description?: string;
+  script: string;
+  requiresOAuthClient?: boolean;
+}
+
+export interface TestCaseTemplate {
+  metadata: ObjectMeta;
+  spec: TestCaseTemplateSpec;
+  status?: {
+    conditions?: Condition[];
+    phase?: string;
+  };
+}
+
 export type TestRunPhase = 'Pending' | 'Running' | 'Succeeded' | 'Failed';
 
 export interface TestRun {

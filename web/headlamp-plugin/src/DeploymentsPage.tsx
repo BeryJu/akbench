@@ -23,9 +23,9 @@ import { Alert, Button, Stack } from '@mui/material';
 import { useParams } from 'react-router-dom';
 import { api, ApiError, headlampClusterName, MANAGEMENT_CLUSTER } from './api';
 import { ClusterResourceButton } from './ClusterResourceButton';
+import { DeploymentForm } from './DeploymentForm';
 import { PrimaryLinkButton } from './PrimaryLinkButton';
 import { StatusChip } from './StatusPopover';
-import { DeploymentForm } from './DeploymentForm';
 import { useResource } from './useResource';
 
 export function DeploymentsPage() {
