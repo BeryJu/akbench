@@ -41,8 +41,6 @@ import (
 	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
 	"github.com/goauthentik/authentik-bench/internal/multicluster"
 	"github.com/goauthentik/authentik-bench/internal/render"
-	"github.com/goauthentik/authentik-bench/internal/testtemplate"
-	k6scripts "github.com/goauthentik/authentik-bench/k6/scripts"
 )
 
 const testCaseFinalizer = "bench.goauthentik.io/remote-cleanup"
@@ -77,6 +75,7 @@ type TestCaseReconciler struct {
 // +kubebuilder:rbac:groups=bench.goauthentik.io,resources=testcases/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=bench.goauthentik.io,resources=testcases/finalizers,verbs=update
 // +kubebuilder:rbac:groups=bench.goauthentik.io,resources=authentikdeployments,verbs=get;list;watch
+// +kubebuilder:rbac:groups=bench.goauthentik.io,resources=testcasetemplates,verbs=get;list;watch
 // +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=core,resources=configmaps,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=core,resources=services,verbs=get;list;watch;create;update
@@ -140,7 +139,24 @@ func (r *TestCaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		}
 	}
 
-	scriptCM, err := r.ensureScriptConfigMap(ctx, rc, remote, &tc)
+	var tmpl *benchv1alpha1.TestCaseTemplate
+	usingTemplate := tc.Spec.Inline == "" && tc.Spec.ScriptConfigMapRef == nil
+	if usingTemplate {
+		tmpl, err = resolveTemplate(ctx, r.Client, tc.Namespace, tc.Spec.Template)
+		if err != nil {
+			if apierrors.IsNotFound(err) {
+				setCondition(r.Recorder, &tc, &tc.Status.Conditions, tc.Generation, benchv1alpha1.ConditionScriptReady, metav1.ConditionFalse,
+					benchv1alpha1.ReasonDependencyNotReady, fmt.Sprintf("TestCaseTemplate %q not found", tc.Spec.Template))
+				setCondition(r.Recorder, &tc, &tc.Status.Conditions, tc.Generation, benchv1alpha1.ConditionReady, metav1.ConditionFalse,
+					benchv1alpha1.ReasonDependencyNotReady, "waiting for template")
+				tc.Status.Phase = benchv1alpha1.PhaseFor(tc.Status.Conditions)
+				return ctrl.Result{}, r.Status().Update(ctx, &tc)
+			}
+			return ctrl.Result{}, fmt.Errorf("resolve template: %w", err)
+		}
+	}
+
+	scriptCM, err := r.ensureScriptConfigMap(ctx, rc, remote, &tc, tmpl)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("ensure script configmap: %w", err)
 	}
@@ -153,7 +169,7 @@ func (r *TestCaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 
 	var oauthHost string
 	var oauthPort int32
-	if tmpl, ok := testtemplate.Resolve(tc.Spec.Template); ok && tmpl.RequiresOAuthClient && tc.Spec.Inline == "" && tc.Spec.ScriptConfigMapRef == nil {
+	if tmpl != nil && tmpl.Spec.RequiresOAuthClient {
 		oauthHost, oauthPort, err = r.ensureOAuthClient(ctx, rc, remote, &tc, topo, host, port)
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("ensure oauth client: %w", err)
@@ -279,29 +295,27 @@ func (r *TestCaseReconciler) reconcileBurn(ctx context.Context, rc client.Client
 
 // ensureScriptConfigMap mirrors the resolved script content - a
 // user-supplied scriptConfigMapRef (BYO, used directly), inline content
-// stored on the TestCase itself, or the selected template's built-in
+// stored on the TestCase itself, or the resolved TestCaseTemplate's own
 // script, in that precedence order (matching render.scriptFileName's own) -
-// into the ConfigMap the k6 pod mounts on rc, returning its name.
-func (r *TestCaseReconciler) ensureScriptConfigMap(ctx context.Context, rc client.Client, remote bool, tc *benchv1alpha1.TestCase) (string, error) {
+// into the ConfigMap the k6 pod mounts on rc, returning its name. tmpl is
+// nil when scriptConfigMapRef or inline already won upstream (see Reconcile's
+// usingTemplate).
+func (r *TestCaseReconciler) ensureScriptConfigMap(ctx context.Context, rc client.Client, remote bool, tc *benchv1alpha1.TestCase, tmpl *benchv1alpha1.TestCaseTemplate) (string, error) {
 	if tc.Spec.ScriptConfigMapRef != nil {
 		// BYO script: used directly, nothing to mirror.
 		return tc.Spec.ScriptConfigMapRef.Name, nil
 	}
 
-	var key, content string
+	var content string
 	if tc.Spec.Inline != "" {
-		key, content = "script.ts", tc.Spec.Inline
+		content = tc.Spec.Inline
 	} else {
-		tmpl, ok := testtemplate.Resolve(tc.Spec.Template)
-		if !ok {
-			return "", fmt.Errorf("unknown template %q", tc.Spec.Template)
+		if tmpl.Spec.Script == "" {
+			return "", fmt.Errorf("TestCaseTemplate %q has an empty script", tmpl.Name)
 		}
-		c, ok := k6scripts.Get(tmpl.ScriptName)
-		if !ok {
-			return "", fmt.Errorf("template %q's script %q is missing from the embedded k6/scripts", tmpl.Name, tmpl.ScriptName)
-		}
-		key, content = tmpl.ScriptName, c
+		content = tmpl.Spec.Script
 	}
+	const key = "script.ts"
 
 	name := "k6-script-" + tc.Name
 	cm := &corev1.ConfigMap{

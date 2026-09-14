@@ -4,6 +4,7 @@
 resources:
 - bases/bench.goauthentik.io_authentikdeployments.yaml
 - bases/bench.goauthentik.io_testcases.yaml
+- bases/bench.goauthentik.io_testcasetemplates.yaml
 - bases/bench.goauthentik.io_testruns.yaml
 - bases/bench.goauthentik.io_workloadclusters.yaml
 # +kubebuilder:scaffold:crdkustomizeresource

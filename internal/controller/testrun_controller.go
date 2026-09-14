@@ -38,7 +38,6 @@ import (
 	"github.com/goauthentik/authentik-bench/internal/grafana"
 	"github.com/goauthentik/authentik-bench/internal/multicluster"
 	"github.com/goauthentik/authentik-bench/internal/render"
-	"github.com/goauthentik/authentik-bench/internal/testtemplate"
 )
 
 const testRunFinalizer = "bench.goauthentik.io/remote-cleanup"
@@ -61,6 +60,7 @@ type TestRunReconciler struct {
 // +kubebuilder:rbac:groups=bench.goauthentik.io,resources=testruns/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=bench.goauthentik.io,resources=testruns/finalizers,verbs=update
 // +kubebuilder:rbac:groups=bench.goauthentik.io,resources=testcases,verbs=get;list;watch
+// +kubebuilder:rbac:groups=bench.goauthentik.io,resources=testcasetemplates,verbs=get;list;watch
 // +kubebuilder:rbac:groups=batch,resources=jobs,verbs=get;list;watch;create;update;patch;delete
 
 func (r *TestRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -157,8 +157,16 @@ func (r *TestRunReconciler) start(ctx context.Context, run *benchv1alpha1.TestRu
 
 	var oauthHost string
 	var oauthPort int32
-	if tmpl, ok := testtemplate.Resolve(tc.Spec.Template); ok && tmpl.RequiresOAuthClient && tc.Spec.Inline == "" && tc.Spec.ScriptConfigMapRef == nil {
-		oauthHost, oauthPort = oidcTestClientHostPort(&tc)
+	if tc.Spec.Inline == "" && tc.Spec.ScriptConfigMapRef == nil {
+		tmpl, err := resolveTemplate(ctx, r.Client, tc.Namespace, tc.Spec.Template)
+		if err != nil {
+			setCondition(r.Recorder, run, &run.Status.Conditions, run.Generation, benchv1alpha1.ConditionReady, metav1.ConditionFalse,
+				benchv1alpha1.ReasonDependencyNotReady, fmt.Sprintf("resolving TestCaseTemplate %q: %v", tc.Spec.Template, err))
+			return ctrl.Result{RequeueAfter: 5 * time.Second}, r.Status().Update(ctx, run)
+		}
+		if tmpl.Spec.RequiresOAuthClient {
+			oauthHost, oauthPort = oidcTestClientHostPort(&tc)
+		}
 	}
 
 	params := render.K6WorkloadParams{

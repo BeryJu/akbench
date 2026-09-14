@@ -1,0 +1,172 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.21.0
+  name: testcasetemplates.bench.goauthentik.io
+spec:
+  group: bench.goauthentik.io
+  names:
+    kind: TestCaseTemplate
+    listKind: TestCaseTemplateList
+    plural: testcasetemplates
+    singular: testcasetemplate
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.requiresOAuthClient
+      name: OAuth
+      type: boolean
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .status.conditions[?(@.type=="Ready")].status
+      name: Ready
+      type: string
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: TestCaseTemplate is the Schema for the testcasetemplates API
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: |-
+              TestCaseTemplateSpec is one reusable k6 test preset a TestCase can select
+              via spec.template (by this object's name) - the editable, cluster-native
+              replacement for what used to be a fixed, code-compiled catalog
+              (internal/testtemplate's own Registry, now removed). Editing a template
+              here - through Headlamp, or plain kubectl - takes effect the next time a
+              TestCase referencing it reconciles; nothing needs rebuilding or
+              redeploying.
+            properties:
+              description:
+                description: |-
+                  description documents what this template exercises, shown in the
+                  Headlamp plugin's template picker.
+                type: string
+              requiresOAuthClient:
+                description: |-
+                  requiresOAuthClient gates TestCaseReconciler's oidc-test-client
+                  Deployment/Service + OAuth2 provider/application blueprint
+                  provisioning (internal/controller/testcase_controller.go,
+                  internal/render/oidctestclient.go) for any TestCase selecting this
+                  template - scoped to the TestCase, not the AuthentikDeployment it
+                  targets, so "what is being tested" stays fully decoupled from "what
+                  it's being tested against" the same way the k6 workload itself
+                  already is.
+                type: boolean
+              script:
+                description: |-
+                  script is the k6 test script (TypeScript) this template runs -
+                  mirrored verbatim into the k6-script-<testcase> ConfigMap by
+                  TestCaseReconciler, the same way spec.inline already is on a TestCase
+                  itself.
+                type: string
+            required:
+            - script
+            type: object
+          status:
+            description: TestCaseTemplateStatus defines the observed state of TestCaseTemplate.
+            properties:
+              conditions:
+                description: |-
+                  conditions report Ready - True once spec.script is non-empty. A
+                  template has no remote/owned resources of its own to reconcile; this
+                  only exists so a broken template (e.g. accidentally emptied via
+                  Headlamp) is visible the same way every other CRD's status already is.
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              observedGeneration:
+                format: int64
+                type: integer
+              phase:
+                description: |-
+                  phase summarizes the Ready condition at a glance - computed from
+                  conditions, never set independently. See ReconcilePhase.
+                enum:
+                - Pending
+                - Reconciling
+                - Ready
+                - Failed
+                type: string
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

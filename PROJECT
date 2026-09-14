@@ -15,7 +15,7 @@ resources:
   controller: true
   domain: goauthentik.io
   group: bench
-  kind: AuthentikTopology
+  kind: AuthentikDeployment
   path: github.com/goauthentik/authentik-bench/api/v1alpha1
   version: v1alpha1
 - api:
@@ -25,6 +25,15 @@ resources:
   domain: goauthentik.io
   group: bench
   kind: TestCase
+  path: github.com/goauthentik/authentik-bench/api/v1alpha1
+  version: v1alpha1
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
+  domain: goauthentik.io
+  group: bench
+  kind: TestCaseTemplate
   path: github.com/goauthentik/authentik-bench/api/v1alpha1
   version: v1alpha1
 - api:

@@ -41,10 +41,11 @@ type resourceKind struct {
 
 // resourceKinds maps /api/v1/<path> onto the kind it serves.
 var resourceKinds = map[string]resourceKind{
-	"deployments":      {kind: "AuthentikDeployment", listKind: "AuthentikDeploymentList"},
-	"testcases":        {kind: "TestCase", listKind: "TestCaseList"},
-	"testruns":         {kind: "TestRun", listKind: "TestRunList"},
-	"workloadclusters": {kind: "WorkloadCluster", listKind: "WorkloadClusterList"},
+	"deployments":       {kind: "AuthentikDeployment", listKind: "AuthentikDeploymentList"},
+	"testcases":         {kind: "TestCase", listKind: "TestCaseList"},
+	"testcasetemplates": {kind: "TestCaseTemplate", listKind: "TestCaseTemplateList"},
+	"testruns":          {kind: "TestRun", listKind: "TestRunList"},
+	"workloadclusters":  {kind: "WorkloadCluster", listKind: "WorkloadClusterList"},
 }
 
 func (k resourceKind) gvk() schema.GroupVersionKind {

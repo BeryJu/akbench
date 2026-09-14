@@ -127,8 +127,8 @@ func TestK6TagScheme(t *testing.T) {
 			t.Errorf("k6 args %v must start with `run --out experimental-prometheus-rw`", args)
 		}
 		last := args[len(args)-1]
-		if last != "/data/tests/login.ts" {
-			t.Errorf("k6 args end with %q, want the script path /data/tests/login.ts", last)
+		if last != "/data/tests/script.ts" {
+			t.Errorf("k6 args end with %q, want the script path /data/tests/script.ts", last)
 		}
 	}
 }

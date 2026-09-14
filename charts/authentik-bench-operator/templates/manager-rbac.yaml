@@ -83,6 +83,7 @@ rules:
   resources:
   - authentikdeployments
   - testcases
+  - testcasetemplates
   - testruns
   - workloadclusters
   verbs:
@@ -98,6 +99,7 @@ rules:
   resources:
   - authentikdeployments/finalizers
   - testcases/finalizers
+  - testcasetemplates/finalizers
   - testruns/finalizers
   - workloadclusters/finalizers
   verbs:
@@ -107,6 +109,7 @@ rules:
   resources:
   - authentikdeployments/status
   - testcases/status
+  - testcasetemplates/status
   - testruns/status
   - workloadclusters/status
   verbs:

@@ -31,6 +31,7 @@ import (
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/filters"
@@ -216,6 +217,14 @@ func main() {
 		setupLog.Error(err, "Failed to create controller", "controller", "testcase")
 		os.Exit(1)
 	}
+	if err := (&controller.TestCaseTemplateReconciler{
+		Client:   mgr.GetClient(),
+		Scheme:   mgr.GetScheme(),
+		Recorder: mgr.GetEventRecorderFor("testcasetemplate-controller"),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "Failed to create controller", "controller", "testcasetemplate")
+		os.Exit(1)
+	}
 	if err := (&controller.TestRunReconciler{
 		Client:   mgr.GetClient(),
 		Scheme:   mgr.GetScheme(),
@@ -243,6 +252,21 @@ func main() {
 		os.Exit(1)
 	}
 	// +kubebuilder:scaffold:builder
+
+	// Seeded with a plain, uncached client (the manager's own GetClient()
+	// only works once its cache has started, i.e. after mgr.Start below) so
+	// any failure here - e.g. the CRD not installed yet - surfaces
+	// immediately as a clear startup error rather than racing the manager's
+	// own lifecycle.
+	seedClient, err := client.New(mgr.GetConfig(), client.Options{Scheme: mgr.GetScheme()})
+	if err != nil {
+		setupLog.Error(err, "Failed to build seed client")
+		os.Exit(1)
+	}
+	if err := controller.SeedDefaultTestCaseTemplates(ctx, seedClient, envOr("BENCH_NAMESPACE", "default")); err != nil {
+		setupLog.Error(err, "Failed to seed default TestCaseTemplates")
+		os.Exit(1)
+	}
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		setupLog.Error(err, "Failed to set up health check")

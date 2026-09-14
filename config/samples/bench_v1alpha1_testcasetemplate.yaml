@@ -1,0 +1,17 @@
+apiVersion: bench.goauthentik.io/v1alpha1
+kind: TestCaseTemplate
+metadata:
+  labels:
+    app.kubernetes.io/name: authentik-bench
+    app.kubernetes.io/managed-by: kustomize
+  name: login
+spec:
+  description: Walks the authentik flow executor through a standard username/password (+ optional MFA) login.
+  script: |
+    // A minimal k6 script - see the operator's own seeded "login"/"oauth-oidc"
+    // TestCaseTemplate objects (internal/controller/seedtemplates.go) for a
+    // real, complete example.
+    import http from "k6/http";
+    export default function () {
+      http.get(`http://${__ENV.BENCH_HOST}:${__ENV.BENCH_PORT}/`);
+    }

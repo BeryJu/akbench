@@ -192,11 +192,22 @@ var _ = Describe("TestCase Controller", func() {
 			forceDelete(context.Background(), &benchv1alpha1.TestCase{ObjectMeta: metav1.ObjectMeta{Name: typeNamespacedName.Name, Namespace: typeNamespacedName.Namespace}})
 		})
 
-		It("fails the reconcile with a clear error instead of silently falling back", func() {
+		It("reports DependencyNotReady with a clear message instead of silently falling back", func() {
 			r := &TestCaseReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Recorder: record.NewFakeRecorder(100)}
 			_, err := r.Reconcile(context.Background(), reconcile.Request{NamespacedName: typeNamespacedName})
-			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("does-not-exist"))
+			Expect(err).NotTo(HaveOccurred())
+
+			var tc benchv1alpha1.TestCase
+			Expect(k8sClient.Get(context.Background(), typeNamespacedName, &tc)).To(Succeed())
+			ready := meta.FindStatusCondition(tc.Status.Conditions, benchv1alpha1.ConditionReady)
+			Expect(ready).NotTo(BeNil())
+			Expect(ready.Status).To(Equal(metav1.ConditionFalse))
+			Expect(ready.Reason).To(Equal(benchv1alpha1.ReasonDependencyNotReady))
+
+			script := meta.FindStatusCondition(tc.Status.Conditions, benchv1alpha1.ConditionScriptReady)
+			Expect(script).NotTo(BeNil())
+			Expect(script.Status).To(Equal(metav1.ConditionFalse))
+			Expect(script.Message).To(ContainSubstring("does-not-exist"))
 		})
 	})
 })

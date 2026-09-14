@@ -44,7 +44,7 @@ const (
 // OIDCTestClientName is deterministic from the TestCase name - one
 // oidc-test-client per oauth-oidc TestCase, owned by it (not the
 // AuthentikDeployment it targets), the same scoping the k6 workload itself
-// already uses (see testtemplate.Template.RequiresOAuthClient's own doc
+// already uses (see TestCaseTemplateSpec.RequiresOAuthClient's own doc
 // comment for why: keeps "what's being tested" out of the deployment).
 func OIDCTestClientName(tc *benchv1alpha1.TestCase) string {
 	return "oidc-test-client-" + tc.Name

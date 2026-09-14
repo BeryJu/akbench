@@ -95,7 +95,7 @@ entries:
 // ensureOAuthClient provisions what the oauth-oidc template's k6 script
 // needs beyond the plain flow-executor walk login.ts already does: a
 // running oidc-test-client (owned by tc, not topo - see
-// testtemplate.Template.RequiresOAuthClient's own doc comment for why) plus
+// TestCaseTemplateSpec.RequiresOAuthClient's own doc comment for why) plus
 // a matching OAuth2Provider/Application registered in the target
 // AuthentikDeployment via the same render.BlueprintJob mechanism
 // AuthentikDeploymentReconciler's own fixtures blueprint already uses.

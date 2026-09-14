@@ -115,6 +115,14 @@ var _ = BeforeSuite(func() {
 		ObjectMeta: metav1.ObjectMeta{Name: fixturesSecretName, Namespace: "default"},
 		Data:       map[string][]byte{"users.json": []byte("[]")},
 	})).To(Succeed())
+
+	// Mirrors production: the real operator seeds these two built-in
+	// TestCaseTemplate objects at startup (see seedtemplates.go). Every spec
+	// that reconciles a TestCase/TestRun resolves its template against a
+	// real object now (there's no compiled-in registry fallback anymore), so
+	// this is created once here rather than per-spec, the same reasoning as
+	// the fixtures Secret above.
+	Expect(SeedDefaultTestCaseTemplates(ctx, k8sClient, "default")).To(Succeed())
 })
 
 var _ = AfterSuite(func() {

@@ -80,3 +80,23 @@ func resolveRunnerClient(ctx context.Context, tracker *multicluster.Tracker, loc
 	rc, err := tracker.GetClient(ctx, client.ObjectKey{Namespace: namespace, Name: name})
 	return rc, true, err
 }
+
+// resolveTemplate fetches the TestCaseTemplate a TestCase's spec.template
+// names, defaulting an empty name to DefaultTemplateName (in case this is
+// reached before CRD admission defaulting - e.g. a TestCase built by hand in
+// a test). Templates live in the same namespace as the TestCase itself (the
+// management cluster's own bench namespace, never the runner cluster), so
+// this is always a local Get, unlike resolveReadyDeployment/
+// resolveRunnerClient which may cross into a workload cluster. Shared by
+// TestCaseReconciler and TestRunReconciler so a template's resolution
+// contract is defined in exactly one place.
+func resolveTemplate(ctx context.Context, c client.Client, namespace, name string) (*benchv1alpha1.TestCaseTemplate, error) {
+	if name == "" {
+		name = DefaultTemplateName
+	}
+	var tmpl benchv1alpha1.TestCaseTemplate
+	if err := c.Get(ctx, types.NamespacedName{Name: name, Namespace: namespace}, &tmpl); err != nil {
+		return nil, err
+	}
+	return &tmpl, nil
+}

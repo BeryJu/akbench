@@ -49,8 +49,9 @@ type TestCaseSpec struct {
 	// +optional
 	RunnerClusterRef *corev1.LocalObjectReference `json:"runnerClusterRef,omitempty"`
 
-	// template names a built-in test template from internal/testtemplate's
-	// Registry (e.g. "login", "oauth-oidc") - which k6 script runs, plus any
+	// template names a TestCaseTemplate object (e.g. "login", "oauth-oidc" -
+	// the two the operator seeds by default, see
+	// internal/controller/seedtemplates.go) - which k6 script runs, plus any
 	// extra provisioning that template's flow needs (e.g. oauth-oidc's own
 	// oidc-test-client and OAuth2 provider/application). Ignored when inline
 	// or scriptConfigMapRef is set.

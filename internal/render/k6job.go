@@ -10,7 +10,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
-	"github.com/goauthentik/authentik-bench/internal/testtemplate"
 )
 
 // K6Image is the k6 image every rendered workload runs. Pinned rather than
@@ -55,14 +54,14 @@ type K6WorkloadParams struct {
 	// RemoteWriteURL is the runner cluster's Prometheus remote-write
 	// endpoint. Local in M1-M3; the mTLS central receiver from M4 on.
 	RemoteWriteURL string
-	// ScriptConfigMapName holds the k6 script under key matching its
-	// filename (e.g. "login.ts" or "script.ts" for a BYO script).
+	// ScriptConfigMapName holds the k6 script under the fixed key
+	// "script.ts" (see scriptFileName).
 	ScriptConfigMapName string
 	// FixturesSecretName holds the generated users.json fixture.
 	FixturesSecretName string
 	// OAuthTestClientHost/Port are set only when the resolved template
 	// requires an OAuth client (oauth-oidc - see
-	// testtemplate.Template.RequiresOAuthClient and
+	// TestCaseTemplateSpec.RequiresOAuthClient and
 	// internal/controller/oauthclient.go's ensureOAuthClient). Empty
 	// otherwise, in which case EnvVars renders no OAUTH_TEST_CLIENT_* vars
 	// at all, so a non-oauth script never sees them.
@@ -108,26 +107,12 @@ func k6ProfileValue(p benchv1alpha1.TestProfile) string {
 	return "quick"
 }
 
-// scriptFileName is the file under ScriptVolumeMountPath k6 is told to run.
-// Precedence matches ensureScriptConfigMap's own (testcase_controller.go):
-// scriptConfigMapRef > inline > the resolved template's script - both of the
-// first two are always mounted under the fixed key "script.ts".
-func scriptFileName(tc *benchv1alpha1.TestCase) string {
-	if tc.Spec.ScriptConfigMapRef != nil {
-		return "script.ts"
-	}
-	if tc.Spec.Inline != "" {
-		return "script.ts"
-	}
-	tmpl, ok := testtemplate.Resolve(tc.Spec.Template)
-	if !ok {
-		// Reconcile already fails this TestCase with a clear condition before
-		// ever rendering it (see testcase_controller.go) - falling back to
-		// the default here just keeps this function total/panic-free.
-		tmpl, _ = testtemplate.Resolve(testtemplate.DefaultName)
-	}
-	return tmpl.ScriptName
-}
+// scriptFileName is the file under ScriptVolumeMountPath k6 is told to run -
+// always "script.ts": ensureScriptConfigMap (testcase_controller.go) mirrors
+// whichever source wins (scriptConfigMapRef > inline > the resolved
+// TestCaseTemplate's own script) under this one fixed key regardless of
+// where the content actually came from.
+const scriptFileName = "script.ts"
 
 // Args builds the k6 command line, matching the --tag scheme every Grafana
 // dashboard splits on: testid, target, profile, plus any extraTags.
@@ -152,7 +137,7 @@ func (p K6WorkloadParams) Args() []string {
 	for _, k := range keys {
 		args = append(args, tagFlag, fmt.Sprintf("%s=%s", k, tc.Spec.ExtraTags[k]))
 	}
-	args = append(args, ScriptVolumeMountPath+"/"+scriptFileName(tc))
+	args = append(args, ScriptVolumeMountPath+"/"+scriptFileName)
 	return args
 }
 
