@@ -49,10 +49,13 @@ import { useState } from 'react';
 import { api } from './api';
 import { useResource } from './useResource';
 
-// Matches hack/dev-apiserver.yaml's apiserver-nodeport Service.
-const APISERVER_NODEPORT = 30911;
+// Matches hack/dev-apiserver.yaml's apiserver-nodeport Service. Exported
+// alongside DASHBOARDS/grafanaProxyURL below so DetailSections.tsx's
+// WorkloadClusterSection can link/embed the same dashboards without
+// duplicating this URL-construction logic.
+export const APISERVER_NODEPORT = 30911;
 
-const DASHBOARDS = [
+export const DASHBOARDS = [
   { uid: 'akbench-compare', label: 'Compare tests' },
   { uid: 'akbench-k6', label: 'k6 load generator' },
   { uid: 'akbench-authentik', label: 'authentik under load' },
@@ -60,7 +63,7 @@ const DASHBOARDS = [
   { uid: 'akbench-nodes', label: 'Nodes' },
 ];
 
-function grafanaProxyURL(workloadClusterName: string, dashboardUID: string): string {
+export function grafanaProxyURL(workloadClusterName: string, dashboardUID: string): string {
   return (
     `http://${window.location.hostname}:${APISERVER_NODEPORT}` +
     `/grafana-proxy/${workloadClusterName}/d/${dashboardUID}/-?orgId=1&kiosk`

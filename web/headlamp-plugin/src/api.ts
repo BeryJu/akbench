@@ -198,6 +198,7 @@ export const api = {
         ? `/api/v1/testruns?labelSelector=${encodeURIComponent(`bench.goauthentik.io/testcase=${testCase}`)}`
         : '/api/v1/testruns'
     ).then(r => r.items ?? []),
+  testRun: (name: string) => request<TestRun>(`/api/v1/testruns/${name}`),
   deleteTestRun: (name: string) => request<void>(`/api/v1/testruns/${name}`, { method: 'DELETE' }),
 
   // -- Metrics

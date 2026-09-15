@@ -69,7 +69,13 @@ import { ClusterCreatePage, ClusterEditPage, ClustersPage } from './ClustersPage
 import { ComparePage } from './ComparePage';
 import { DashboardPage } from './DashboardPage';
 import { DeploymentCreatePage, DeploymentEditPage,DeploymentsPage } from './DeploymentsPage';
-import { DeploymentSection,TestCaseSection } from './DetailSections';
+import {
+  DeploymentSection,
+  TestCaseSection,
+  TestCaseTemplateSection,
+  TestRunSection,
+  WorkloadClusterSection,
+} from './DetailSections';
 import { GrafanaPage } from './GrafanaPage';
 import { registerAuthentikIcon } from "./icon";
 import { TestCaseCreatePage, TestCaseEditPage, TestCasesPage } from './TestCasesPage';
@@ -304,6 +310,39 @@ registerDetailsViewSection(resource => {
   return (
     <SectionBox title="Benchmark metrics">
       <DeploymentSection deploymentName={resource.metadata.name} />
+    </SectionBox>
+  );
+});
+
+registerDetailsViewSection(resource => {
+  if (resource?.kind !== 'WorkloadCluster') {
+    return null;
+  }
+  return (
+    <SectionBox title="Cluster">
+      <WorkloadClusterSection name={resource.metadata.name} />
+    </SectionBox>
+  );
+});
+
+registerDetailsViewSection(resource => {
+  if (resource?.kind !== 'TestRun') {
+    return null;
+  }
+  return (
+    <SectionBox title="Run">
+      <TestRunSection name={resource.metadata.name} />
+    </SectionBox>
+  );
+});
+
+registerDetailsViewSection(resource => {
+  if (resource?.kind !== 'TestCaseTemplate') {
+    return null;
+  }
+  return (
+    <SectionBox title="Used by">
+      <TestCaseTemplateSection name={resource.metadata.name} />
     </SectionBox>
   );
 });
