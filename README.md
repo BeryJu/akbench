@@ -3,29 +3,44 @@
 A Kubernetes-native replacement for the Ansible/docker-compose authentik
 benchmark harness at
 [BeryJu/authentik-benchmark](https://github.com/BeryJu/authentik-benchmark):
-an operator plus (eventually) a web UI for defining k6 load-test cases
-against different authentik deployment topologies - replica counts, node
-placement (dedicated vs. shared nodes), and Postgres backend (embedded
-subchart, CloudNativePG HA, or external) - with multi-cluster support via
-Cluster API and a central, mTLS-secured metrics pipeline.
+an operator plus a [Headlamp](https://headlamp.dev)-based web UI for defining
+k6 load-test cases against different authentik deployment topologies -
+replica counts, node placement (dedicated vs. shared nodes), and Postgres
+backend (embedded subchart, CloudNativePG HA, or external) - with
+multi-cluster provisioning via Cluster API and a Prometheus/Grafana/
+Pyroscope/Tempo observability stack installed per workload cluster.
 
 See the design plan this repo implements for the full architecture and
-phased delivery milestones (M1-M4).
+phased delivery milestones (M1-M5).
 
-## Status: M4 (multi-cluster provisioning + clusterRef wiring)
+## Status: multi-cluster provisioning, test-case templates, and per-cluster observability
 
 Implemented so far:
 
 - **CRDs** (`bench.goauthentik.io/v1alpha1`): `AuthentikDeployment`, `TestCase`,
-  `TestRun`, `WorkloadCluster`.
+  `TestCaseTemplate`, `TestRun`, `WorkloadCluster`.
 - **`WorkloadClusterReconciler`**: renders a full Cluster API cluster stack
   (`Cluster`/`LXCCluster`/`KubeadmControlPlane`/`MachineDeployment` plus their
   `LXCMachineTemplate`s and a worker `KubeadmConfigTemplate`) against the
   Incus infrastructure provider already installed on the management cluster,
   and mirrors the resulting `Cluster`'s readiness (and its
-  `<name>-kubeconfig` Secret) back onto its own status. Provisioning is
-  create-once for now - no day-2 resize/upgrade of an existing
-  `WorkloadCluster` yet.
+  `<name>-kubeconfig` Secret) back onto its own status. Control-plane size
+  and Kubernetes version are create-once; a worker pool's own `replicas`/
+  flavor are a supported day-2 edit, applied in place
+  (`applyMachineDeploymentPool`). A pool can also opt into
+  `spec.autoscaling{minReplicas,maxReplicas}`, which installs
+  [cluster-autoscaler](https://github.com/kubernetes/autoscaler/tree/master/cluster-autoscaler/cloudprovider/clusterapi)
+  for it (one instance per `WorkloadCluster` that uses it, torn down again
+  once no pool does) - `.spec.replicas` stops being reconciled for an
+  autoscaled pool once set, so it never fights cluster-autoscaler's own
+  scale-up/down.
+  It also installs, once the control plane is reachable: CNI (Flannel),
+  metrics-server, csi-incus (the cluster's only `StorageClass`, backed by a
+  real Incus storage pool), and - in the `bench-system` namespace -
+  kube-prometheus-stack (Prometheus with the remote-write receiver k6 pushes
+  to, node-exporter, kube-state-metrics), Grafana (anonymous-admin, embedded
+  in Headlamp via `cmd/apiserver`'s own reverse proxy - see below), Pyroscope,
+  and Tempo.
 - **`clusterRef`/`runnerClusterRef`**: `AuthentikDeploymentReconciler`,
   `TestCaseReconciler`, and `TestRunReconciler` all resolve these to a live
   client via `internal/multicluster.Tracker` (wrapping Cluster API's
@@ -62,18 +77,29 @@ Implemented so far:
   `testid`/`target`/`profile` tag scheme and env var contract
   (`TEST_ID`/`TARGET`/`BENCH_HOST`/... ), guarded by `test/contract`.
 - **Fixtures**: `fixtures/gen-blueprint.py` ported unchanged.
+- **Test-case templates**: `TestCaseTemplate` is a real, Headlamp-editable
+  CRD (list/create/edit/delete, Monaco editor for the script) - the operator
+  seeds two built-in ones at startup (`login`, `oauth-oidc`, the latter
+  driving a real OAuth2/OIDC authorization-code round trip through
+  [BeryJu/oidc-test-client](https://github.com/BeryJu/oidc-test-client)),
+  sourced from the exact same embedded `k6/scripts/*.ts` files the operator
+  binary carries (create-only, so editing one via Headlamp is never
+  clobbered by a later restart). A SAML template slot is reserved but not
+  implemented yet.
 - **Web UI**: `internal/api` is a REST/JSON backend (chi router, bearer-token
-  auth) that CRUDs all four CRDs as unstructured objects (the CRD schema
-  stays the single source of truth), proxies PromQL for the compare view
-  (resolved per-testid against whichever cluster's own Prometheus actually
-  has that data - see `prometheusURLForTestID`), and builds allowlisted
-  Grafana embed URLs - deployed in-cluster (`make deploy-apiserver`,
-  `hack/dev-apiserver.yaml`). The UI itself is [Headlamp](https://headlamp.dev)
-  (`make headlamp`, `hack/dev-headlamp-values.yaml`) plus
-  `web/headlamp-plugin`, a custom plugin (guided create/edit forms for all
-  four CRDs, a Compare page, a TestRuns history page, and metrics charting)
-  for what Headlamp has no native concept of, reached through Headlamp's own
-  `ApiProxy` (a Kubernetes API Service-proxy call, not a browser-direct one).
+  auth) that CRUDs every CRD as unstructured objects (the CRD schema stays
+  the single source of truth), proxies PromQL for the compare view (resolved
+  per-testid against whichever cluster's own Prometheus actually has that
+  data - see `prometheusURLForTestID`), and reverse-proxies a workload
+  cluster's own Grafana for embedding (`/grafana-proxy/<cluster>/...`,
+  `internal/api/grafana_proxy.go`) - deployed in-cluster
+  (`make deploy-apiserver`, `hack/dev-apiserver.yaml`). The UI itself is
+  [Headlamp](https://headlamp.dev) (`make headlamp`,
+  `hack/dev-headlamp-values.yaml`) plus `web/headlamp-plugin`, a custom
+  plugin (guided create/edit forms for every CRD, a Compare page, a Grafana
+  tab, a TestRuns history page, and metrics charting) for what Headlamp has
+  no native concept of, reached through Headlamp's own `ApiProxy` (a
+  Kubernetes API Service-proxy call, not a browser-direct one).
   `make headlamp-plugin` copies a fresh build straight into the running pod
   for fast dev-loop iteration (wiped on a Headlamp pod restart);
   `make deploy-headlamp-plugin` bakes it into an image installed as a
@@ -83,14 +109,13 @@ Implemented so far:
   Headlamp's own generic Kubernetes UI - see `HeadlampKubeconfigReconciler`
   for how every `WorkloadCluster` becomes a switchable cluster automatically.
 
-Not yet implemented (see the plan's milestones): a central,
-mTLS-secured metrics receiver. Each workload cluster instead runs its own
-Prometheus/Pyroscope/Tempo (`WorkloadClusterReconciler`'s `ensurePrometheus`/
-`ensurePyroscope`/`ensureTempo`), reachable from the management cluster
-directly (a management-cluster pod can reach a workload cluster's node IP;
-the reverse can't) rather than through a shared central pipeline. Also not
-yet wired up: Flux-managed GitOps for this stack (dashboard JSON already
-lives in `gitops/dashboards/`, not yet wired to a Flux Kustomization).
+The original plan's central, mTLS-secured metrics receiver was superseded by
+the per-workload-cluster observability stack described above once it became
+clear a management-cluster pod can reach a workload cluster's node IPs
+directly (the reverse can't), making a shared central pipeline unnecessary.
+Still not wired up: Flux-managed GitOps for this stack (dashboard JSON
+already lives in `gitops/dashboards/`, not yet wired to a Flux
+`Kustomization`).
 
 ### Running the tests
 
