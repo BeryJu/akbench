@@ -217,6 +217,16 @@ func GrafanaObjects(wc *benchv1alpha1.WorkloadCluster) []client.Object {
 								Env: []corev1.EnvVar{
 									{Name: "GF_AUTH_ANONYMOUS_ENABLED", Value: "true"},
 									{Name: "GF_AUTH_ANONYMOUS_ORG_ROLE", Value: "Admin"},
+									// Grafana sends "X-Frame-Options: deny" on every
+									// response by default (confirmed live: curl -I
+									// against a stock grafana/grafana:11.4.0 container) -
+									// its own clickjacking protection, blocking iframe
+									// embedding from any origin whatsoever, not a CORS
+									// concern at all (no Access-Control-* header is
+									// involved). allow_embedding is the one documented
+									// switch that removes it - confirmed live that setting
+									// it drops the header entirely.
+									{Name: "GF_SECURITY_ALLOW_EMBEDDING", Value: "true"},
 									{Name: "GF_SERVER_ROOT_URL", Value: rootURL},
 									// "true" is correct here: per Grafana's own docs,
 									// serve_from_sub_path=true means the reverse proxy
