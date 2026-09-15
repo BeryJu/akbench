@@ -75,8 +75,12 @@ func CNPGCluster(t *benchv1alpha1.AuthentikDeployment) *unstructured.Unstructure
 	// postgres_exporter sidecar and scrape config, the same "let the
 	// chart/operator create its own native monitoring object" approach the
 	// authentik chart's own server.metrics.serviceMonitor takes
-	// (helmrelease.go).
-	_ = unstructured.SetNestedField(u.Object, true, "spec", "monitoring", "enablePodMonitor")
+	// (helmrelease.go). Only when clusterRef is set - see HelmValues'
+	// hasServiceMonitorCRD doc comment for why: the PodMonitor CRD only
+	// exists on a WorkloadCluster, never the management cluster.
+	if t.Spec.ClusterRef.Name != "" {
+		_ = unstructured.SetNestedField(u.Object, true, "spec", "monitoring", "enablePodMonitor")
+	}
 	// inheritedMetadata.labels propagates onto every pod CNPG creates for
 	// this cluster (its real Go API, cluster_types.go's
 	// Cluster.Spec.InheritedMetadata *EmbeddedObjectMetadata - built as a

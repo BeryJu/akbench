@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
@@ -13,10 +14,11 @@ func exampleDeployment() *benchv1alpha1.AuthentikDeployment {
 	return &benchv1alpha1.AuthentikDeployment{
 		ObjectMeta: metav1.ObjectMeta{Name: "authentik-1"},
 		Spec: benchv1alpha1.AuthentikDeploymentSpec{
-			Namespace: "authentik-1",
-			Server:    benchv1alpha1.WorkloadSpec{Replicas: 2},
-			Worker:    benchv1alpha1.WorkloadSpec{Replicas: 1},
-			Postgres:  benchv1alpha1.PostgresSpec{Mode: benchv1alpha1.PostgresEmbedded},
+			Namespace:  "authentik-1",
+			ClusterRef: corev1.LocalObjectReference{Name: "wc-1"},
+			Server:     benchv1alpha1.WorkloadSpec{Replicas: 2},
+			Worker:     benchv1alpha1.WorkloadSpec{Replicas: 1},
+			Postgres:   benchv1alpha1.PostgresSpec{Mode: benchv1alpha1.PostgresEmbedded},
 		},
 	}
 }
@@ -95,6 +97,44 @@ func TestHelmValuesEnablesMetrics(t *testing.T) {
 	assertMetricsEnabled(t, values.Server, "server")
 	assertMetricsEnabled(t, values.Worker, "worker")
 	assertMetricsEnabled(t, values.Postgres, "postgresql")
+}
+
+// TestHelmValuesNoServiceMonitorWithoutClusterRef guards a real regression
+// caught live: a deployment with no clusterRef falls back to the management
+// cluster (see AuthentikDeploymentReconciler), which never gets
+// kube-prometheus-stack's ServiceMonitor CRD (only a WorkloadCluster does -
+// see ensurePrometheus). Setting server/worker/postgresql.metrics.serviceMonitor.enabled
+// unconditionally broke a scratch AuthentikDeployment with clusterRef unset:
+// its whole HelmRelease failed to install ("no matches for kind
+// ServiceMonitor in version monitoring.coreos.com/v1"), not just its
+// metrics - the chart's own template has no fallback for a missing CRD.
+// metrics.enabled itself must stay on (it needs no CRD, just a Service).
+func TestHelmValuesNoServiceMonitorWithoutClusterRef(t *testing.T) {
+	topo := exampleDeployment()
+	topo.Spec.ClusterRef = corev1.LocalObjectReference{}
+	raw, err := HelmValues(topo, "secret", &PostgresConnection{Password: "pw"}, "http://pyroscope.example:4040", "http://tempo.example:4318")
+	if err != nil {
+		t.Fatalf("HelmValues: %v", err)
+	}
+	values := decodeValues(t, raw.Raw)
+
+	assertNoServiceMonitor := func(t *testing.T, section map[string]any, path string) {
+		t.Helper()
+		metrics, ok := section["metrics"].(map[string]any)
+		if !ok {
+			t.Fatalf("%s.metrics is not a map: %v", path, section["metrics"])
+		}
+		if metrics["enabled"] != true {
+			t.Errorf("%s.metrics.enabled = %v, want true (needs no CRD)", path, metrics["enabled"])
+		}
+		sm, ok := metrics["serviceMonitor"].(map[string]any)
+		if !ok || sm["enabled"] != false {
+			t.Errorf("%s.metrics.serviceMonitor.enabled = %v, want false (no clusterRef -> management cluster -> no ServiceMonitor CRD)", path, metrics["serviceMonitor"])
+		}
+	}
+	assertNoServiceMonitor(t, values.Server, "server")
+	assertNoServiceMonitor(t, values.Worker, "worker")
+	assertNoServiceMonitor(t, values.Postgres, "postgresql")
 }
 
 // TestHelmValuesPlacementUsesGlobalAffinityPreset guards against regressing

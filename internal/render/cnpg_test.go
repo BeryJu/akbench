@@ -3,6 +3,7 @@ package render
 import (
 	"testing"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
@@ -13,8 +14,9 @@ func TestCNPGClusterDefaults(t *testing.T) {
 	topo := &benchv1alpha1.AuthentikDeployment{
 		ObjectMeta: metav1.ObjectMeta{Name: "authentik-1"},
 		Spec: benchv1alpha1.AuthentikDeploymentSpec{
-			Namespace: "authentik-1",
-			Postgres:  benchv1alpha1.PostgresSpec{Mode: benchv1alpha1.PostgresCNPG},
+			Namespace:  "authentik-1",
+			ClusterRef: corev1.LocalObjectReference{Name: "wc-1"},
+			Postgres:   benchv1alpha1.PostgresSpec{Mode: benchv1alpha1.PostgresCNPG},
 		},
 	}
 	u := CNPGCluster(topo)
@@ -40,6 +42,26 @@ func TestCNPGClusterDefaults(t *testing.T) {
 	enablePodMonitor, _, _ := unstructured.NestedBool(u.Object, "spec", "monitoring", "enablePodMonitor")
 	if !enablePodMonitor {
 		t.Error("spec.monitoring.enablePodMonitor = false, want true")
+	}
+}
+
+// TestCNPGClusterNoPodMonitorWithoutClusterRef guards the same regression as
+// helmrelease_test.go's TestHelmValuesNoServiceMonitorWithoutClusterRef: the
+// PodMonitor CRD only exists on a WorkloadCluster (installed alongside
+// ServiceMonitor by kube-prometheus-stack), never the management cluster a
+// clusterRef-less deployment falls back to.
+func TestCNPGClusterNoPodMonitorWithoutClusterRef(t *testing.T) {
+	topo := &benchv1alpha1.AuthentikDeployment{
+		ObjectMeta: metav1.ObjectMeta{Name: "authentik-1"},
+		Spec: benchv1alpha1.AuthentikDeploymentSpec{
+			Namespace: "authentik-1",
+			Postgres:  benchv1alpha1.PostgresSpec{Mode: benchv1alpha1.PostgresCNPG},
+		},
+	}
+	u := CNPGCluster(topo)
+
+	if _, found, _ := unstructured.NestedBool(u.Object, "spec", "monitoring", "enablePodMonitor"); found {
+		t.Error("spec.monitoring.enablePodMonitor was set with no clusterRef - the PodMonitor CRD won't exist on the management cluster")
 	}
 }
 

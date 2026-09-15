@@ -102,16 +102,31 @@ type AuthentikDeploymentHelmValues struct {
 // releases it as soon as the import completes.
 func HelmValues(t *benchv1alpha1.AuthentikDeployment, secretKey string, pgConn *PostgresConnection, pyroscopeHost, tracingEndpoint string) (*apiextensionsv1.JSON, error) {
 	embedded := t.Spec.Postgres.Mode == benchv1alpha1.PostgresEmbedded
+	// hasServiceMonitorCRD: the ServiceMonitor CRD only exists on a cluster
+	// WorkloadClusterReconciler installed kube-prometheus-stack onto (every
+	// WorkloadCluster, once its control plane is reachable - see
+	// ensurePrometheus) - the management cluster itself never gets one.
+	// clusterRef is exactly the signal for which case this is: it always
+	// names a WorkloadCluster (see internal/multicluster.Tracker), and an
+	// unset clusterRef falls back to the management cluster. Setting
+	// metrics.serviceMonitor.enabled unconditionally broke every
+	// AuthentikDeployment with no clusterRef - confirmed live: a scratch
+	// AuthentikDeployment with clusterRef unset failed Helm install entirely
+	// ("no matches for kind ServiceMonitor in version monitoring.coreos.com/v1"),
+	// since the chart's own template unconditionally emits a ServiceMonitor
+	// object once asked to, with no fallback if the CRD is missing.
+	hasServiceMonitorCRD := t.Spec.ClusterRef.Name != ""
 	// authentikMetrics turns on the chart's own metrics Service (port 9300)
-	// and its own ServiceMonitor for it (server.metrics{,.serviceMonitor}/
-	// worker.metrics{,.serviceMonitor} - confirmed directly against the
-	// chart's real values.yaml, both sections identically shaped) rather
-	// than this project hand-building a competing ServiceMonitor: the chart
-	// already owns the metrics Service's labels/selector, so its own
-	// ServiceMonitor is guaranteed to match them.
+	// unconditionally (needs no CRD) and its own ServiceMonitor for it
+	// (server.metrics{,.serviceMonitor}/worker.metrics{,.serviceMonitor} -
+	// confirmed directly against the chart's real values.yaml, both
+	// sections identically shaped) only when the CRD actually exists,
+	// rather than this project hand-building a competing ServiceMonitor:
+	// the chart already owns the metrics Service's labels/selector, so its
+	// own ServiceMonitor is guaranteed to match them.
 	authentikMetrics := map[string]any{
 		"enabled":        true,
-		"serviceMonitor": map[string]any{"enabled": true},
+		"serviceMonitor": map[string]any{"enabled": hasServiceMonitorCRD},
 	}
 	values := AuthentikDeploymentHelmValues{
 		Server: map[string]any{
@@ -162,10 +177,10 @@ func HelmValues(t *benchv1alpha1.AuthentikDeployment, secretKey string, pgConn *
 		// postgres_exporter sidecar, metrics.serviceMonitor.enabled asks the
 		// subchart to create its own matching ServiceMonitor for it - same
 		// "let the chart own its own monitoring object" approach as
-		// authentikMetrics above.
+		// authentikMetrics above, and the same hasServiceMonitorCRD gate.
 		values.Postgres["metrics"] = map[string]any{
 			"enabled":        true,
-			"serviceMonitor": map[string]any{"enabled": true},
+			"serviceMonitor": map[string]any{"enabled": hasServiceMonitorCRD},
 		}
 	}
 

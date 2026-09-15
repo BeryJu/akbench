@@ -269,6 +269,26 @@ func (r *AuthentikDeploymentReconciler) reconcileBlueprint(ctx context.Context, 
 	return metav1.ConditionFalse, "waiting for fixtures blueprint import job to complete", true
 }
 
+// reconcilePostgresRoleFix creates render.PostgresRoleFixJob once the
+// bundled embedded-postgres StatefulSet exists (helmReleaseReady) - see
+// that function's own doc comment for the real, permanent gap this works
+// around (the authentik chart's own bundled postgresql subchart uses the
+// plain, official postgres image, whose entrypoint never creates the
+// "postgres" role postgres_exporter is hardcoded to authenticate as).
+// Best-effort and non-blocking, unlike reconcileBlueprint: this only
+// affects observability (empty postgres.json Grafana panels), never the
+// deployment's own actual readiness, so a failure here is logged/eventer'd
+// but never holds up the overall Ready condition.
+func (r *AuthentikDeploymentReconciler) reconcilePostgresRoleFix(ctx context.Context, rc client.Client, topo *benchv1alpha1.AuthentikDeployment, helmReleaseReady metav1.ConditionStatus) {
+	if topo.Spec.Postgres.Mode != benchv1alpha1.PostgresEmbedded || helmReleaseReady != metav1.ConditionTrue {
+		return
+	}
+	job := render.PostgresRoleFixJob(topo)
+	if err := rc.Create(ctx, job); err != nil && !apierrors.IsAlreadyExists(err) {
+		r.Recorder.Eventf(topo, corev1.EventTypeWarning, "PostgresRoleFixFailed", "failed to create postgres role-fix job: %v", err)
+	}
+}
+
 // +kubebuilder:rbac:groups=bench.goauthentik.io,resources=authentikdeployments,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=bench.goauthentik.io,resources=authentikdeployments/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=bench.goauthentik.io,resources=authentikdeployments/finalizers,verbs=update
@@ -394,6 +414,8 @@ func (r *AuthentikDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.
 	blueprintReady, blueprintMessage, requeueForBlueprint := r.reconcileBlueprint(ctx, rc, &topo, hasBlueprint, helmReleaseReady, blueprintContent)
 	setCondition(r.Recorder, &topo, &topo.Status.Conditions, topo.Generation, benchv1alpha1.ConditionBlueprintApplied, blueprintReady,
 		benchv1alpha1.ReasonReady, blueprintMessage)
+
+	r.reconcilePostgresRoleFix(ctx, rc, &topo, helmReleaseReady)
 
 	ready := helmReleaseReady == metav1.ConditionTrue && blueprintReady == metav1.ConditionTrue
 	if ready {
