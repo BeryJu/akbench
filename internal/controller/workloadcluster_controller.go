@@ -463,6 +463,18 @@ func (r *WorkloadClusterReconciler) ensurePrometheus(ctx context.Context, wc *be
 // clusterAPIMode reasoning).
 func (r *WorkloadClusterReconciler) ensureClusterAutoscaler(ctx context.Context, wc *benchv1alpha1.WorkloadCluster) error {
 	if !render.HasAutoscalingPool(wc) {
+		// Every pool's autoscaling was removed (or never set) - tear down a
+		// previously-installed instance rather than leave it running
+		// forever against node groups that no longer carry the
+		// min/max-size annotations it was managing. Plain Delete, not a
+		// wait for helm-controller's own uninstall to finish (unlike
+		// AuthentikDeploymentReconciler's own deletion path) - this has no
+		// target-namespace sweep afterward that would race an in-progress
+		// uninstall, so there's nothing to block on.
+		hr := render.ClusterAutoscalerHelmRelease(wc, nil)
+		if err := r.Delete(ctx, hr); err != nil && !apierrors.IsNotFound(err) {
+			return fmt.Errorf("delete cluster-autoscaler HelmRelease: %w", err)
+		}
 		return nil
 	}
 	values, err := render.ClusterAutoscalerHelmValues(wc)

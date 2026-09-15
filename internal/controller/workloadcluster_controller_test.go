@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 
+	helmv2 "github.com/fluxcd/helm-controller/api/v2"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
@@ -200,6 +201,50 @@ var _ = Describe("WorkloadCluster Controller", func() {
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: extraMDName, Namespace: resourceNamespace}, &extraMD)).
 				To(MatchError(errors.IsNotFound, "IsNotFound"))
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: mdName, Namespace: resourceNamespace}, &md)).To(Succeed())
+		})
+
+		// ensureClusterAutoscaler is gated behind ControlPlaneReady inside
+		// Reconcile, which this envtest suite never reaches (no real
+		// Incus/CAPI infrastructure controller runs here to get that far -
+		// see the big test above's own comment on that). Called directly
+		// instead, the same way a real reconcile would once that gate
+		// passes.
+		It("installs cluster-autoscaler only while a pool wants it, and tears it down once none do", func() {
+			controllerReconciler := &WorkloadClusterReconciler{
+				Client:   k8sClient,
+				Scheme:   k8sClient.Scheme(),
+				Recorder: record.NewFakeRecorder(100),
+			}
+			// BeforeEach only populates workloadcluster via Get when the
+			// resource already existed from a prior spec; on first creation
+			// it leaves the shared var at its zero value (empty
+			// Namespace, which ClusterAutoscalerHelmRelease needs) - every
+			// other It in this file re-Gets before relying on it for the
+			// same reason.
+			Expect(k8sClient.Get(ctx, typeNamespacedName, workloadcluster)).To(Succeed())
+			hrKey := types.NamespacedName{Name: render.ClusterAutoscalerHelmReleaseName(workloadcluster), Namespace: resourceNamespace}
+
+			By("with no pool autoscaling, confirming ensureClusterAutoscaler is a no-op")
+			Expect(controllerReconciler.ensureClusterAutoscaler(ctx, workloadcluster)).To(Succeed())
+			Expect(k8sClient.Get(ctx, hrKey, &helmv2.HelmRelease{})).To(MatchError(errors.IsNotFound, "IsNotFound"))
+
+			By("enabling autoscaling and confirming the HelmRelease is created")
+			Expect(k8sClient.Get(ctx, typeNamespacedName, workloadcluster)).To(Succeed())
+			workloadcluster.Spec.WorkerPools[0].Autoscaling = &benchv1alpha1.AutoscalingSpec{MinReplicas: 1, MaxReplicas: 5}
+			Expect(k8sClient.Update(ctx, workloadcluster)).To(Succeed())
+
+			Expect(controllerReconciler.ensureClusterAutoscaler(ctx, workloadcluster)).To(Succeed())
+			var hr helmv2.HelmRelease
+			Expect(k8sClient.Get(ctx, hrKey, &hr)).To(Succeed())
+			Expect(hr.Spec.KubeConfig).To(BeNil(), "cluster-autoscaler must install locally, not remotely onto the workload cluster")
+
+			By("disabling autoscaling again and confirming the HelmRelease is torn down")
+			Expect(k8sClient.Get(ctx, typeNamespacedName, workloadcluster)).To(Succeed())
+			workloadcluster.Spec.WorkerPools[0].Autoscaling = nil
+			Expect(k8sClient.Update(ctx, workloadcluster)).To(Succeed())
+
+			Expect(controllerReconciler.ensureClusterAutoscaler(ctx, workloadcluster)).To(Succeed())
+			Expect(k8sClient.Get(ctx, hrKey, &helmv2.HelmRelease{})).To(MatchError(errors.IsNotFound, "IsNotFound"))
 		})
 	})
 })
