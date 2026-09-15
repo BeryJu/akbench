@@ -14,12 +14,12 @@
  * limitations under the License.
  */
 
-// registerDetailsViewSection sections attached to TestCase/AuthentikDeployment
-// detail pages (Headlamp's own generic CRD detail view already renders
-// everything else - spec, status, events, YAML - these sections add exactly
-// the parts that are benchmark-specific).
+// Sections rendered by each resource's own View page (DeploymentsPage.tsx,
+// TestCasesPage.tsx, ClustersPage.tsx, TestCaseTemplatesPage.tsx,
+// TestRunsPage.tsx) - links/info/metrics specific to that one object, on
+// top of whatever its own edit form already covers.
 import { EmptyContent } from '@kinvolk/headlamp-plugin/lib/CommonComponents';
-import { Alert, Box, Button, Link as MuiLink, Stack, Typography } from '@mui/material';
+import { Alert, Box, Button, Grid, Link as MuiLink, Stack, Typography } from '@mui/material';
 import { useState } from 'react';
 import { api, headlampClusterName } from './api';
 import { ClusterResourceButton } from './ClusterResourceButton';
@@ -158,15 +158,18 @@ export function TestCaseSection({ name, profile }: { name: string; profile?: str
           Latest run is still in progress - metrics will show once it completes.
         </Alert>
       )}
-      {metrics.map(metric => (
-        <MetricsChart
-          key={metric.key}
-          metric={metric.key}
-          testids={[name]}
-          endSeconds={anchor?.endSeconds}
-          rangeSeconds={anchor?.rangeSeconds}
-        />
-      ))}
+      <Grid container spacing={2}>
+        {metrics.map(metric => (
+          <Grid item xs={12} md={6} key={metric.key}>
+            <MetricsChart
+              metric={metric.key}
+              testids={[name]}
+              endSeconds={anchor?.endSeconds}
+              rangeSeconds={anchor?.rangeSeconds}
+            />
+          </Grid>
+        ))}
+      </Grid>
     </Box>
   );
 }
@@ -226,7 +229,13 @@ export function DeploymentSection({ deploymentName }: { deploymentName: string }
       {testids.length === 0 ? (
         <EmptyContent>No test cases reference this deployment yet.</EmptyContent>
       ) : (
-        metrics.map(metric => <MetricsChart key={metric.key} metric={metric.key} testids={testids} />)
+        <Grid container spacing={2}>
+          {metrics.map(metric => (
+            <Grid item xs={12} md={6} key={metric.key}>
+              <MetricsChart metric={metric.key} testids={testids} />
+            </Grid>
+          ))}
+        </Grid>
       )}
     </Box>
   );
@@ -339,15 +348,18 @@ export function TestRunSection({ name }: { name: string }) {
       {!anchor ? (
         <EmptyContent>Run still in progress - metrics will show once it completes.</EmptyContent>
       ) : (
-        metrics.map(metric => (
-          <MetricsChart
-            key={metric.key}
-            metric={metric.key}
-            testids={testCaseName ? [testCaseName] : []}
-            endSeconds={anchor.endSeconds}
-            rangeSeconds={anchor.rangeSeconds}
-          />
-        ))
+        <Grid container spacing={2}>
+          {metrics.map(metric => (
+            <Grid item xs={12} md={6} key={metric.key}>
+              <MetricsChart
+                metric={metric.key}
+                testids={testCaseName ? [testCaseName] : []}
+                endSeconds={anchor.endSeconds}
+                rangeSeconds={anchor.rangeSeconds}
+              />
+            </Grid>
+          ))}
+        </Grid>
       )}
     </Box>
   );
