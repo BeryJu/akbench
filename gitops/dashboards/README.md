@@ -1,10 +1,15 @@
 # Dashboards
 
-Five Grafana dashboards, loaded by kube-prometheus-stack's Grafana sidecar via
-the `grafana_dashboard: "1"` label on the ConfigMaps `kustomization.yaml`
-generates. Their UIDs are the allowlist `internal/api`'s
-`/api/v1/grafana/embed-url` serves, so a UID here and a UID there are kept in
-step by `TestDashboardsMatchEmbedAllowlist`.
+Five Grafana dashboards, embedded verbatim into
+`internal/render/manifests/grafana-dashboards/` (`//go:embed` can't reach
+outside its own package tree, so this is a byte-identical vendored copy, not
+a symlink) and provisioned into every workload cluster's own Grafana by
+`internal/render/grafana.go`. The two copies are kept in sync by
+`TestDashboardsMatchRenderEmbeds` (`internal/api/dashboards_test.go`). The
+Headlamp plugin's Grafana tab embeds them by UID through `cmd/apiserver`'s
+`/grafana-proxy/{cluster}/...` reverse proxy (`internal/api/grafana_proxy.go`) -
+not the older, since-deleted `internal/api` embed-URL allowlist this doc used
+to reference, from before Grafana moved to a per-workload-cluster install.
 
 | File | UID | What it answers |
 | --- | --- | --- |
@@ -24,10 +29,12 @@ Kubernetes:
   now. The `authentik` dashboard uses `pod` instead, and derives `node` by
   joining through `kube_pod_info`, which is what makes the `Dedicated` vs
   `Default` placement comparison legible.
-- `cluster` is new: Grafana Alloy attaches it per workload cluster from the
-  multi-cluster milestone on. Every dashboard matches it as a regex, so a
-  single-cluster install - where no series carries the label yet - still
-  matches everything.
+- `cluster` is new: reserved for a per-workload-cluster identifier, should
+  one ever get attached to these series (each workload cluster runs its own
+  Prometheus/Grafana today - see `internal/render/metrics.go` - so there is
+  currently exactly one cluster's worth of data behind any given dashboard,
+  and no external label sets this). Every dashboard matches it as a regex,
+  so this stays a no-op until/unless that changes.
 
 ## Caveats
 

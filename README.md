@@ -231,7 +231,13 @@ previously added to 'dist/chart/values.yaml' or 'dist/chart/manager/manager.yaml
 is manually re-applied afterwards.
 
 ## Contributing
-// TODO(user): Add detailed information on how you would like others to contribute to this project
+
+Open a PR. `make manifests generate lint test` should pass; for anything
+touching `internal/render`/`internal/controller`, also smoke-test live
+against a real cluster where practical - this project has repeatedly found
+real bugs (chart schema mismatches, webhook-defaulting races, RBAC gaps)
+that `envtest` alone can't catch, since it never runs the actual
+Helm/CAPI/CSI controllers being integrated with.
 
 **NOTE:** Run `make help` for more information on all potential `make` targets
 
