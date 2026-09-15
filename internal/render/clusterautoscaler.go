@@ -126,6 +126,17 @@ func ClusterAutoscalerHelmRepository(namespace string) *sourcev1.HelmRepository 
 //     (wc.Namespace), so without this a second cluster's autoscaler
 //     instance would also see (and potentially scale) this one's node
 //     groups.
+//   - rbac.additionalRules grants read access to LXCMachineTemplate - the
+//     chart's own default ClusterRole only covers the provider-agnostic
+//     Cluster API kinds (MachineDeployment/MachineSet/Machine/MachinePool),
+//     never an infrastructure provider's own machine-template CRD, which
+//     cloudprovider/clusterapi's own README documents as required for
+//     scale-from-zero (estimating a new node's capacity with no existing
+//     Machine to sample). Confirmed live: without this, the pod logs a
+//     continuous "cannot list resource lxcmachinetemplates" watch error.
+//     Incus-specific for now, matching every other Incus-only piece of this
+//     package (e.g. csiincus.go) - a second infrastructure provider would
+//     need its own equivalent rule here.
 func ClusterAutoscalerHelmValues(wc *benchv1alpha1.WorkloadCluster) (*apiextensionsv1.JSON, error) {
 	raw, err := json.Marshal(map[string]any{
 		"cloudProvider":              "clusterapi",
@@ -134,6 +145,15 @@ func ClusterAutoscalerHelmValues(wc *benchv1alpha1.WorkloadCluster) (*apiextensi
 		"autoDiscovery": map[string]any{
 			"namespace":   wc.Namespace,
 			"clusterName": wc.Name,
+		},
+		"rbac": map[string]any{
+			"additionalRules": []map[string]any{
+				{
+					"apiGroups": []string{"infrastructure.cluster.x-k8s.io"},
+					"resources": []string{"lxcmachinetemplates"},
+					"verbs":     []string{"get", "list", "watch"},
+				},
+			},
 		},
 	})
 	if err != nil {

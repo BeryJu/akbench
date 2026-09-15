@@ -70,6 +70,32 @@ func TestClusterAutoscalerHelmValues(t *testing.T) {
 	if autoDiscovery["clusterName"] != wc.Name {
 		t.Errorf("autoDiscovery.clusterName = %v, want %q", autoDiscovery["clusterName"], wc.Name)
 	}
+
+	// Confirmed live: without this, the chart's own default ClusterRole
+	// (provider-agnostic Cluster API kinds only) leaves the pod unable to
+	// list infrastructure.cluster.x-k8s.io/LXCMachineTemplate at all,
+	// logging a continuous watch error - needed for scale-from-zero.
+	// json.Unmarshal into map[string]any decodes nested arrays/objects as
+	// []any/map[string]any, not the concrete types the values were built
+	// from - asserting straight to []map[string]any would always fail.
+	rbac, _ := values["rbac"].(map[string]any)
+	rules, _ := rbac["additionalRules"].([]any)
+	var grantsLXCMachineTemplates bool
+	for _, raw := range rules {
+		rule, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		resources, _ := rule["resources"].([]any)
+		for _, resource := range resources {
+			if resource == "lxcmachinetemplates" {
+				grantsLXCMachineTemplates = true
+			}
+		}
+	}
+	if !grantsLXCMachineTemplates {
+		t.Errorf("rbac.additionalRules = %v, want a rule granting lxcmachinetemplates", rules)
+	}
 }
 
 // TestClusterAutoscalerHelmReleaseHasNoKubeConfig guards the one thing that
