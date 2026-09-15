@@ -182,6 +182,22 @@ func prometheusCompatServices() []map[string]any {
 //     kube-state-metrics comes along for free at no extra operational cost.
 //   - extraManifests carries the two compatibility Services (see their own
 //     doc comment) so this one HelmRelease produces everything needed.
+//   - serviceMonitorSelectorNilUsesHelmValues/podMonitorSelectorNilUsesHelmValues
+//     both false, with the chart's own default empty selectors left as-is:
+//     the chart's own comment on the first key says a nil/{} value there
+//     "will cause the prometheus resource to be created with selectors based
+//     on values in the helm deployment" - i.e. restricted to ServiceMonitors/
+//     PodMonitors carrying this release's own "release: kube-prometheus-stack"
+//     label, which every ServiceMonitor/PodMonitor this operator creates
+//     itself (see newServiceMonitor) or asks another chart to create (the
+//     authentik chart's own server.metrics.serviceMonitor, the bundled
+//     postgresql subchart's metrics.serviceMonitor, CNPG's
+//     spec.monitoring.enablePodMonitor) does not carry. False here instead
+//     leaves prometheusSpec.serviceMonitorSelector/podMonitorSelector at
+//     their own already-empty-map chart defaults, which - confirmed directly
+//     against the chart's own values.yaml comment - means "select
+//     everything," in every namespace (serviceMonitorNamespaceSelector/
+//     podMonitorNamespaceSelector already default to {} too).
 func KubePrometheusStackHelmValues() (*apiextensionsv1.JSON, error) {
 	raw, err := json.Marshal(map[string]any{
 		"fullnameOverride":                   kubePrometheusStackFullname,
@@ -190,7 +206,9 @@ func KubePrometheusStackHelmValues() (*apiextensionsv1.JSON, error) {
 		"alertmanager":                       map[string]any{"enabled": false},
 		"prometheus": map[string]any{
 			"prometheusSpec": map[string]any{
-				"enableRemoteWriteReceiver": true,
+				"enableRemoteWriteReceiver":               true,
+				"serviceMonitorSelectorNilUsesHelmValues": false,
+				"podMonitorSelectorNilUsesHelmValues":     false,
 			},
 		},
 		"extraManifests": prometheusCompatServices(),

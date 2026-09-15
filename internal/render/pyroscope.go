@@ -80,7 +80,7 @@ func PyroscopeObjects() []client.Object {
 		},
 		&corev1.Service{
 			TypeMeta:   metav1.TypeMeta{Kind: "Service", APIVersion: "v1"},
-			ObjectMeta: metav1.ObjectMeta{Name: PyroscopeServiceName, Namespace: ObservabilityNamespace},
+			ObjectMeta: metav1.ObjectMeta{Name: PyroscopeServiceName, Namespace: ObservabilityNamespace, Labels: labels},
 			Spec: corev1.ServiceSpec{
 				Selector: labels,
 				Ports: []corev1.ServicePort{
@@ -88,5 +88,10 @@ func PyroscopeObjects() []client.Object {
 				},
 			},
 		},
+		// Pyroscope serves its own Prometheus-format /metrics on the same
+		// "http" port everything else uses - confirmed live (docker run
+		// grafana/pyroscope:1.8.0, curl :4040/metrics returns real
+		// counter_*/go_* series), not a separate port.
+		newServiceMonitor(PyroscopeServiceName, ObservabilityNamespace, labels, "http"),
 	}
 }

@@ -46,12 +46,18 @@ func TestGrafanaObjects(t *testing.T) {
 			dashboardsCM = cm
 		}
 	}
-	if found["Namespace"] != 1 || found["ConfigMap"] != 3 || found["Deployment"] != 1 || found["Service"] != 2 {
+	if found["Namespace"] != 1 || found["ConfigMap"] != 3 || found["Deployment"] != 1 || found["Service"] != 2 || found["ServiceMonitor"] != 1 {
 		t.Fatalf("unexpected object counts: %v", found)
 	}
 
 	if svc.Spec.Ports[0].Port != GrafanaPort {
 		t.Errorf("service port = %d, want %d", svc.Spec.Ports[0].Port, GrafanaPort)
+	}
+	// The ClusterIP Service needs .metadata.labels (not just .spec.selector)
+	// for the ServiceMonitor above to find it - a ServiceMonitor's own
+	// spec.selector matches the target Service object's labels.
+	if svc.Labels["app"] != GrafanaServiceName {
+		t.Errorf("grafana Service.Labels = %v, want app=%q so its ServiceMonitor can find it", svc.Labels, GrafanaServiceName)
 	}
 	if nodePortSvc.Spec.Type != corev1.ServiceTypeNodePort {
 		t.Errorf("nodeport service type = %q, want NodePort", nodePortSvc.Spec.Type)

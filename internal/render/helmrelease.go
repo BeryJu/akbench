@@ -102,12 +102,25 @@ type AuthentikDeploymentHelmValues struct {
 // releases it as soon as the import completes.
 func HelmValues(t *benchv1alpha1.AuthentikDeployment, secretKey string, pgConn *PostgresConnection, pyroscopeHost, tracingEndpoint string) (*apiextensionsv1.JSON, error) {
 	embedded := t.Spec.Postgres.Mode == benchv1alpha1.PostgresEmbedded
+	// authentikMetrics turns on the chart's own metrics Service (port 9300)
+	// and its own ServiceMonitor for it (server.metrics{,.serviceMonitor}/
+	// worker.metrics{,.serviceMonitor} - confirmed directly against the
+	// chart's real values.yaml, both sections identically shaped) rather
+	// than this project hand-building a competing ServiceMonitor: the chart
+	// already owns the metrics Service's labels/selector, so its own
+	// ServiceMonitor is guaranteed to match them.
+	authentikMetrics := map[string]any{
+		"enabled":        true,
+		"serviceMonitor": map[string]any{"enabled": true},
+	}
 	values := AuthentikDeploymentHelmValues{
 		Server: map[string]any{
 			valuesKeyReplicas: t.Spec.Server.Replicas,
+			"metrics":         authentikMetrics,
 		},
 		Worker: map[string]any{
 			valuesKeyReplicas: t.Spec.Worker.Replicas,
+			"metrics":         authentikMetrics,
 		},
 		// secret_key as a literal value, not authentik.existingSecret: the
 		// chart only renders its authentik.env-derived config Secret (which
@@ -143,6 +156,16 @@ func HelmValues(t *benchv1alpha1.AuthentikDeployment, secretKey string, pgConn *
 					},
 				},
 			},
+		}
+		// The bundled subchart is Bitnami's own postgresql chart (confirmed
+		// against its real values.yaml): metrics.enabled runs its
+		// postgres_exporter sidecar, metrics.serviceMonitor.enabled asks the
+		// subchart to create its own matching ServiceMonitor for it - same
+		// "let the chart own its own monitoring object" approach as
+		// authentikMetrics above.
+		values.Postgres["metrics"] = map[string]any{
+			"enabled":        true,
+			"serviceMonitor": map[string]any{"enabled": true},
 		}
 	}
 

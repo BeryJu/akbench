@@ -43,6 +43,17 @@ func TestKubePrometheusStackHelmValues(t *testing.T) {
 	if enabled, _ := prometheusSpec["enableRemoteWriteReceiver"].(bool); !enabled {
 		t.Errorf("prometheus.prometheusSpec.enableRemoteWriteReceiver = %v, want true", prometheusSpec["enableRemoteWriteReceiver"])
 	}
+	// Both false: the chart's own default (true) restricts discovery to
+	// ServiceMonitors/PodMonitors carrying this release's own "release: ..."
+	// label, which none of the ones this operator creates or asks other
+	// charts to create (authentik's own, the bundled postgresql subchart's,
+	// CNPG's PodMonitor, this package's own newServiceMonitor) carry.
+	if v, ok := prometheusSpec["serviceMonitorSelectorNilUsesHelmValues"].(bool); !ok || v {
+		t.Errorf("prometheus.prometheusSpec.serviceMonitorSelectorNilUsesHelmValues = %v, want false", prometheusSpec["serviceMonitorSelectorNilUsesHelmValues"])
+	}
+	if v, ok := prometheusSpec["podMonitorSelectorNilUsesHelmValues"].(bool); !ok || v {
+		t.Errorf("prometheus.prometheusSpec.podMonitorSelectorNilUsesHelmValues = %v, want false", prometheusSpec["podMonitorSelectorNilUsesHelmValues"])
+	}
 
 	if enabled, _ := values["grafana"].(map[string]any)["enabled"].(bool); enabled {
 		t.Error("grafana.enabled = true, want false (this project runs its own Grafana)")

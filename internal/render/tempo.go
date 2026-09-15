@@ -135,7 +135,7 @@ func TempoObjects() []client.Object {
 		},
 		&corev1.Service{
 			TypeMeta:   metav1.TypeMeta{Kind: "Service", APIVersion: "v1"},
-			ObjectMeta: metav1.ObjectMeta{Name: TempoServiceName, Namespace: ObservabilityNamespace},
+			ObjectMeta: metav1.ObjectMeta{Name: TempoServiceName, Namespace: ObservabilityNamespace, Labels: labels},
 			Spec: corev1.ServiceSpec{
 				Selector: labels,
 				Ports: []corev1.ServicePort{
@@ -144,5 +144,11 @@ func TempoObjects() []client.Object {
 				},
 			},
 		},
+		// Tempo serves its own Prometheus-format /metrics on its HTTP API
+		// port (tempo-query/3200, server.http_listen_port in tempoConfig
+		// above), not the OTLP ingest port - confirmed live (docker run
+		// grafana/tempo:2.6.1, curl :3200/metrics returns real go_*/
+		// deprecated_flags_inuse_total series).
+		newServiceMonitor(TempoServiceName, ObservabilityNamespace, labels, "tempo-query"),
 	}
 }

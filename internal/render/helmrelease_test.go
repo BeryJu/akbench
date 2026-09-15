@@ -64,6 +64,39 @@ func TestHelmValuesEmbedded(t *testing.T) {
 	}
 }
 
+// TestHelmValuesEnablesMetrics guards the fix for gitops/dashboards/
+// README.md's documented gap ("authentik.json shows resource use, not
+// authentik's own metrics... nothing scrapes the release's /metrics
+// endpoint until the operator renders a ServiceMonitor for it"): server/
+// worker/bundled-postgres metrics + their own chart-native ServiceMonitors
+// must all be turned on, for Embedded mode.
+func TestHelmValuesEnablesMetrics(t *testing.T) {
+	topo := exampleDeployment()
+	raw, err := HelmValues(topo, "secret", &PostgresConnection{Password: "pw"}, "http://pyroscope.example:4040", "http://tempo.example:4318")
+	if err != nil {
+		t.Fatalf("HelmValues: %v", err)
+	}
+	values := decodeValues(t, raw.Raw)
+
+	assertMetricsEnabled := func(t *testing.T, section map[string]any, path string) {
+		t.Helper()
+		metrics, ok := section["metrics"].(map[string]any)
+		if !ok {
+			t.Fatalf("%s.metrics is not a map: %v", path, section["metrics"])
+		}
+		if metrics["enabled"] != true {
+			t.Errorf("%s.metrics.enabled = %v, want true", path, metrics["enabled"])
+		}
+		sm, ok := metrics["serviceMonitor"].(map[string]any)
+		if !ok || sm["enabled"] != true {
+			t.Errorf("%s.metrics.serviceMonitor.enabled = %v, want true", path, metrics["serviceMonitor"])
+		}
+	}
+	assertMetricsEnabled(t, values.Server, "server")
+	assertMetricsEnabled(t, values.Worker, "worker")
+	assertMetricsEnabled(t, values.Postgres, "postgresql")
+}
+
 // TestHelmValuesPlacementUsesGlobalAffinityPreset guards against regressing
 // into setting server.affinity/worker.affinity directly: verified against a
 // live chart install that those fields are a raw corev1.Affinity override in

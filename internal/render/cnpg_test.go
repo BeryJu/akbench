@@ -33,6 +33,14 @@ func TestCNPGClusterDefaults(t *testing.T) {
 	if got, want := CNPGAppSecretName(topo), "authentik-1-postgres-app"; got != want {
 		t.Errorf("app secret name = %q, want %q", got, want)
 	}
+
+	// enablePodMonitor makes CNPG's own operator create a PodMonitor -
+	// closes the gap gitops/dashboards/README.md documents ("postgres.json
+	// is empty until something scrapes pg_* series").
+	enablePodMonitor, _, _ := unstructured.NestedBool(u.Object, "spec", "monitoring", "enablePodMonitor")
+	if !enablePodMonitor {
+		t.Error("spec.monitoring.enablePodMonitor = false, want true")
+	}
 }
 
 func TestCNPGClusterHonorsSpec(t *testing.T) {

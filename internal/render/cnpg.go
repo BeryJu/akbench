@@ -68,6 +68,15 @@ func CNPGCluster(t *benchv1alpha1.AuthentikDeployment) *unstructured.Unstructure
 	_ = unstructured.SetNestedMap(u.Object, storage, "spec", "storage")
 	_ = unstructured.SetNestedField(u.Object, cnpgDatabase, "spec", "bootstrap", "initdb", "database")
 	_ = unstructured.SetNestedField(u.Object, cnpgOwner, "spec", "bootstrap", "initdb", "owner")
+	// enablePodMonitor makes CNPG's own operator create a PodMonitor for
+	// this Cluster (confirmed against the live CRD: `kubectl explain
+	// clusters.postgresql.cnpg.io.spec.monitoring` - a real boolean field,
+	// not guessed) - CNPG's operator, not this file, owns building the
+	// postgres_exporter sidecar and scrape config, the same "let the
+	// chart/operator create its own native monitoring object" approach the
+	// authentik chart's own server.metrics.serviceMonitor takes
+	// (helmrelease.go).
+	_ = unstructured.SetNestedField(u.Object, true, "spec", "monitoring", "enablePodMonitor")
 	// inheritedMetadata.labels propagates onto every pod CNPG creates for
 	// this cluster (its real Go API, cluster_types.go's
 	// Cluster.Spec.InheritedMetadata *EmbeddedObjectMetadata - built as a

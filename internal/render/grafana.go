@@ -272,7 +272,7 @@ func GrafanaObjects(wc *benchv1alpha1.WorkloadCluster) []client.Object {
 		},
 		&corev1.Service{
 			TypeMeta:   metav1.TypeMeta{Kind: "Service", APIVersion: "v1"},
-			ObjectMeta: metav1.ObjectMeta{Name: GrafanaServiceName, Namespace: ObservabilityNamespace},
+			ObjectMeta: metav1.ObjectMeta{Name: GrafanaServiceName, Namespace: ObservabilityNamespace, Labels: labels},
 			Spec: corev1.ServiceSpec{
 				Selector: labels,
 				Ports:    []corev1.ServicePort{{Name: "http", Port: GrafanaPort, TargetPort: intstr.FromInt32(GrafanaPort)}},
@@ -289,5 +289,12 @@ func GrafanaObjects(wc *benchv1alpha1.WorkloadCluster) []client.Object {
 				},
 			},
 		},
+		// Grafana serves its own Prometheus-format /metrics on its main
+		// "http" port - confirmed live (docker run grafana/grafana:11.4.0,
+		// curl :3000/metrics returns real go_*/deprecated_flags_inuse_total
+		// series). Selects the plain ClusterIP Service above (it carries
+		// these same labels); the NodePort twin isn't labeled, so it's
+		// skipped rather than scraped twice.
+		newServiceMonitor(GrafanaServiceName, ObservabilityNamespace, labels, "http"),
 	}
 }
