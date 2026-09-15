@@ -149,7 +149,32 @@ spec:
                     Removing a pool from the list deletes its MachineDeployment; adding a new
                     name creates one. The control plane itself is not resizable/reconfigurable
                     this way yet.
+  
+                    replicas stops being reconciled once autoscaling is set (see its own doc
+                    comment) - cluster-autoscaler owns .spec.replicas from then on, and
+                    WorkloadClusterReconciler would otherwise fight it back to replicas on
+                    every reconcile.
                   properties:
+                    autoscaling:
+                      description: |-
+                        autoscaling enables cluster-autoscaler for this pool (see
+                        WorkloadClusterReconciler's ensureClusterAutoscaler). When set, this
+                        pool's MachineDeployment carries cluster-autoscaler's own min/max-size
+                        annotations and replicas above is only used to size it at creation -
+                        cluster-autoscaler scales it from then on.
+                      properties:
+                        maxReplicas:
+                          format: int32
+                          minimum: 1
+                          type: integer
+                        minReplicas:
+                          default: 0
+                          format: int32
+                          minimum: 0
+                          type: integer
+                      required:
+                      - maxReplicas
+                      type: object
                     incus:
                       description: |-
                         incus is this pool's Incus-specific sizing. Required when
@@ -169,6 +194,9 @@ spec:
                       type: string
                     replicas:
                       default: 1
+                      description: |-
+                        replicas is this pool's initial/fixed size. Only used at creation time
+                        once autoscaling is set - see AutoscalingSpec.
                       format: int32
                       minimum: 1
                       type: integer

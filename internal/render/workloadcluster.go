@@ -300,15 +300,41 @@ func machineDeploymentSelectorLabels(wc *benchv1alpha1.WorkloadCluster, pool ben
 	}
 }
 
-// MachineDeployment renders one worker pool.
+// clusterAutoscalerMinSizeAnnotation/clusterAutoscalerMaxSizeAnnotation are
+// cluster-autoscaler's own well-known annotations
+// (cloudprovider/clusterapi's README, verified directly rather than
+// assumed): applying both to a MachineDeployment is what tells
+// cluster-autoscaler to manage it as a node group. Exported so
+// applyMachineDeploymentPool (internal/controller/apply.go) can detect
+// autoscaling is enabled for a pool without re-deriving it from
+// WorkerPoolSpec itself.
+const (
+	ClusterAutoscalerMinSizeAnnotation = "cluster.x-k8s.io/cluster-api-autoscaler-node-group-min-size"
+	ClusterAutoscalerMaxSizeAnnotation = "cluster.x-k8s.io/cluster-api-autoscaler-node-group-max-size"
+)
+
+// MachineDeployment renders one worker pool. When pool.Autoscaling is set,
+// the rendered object carries cluster-autoscaler's own min/max-size
+// annotations - replicas is still set (it's this pool's initial size at
+// creation), but applyMachineDeploymentPool stops reconciling it against
+// the live object's .spec.replicas from then on, since cluster-autoscaler
+// owns that field once these annotations are present.
 func MachineDeployment(wc *benchv1alpha1.WorkloadCluster, pool benchv1alpha1.WorkerPoolSpec) *clusterv1.MachineDeployment {
 	replicas := pool.Replicas
 	labels := machineDeploymentSelectorLabels(wc, pool)
+	var annotations map[string]string
+	if pool.Autoscaling != nil {
+		annotations = map[string]string{
+			ClusterAutoscalerMinSizeAnnotation: fmt.Sprintf("%d", pool.Autoscaling.MinReplicas),
+			ClusterAutoscalerMaxSizeAnnotation: fmt.Sprintf("%d", pool.Autoscaling.MaxReplicas),
+		}
+	}
 	return &clusterv1.MachineDeployment{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      MachineDeploymentName(wc, pool),
-			Namespace: wc.Namespace,
-			Labels:    labels,
+			Name:        MachineDeploymentName(wc, pool),
+			Namespace:   wc.Namespace,
+			Labels:      labels,
+			Annotations: annotations,
 		},
 		Spec: clusterv1.MachineDeploymentSpec{
 			ClusterName: wc.Name,

@@ -141,3 +141,35 @@ func TestWorkerMachineTemplateNameChangesWithFlavor(t *testing.T) {
 		t.Fatalf("workerMachineTemplateName is not stable across identical input: %q vs %q", nameForSmall, again)
 	}
 }
+
+// TestMachineDeploymentAutoscalingAnnotations guards the two annotations
+// cluster-autoscaler itself watches for (cloudprovider/clusterapi's own
+// README, verified directly - see ClusterAutoscalerHelmRelease's doc
+// comment) - without them on the rendered object, cluster-autoscaler would
+// never recognize this pool as a node group to manage at all, regardless of
+// how the rest of its Helm install is configured.
+func TestMachineDeploymentAutoscalingAnnotations(t *testing.T) {
+	pool := benchv1alpha1.WorkerPoolSpec{
+		Name:        "workers",
+		Replicas:    2,
+		Incus:       benchv1alpha1.IncusMachineSpec{Flavor: "c1-m2"},
+		Autoscaling: &benchv1alpha1.AutoscalingSpec{MinReplicas: 1, MaxReplicas: 5},
+	}
+	md := MachineDeployment(wcWithPools(pool), pool)
+
+	if got := md.Annotations[ClusterAutoscalerMinSizeAnnotation]; got != "1" {
+		t.Errorf("min-size annotation = %q, want %q", got, "1")
+	}
+	if got := md.Annotations[ClusterAutoscalerMaxSizeAnnotation]; got != "5" {
+		t.Errorf("max-size annotation = %q, want %q", got, "5")
+	}
+
+	// A pool with no autoscaling set must render neither annotation - a
+	// present-but-empty annotation would still make cluster-autoscaler
+	// treat it as a managed node group.
+	fixed := benchv1alpha1.WorkerPoolSpec{Name: "fixed", Replicas: 2, Incus: benchv1alpha1.IncusMachineSpec{Flavor: "c1-m2"}}
+	fixedMD := MachineDeployment(wcWithPools(fixed), fixed)
+	if _, ok := fixedMD.Annotations[ClusterAutoscalerMinSizeAnnotation]; ok {
+		t.Errorf("non-autoscaled pool got the min-size annotation anyway: %v", fixedMD.Annotations)
+	}
+}

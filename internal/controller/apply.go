@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"maps"
 
 	helmv2 "github.com/fluxcd/helm-controller/api/v2"
 	sourcev1 "github.com/fluxcd/source-controller/api/v1"
@@ -35,6 +36,8 @@ import (
 	bootstrapv1 "sigs.k8s.io/cluster-api/api/bootstrap/kubeadm/v1beta2"
 	controlplanev1 "sigs.k8s.io/cluster-api/api/controlplane/kubeadm/v1beta2"
 	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
+
+	"github.com/goauthentik/authentik-bench/internal/render"
 )
 
 // applyOwned creates or updates obj, setting owner as its controller owner so
@@ -129,14 +132,21 @@ func applyCreateOnly(ctx context.Context, c client.Client, scheme *runtime.Schem
 }
 
 // applyMachineDeploymentPool creates a worker pool's MachineDeployment if it
-// doesn't exist yet, or - if it does - patches only spec.replicas and
-// spec.template.spec.infrastructureRef.name (the two fields a
-// WorkerPoolSpec edit can actually change) rather than comparing/replacing
-// the whole spec the way applyOwned does. A full-spec comparison would hit
-// the same infinite-reconcile bug applyCreateOnly's doc comment describes -
-// CAPI mutates other spec fields (rollout strategy defaults, etc.) after
-// creation - so this only ever touches the two fields this operator itself
-// owns, leaving everything CAPI has defaulted alone.
+// doesn't exist yet, or - if it does - patches only spec.replicas,
+// spec.template.spec.infrastructureRef.name, and its cluster-autoscaler
+// annotations (the fields a WorkerPoolSpec edit can actually change) rather
+// than comparing/replacing the whole spec the way applyOwned does. A
+// full-spec comparison would hit the same infinite-reconcile bug
+// applyCreateOnly's doc comment describes - CAPI mutates other spec fields
+// (rollout strategy defaults, etc.) after creation - so this only ever
+// touches the fields this operator itself owns, leaving everything CAPI has
+// defaulted alone.
+//
+// spec.replicas is skipped entirely once desired carries
+// render.ClusterAutoscalerMinSizeAnnotation: once a pool is autoscaled,
+// cluster-autoscaler owns that field, and patching it back to the
+// WorkerPoolSpec's own (creation-time-only) replicas on every reconcile
+// would fight every scale-up/down it makes.
 func applyMachineDeploymentPool(ctx context.Context, c client.Client, scheme *runtime.Scheme, owner client.Object, desired *clusterv1.MachineDeployment) error {
 	if err := controllerutil.SetControllerReference(owner, desired, scheme); err != nil {
 		return err
@@ -150,12 +160,17 @@ func applyMachineDeploymentPool(ctx context.Context, c client.Client, scheme *ru
 		return err
 	}
 	changed := false
-	if existing.Spec.Replicas == nil || desired.Spec.Replicas == nil || *existing.Spec.Replicas != *desired.Spec.Replicas {
+	_, autoscaled := desired.Annotations[render.ClusterAutoscalerMinSizeAnnotation]
+	if !autoscaled && (existing.Spec.Replicas == nil || desired.Spec.Replicas == nil || *existing.Spec.Replicas != *desired.Spec.Replicas) {
 		existing.Spec.Replicas = desired.Spec.Replicas
 		changed = true
 	}
 	if existing.Spec.Template.Spec.InfrastructureRef.Name != desired.Spec.Template.Spec.InfrastructureRef.Name {
 		existing.Spec.Template.Spec.InfrastructureRef.Name = desired.Spec.Template.Spec.InfrastructureRef.Name
+		changed = true
+	}
+	if !maps.Equal(existing.Annotations, desired.Annotations) {
+		existing.Annotations = desired.Annotations
 		changed = true
 	}
 	if !changed {

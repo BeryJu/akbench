@@ -237,6 +237,15 @@ func (r *WorkloadClusterReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 			log.Error(err, "failed to ensure Prometheus on workload cluster")
 			r.Recorder.Eventf(&wc, corev1.EventTypeWarning, "AddonFailed", "failed to ensure Prometheus: %v", err)
 		}
+		// Best-effort/idempotent, and a no-op unless at least one worker
+		// pool actually sets spec.autoscaling - installing an always-on
+		// cluster-autoscaler for every WorkloadCluster regardless of whether
+		// anything asked for it would be pure waste, the same reasoning
+		// ensureCSIIncus already applies to spec.incus being unset.
+		if err := r.ensureClusterAutoscaler(ctx, &wc); err != nil {
+			log.Error(err, "failed to ensure cluster-autoscaler on workload cluster")
+			r.Recorder.Eventf(&wc, corev1.EventTypeWarning, "AddonFailed", "failed to ensure cluster-autoscaler: %v", err)
+		}
 		// Best-effort/idempotent for the same reason: without these,
 		// authentik's own AUTHENTIK_PYROSCOPE_HOST/
 		// AUTHENTIK_ERROR_REPORTING__OTEL_ENDPOINT env vars
@@ -439,6 +448,34 @@ func (r *WorkloadClusterReconciler) ensurePrometheus(ctx context.Context, wc *be
 		return fmt.Errorf("resolve reachable node IP: %w", err)
 	}
 	wc.Status.PrometheusURL = fmt.Sprintf("http://%s:%d", nodeIP, render.PrometheusNodePort)
+	return nil
+}
+
+// ensureClusterAutoscaler installs cluster-autoscaler (kubernetes.github.io/
+// autoscaler, --cloud-provider=clusterapi) for this WorkloadCluster if at
+// least one of its worker pools sets spec.autoscaling - a no-op otherwise.
+// Unlike every other addon in this file, this applies locally (r.Client, no
+// spec.kubeConfig on the HelmRelease) rather than remotely onto the
+// workload cluster: cluster-autoscaler must run wherever the Cluster API
+// MachineDeployment/Cluster objects it watches actually live, which is the
+// management cluster this operator itself runs on (see
+// render.ClusterAutoscalerHelmRelease's own doc comment for the verified
+// clusterAPIMode reasoning).
+func (r *WorkloadClusterReconciler) ensureClusterAutoscaler(ctx context.Context, wc *benchv1alpha1.WorkloadCluster) error {
+	if !render.HasAutoscalingPool(wc) {
+		return nil
+	}
+	values, err := render.ClusterAutoscalerHelmValues(wc)
+	if err != nil {
+		return err
+	}
+	if err := applyOwned(ctx, r.Client, r.Scheme, wc, render.ClusterAutoscalerHelmRepository(wc.Namespace)); err != nil {
+		return fmt.Errorf("apply cluster-autoscaler HelmRepository: %w", err)
+	}
+	hr := render.ClusterAutoscalerHelmRelease(wc, values)
+	if err := applyOwned(ctx, r.Client, r.Scheme, wc, hr); err != nil {
+		return fmt.Errorf("apply cluster-autoscaler HelmRelease: %w", err)
+	}
 	return nil
 }
 

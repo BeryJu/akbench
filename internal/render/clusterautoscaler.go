@@ -1,0 +1,168 @@
+/*
+Copyright 2026.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package render
+
+import (
+	"encoding/json"
+	"fmt"
+
+	helmv2 "github.com/fluxcd/helm-controller/api/v2"
+	sourcev1 "github.com/fluxcd/source-controller/api/v1"
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
+)
+
+// cluster-autoscaler is installed via its own official Helm chart
+// (kubernetes.github.io/autoscaler), one release per WorkloadCluster that
+// actually uses autoscaling (see HasAutoscalingPool) - unlike ensureCNI/
+// ensureCSIIncus/ensureMetricsServer/ensurePrometheus, this HelmRelease
+// carries no spec.kubeConfig: cluster-autoscaler must run on the SAME
+// cluster its target Cluster API objects (MachineDeployment/Cluster) live
+// on - the management cluster - so this installs locally, wherever
+// helm-controller itself runs, exactly like AuthentikDeploymentReconciler's
+// own local objects.
+//
+// Verified directly against the chart's own templates/deployment.yaml and
+// values.yaml (not assumed): clusterAPIMode's four hyphenated values are
+// "workloadClusterMode-managementClusterMode", so "kubeconfig-incluster" -
+// not the more intuitive-sounding "incluster-kubeconfig" - is the one that
+// renders `--kubeconfig=<path>` with no --cloud-config flag, matching
+// "autoscaler pod runs where the CAPI objects live (management, in-cluster
+// via its own ServiceAccount) but manages a *different* cluster's nodes (the
+// workload cluster, via a mounted kubeconfig)". clusterAPIKubeconfigSecret's
+// default mount path (/etc/kubernetes/value) already matches the data key
+// ("value") CAPI's own generated "<cluster>-kubeconfig" Secret uses, so no
+// extra values are needed to wire the two together beyond the Secret's name.
+const (
+	ClusterAutoscalerHelmRepositoryName = "cluster-autoscaler"
+	clusterAutoscalerChartName          = "cluster-autoscaler"
+	clusterAutoscalerChartRepoURL       = "https://kubernetes.github.io/autoscaler"
+
+	// clusterAutoscalerChartVersion is pinned - matches the chart version
+	// last verified working; bump deliberately.
+	clusterAutoscalerChartVersion = "9.59.0"
+)
+
+// ClusterAutoscalerHelmReleaseName/ClusterAutoscalerNamespace are unique per
+// WorkloadCluster (unlike CNI/CSI/metrics-server, which each only ever
+// install once per *workload* cluster and so can use a fixed name/namespace
+// there) - every cluster-autoscaler instance this operator installs lives
+// in the one shared management cluster, so a fixed name/namespace would
+// collide the moment a second WorkloadCluster also wants autoscaling.
+func ClusterAutoscalerHelmReleaseName(wc *benchv1alpha1.WorkloadCluster) string {
+	return "cluster-autoscaler-" + wc.Name
+}
+
+func ClusterAutoscalerNamespace(wc *benchv1alpha1.WorkloadCluster) string {
+	return ClusterAutoscalerHelmReleaseName(wc)
+}
+
+// HasAutoscalingPool reports whether any of this WorkloadCluster's worker
+// pools has autoscaling configured - ensureClusterAutoscaler is a no-op
+// without one, the same "only install what's actually used" reasoning
+// ensureCSIIncus already applies to spec.incus.
+func HasAutoscalingPool(wc *benchv1alpha1.WorkloadCluster) bool {
+	for _, pool := range wc.Spec.WorkerPools {
+		if pool.Autoscaling != nil {
+			return true
+		}
+	}
+	return false
+}
+
+// ClusterAutoscalerHelmRepository is the (singleton, per-namespace)
+// HelmRepository pointing at the official kubernetes/autoscaler chart repo -
+// shared by every WorkloadCluster's own cluster-autoscaler HelmRelease, the
+// same way CNIHelmRepository/MetricsServerHelmRepository already are.
+func ClusterAutoscalerHelmRepository(namespace string) *sourcev1.HelmRepository {
+	return &sourcev1.HelmRepository{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      ClusterAutoscalerHelmRepositoryName,
+			Namespace: namespace,
+		},
+		Spec: sourcev1.HelmRepositorySpec{
+			URL:      clusterAutoscalerChartRepoURL,
+			Interval: metav1.Duration{Duration: helmRepoInterval},
+		},
+	}
+}
+
+// ClusterAutoscalerHelmValues builds spec.values for one WorkloadCluster's
+// cluster-autoscaler install:
+//   - cloudProvider/clusterAPIMode as this file's own doc comment explains.
+//   - clusterAPIKubeconfigSecret names the exact "<cluster>-kubeconfig"
+//     Secret CAPI already writes on the management cluster (render.KubeconfigSecretName) -
+//     no copying/relabeling needed, it already lives right next to where
+//     this HelmRelease installs.
+//   - autoDiscovery.namespace/clusterName scope this instance to exactly
+//     this WorkloadCluster's own MachineDeployments: every WorkloadCluster's
+//     CAPI objects live in the same management-cluster namespace
+//     (wc.Namespace), so without this a second cluster's autoscaler
+//     instance would also see (and potentially scale) this one's node
+//     groups.
+func ClusterAutoscalerHelmValues(wc *benchv1alpha1.WorkloadCluster) (*apiextensionsv1.JSON, error) {
+	raw, err := json.Marshal(map[string]any{
+		"cloudProvider":              "clusterapi",
+		"clusterAPIMode":             "kubeconfig-incluster",
+		"clusterAPIKubeconfigSecret": KubeconfigSecretName(wc),
+		"autoDiscovery": map[string]any{
+			"namespace":   wc.Namespace,
+			"clusterName": wc.Name,
+		},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("marshal cluster-autoscaler helm values: %w", err)
+	}
+	return &apiextensionsv1.JSON{Raw: raw}, nil
+}
+
+// ClusterAutoscalerHelmRelease builds the Flux HelmRelease that installs
+// cluster-autoscaler for one WorkloadCluster - deliberately no
+// spec.kubeConfig (see this file's own doc comment for why): this installs
+// on whichever cluster helm-controller itself runs on, the management
+// cluster, not remotely onto the workload cluster the way every other addon
+// in this package does.
+func ClusterAutoscalerHelmRelease(wc *benchv1alpha1.WorkloadCluster, values *apiextensionsv1.JSON) *helmv2.HelmRelease {
+	name := ClusterAutoscalerHelmReleaseName(wc)
+	return &helmv2.HelmRelease{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: wc.Namespace,
+		},
+		Spec: helmv2.HelmReleaseSpec{
+			Interval:    metav1.Duration{Duration: helmRepoInterval},
+			Timeout:     &metav1.Duration{Duration: helmInstallTimeout},
+			ReleaseName: name,
+			Chart: &helmv2.HelmChartTemplate{
+				Spec: helmv2.HelmChartTemplateSpec{
+					Chart:   clusterAutoscalerChartName,
+					Version: clusterAutoscalerChartVersion,
+					SourceRef: helmv2.CrossNamespaceObjectReference{
+						Kind:      sourcev1.HelmRepositoryKind,
+						Name:      ClusterAutoscalerHelmRepositoryName,
+						Namespace: wc.Namespace,
+					},
+				},
+			},
+			TargetNamespace: ClusterAutoscalerNamespace(wc),
+			Install:         &helmv2.Install{CreateNamespace: true},
+			Values:          values,
+		},
+	}
+}

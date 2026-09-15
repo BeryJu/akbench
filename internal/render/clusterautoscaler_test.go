@@ -1,0 +1,114 @@
+package render
+
+import (
+	"encoding/json"
+	"testing"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
+)
+
+func exampleAutoscalingCluster() *benchv1alpha1.WorkloadCluster {
+	return &benchv1alpha1.WorkloadCluster{
+		ObjectMeta: metav1.ObjectMeta{Name: "wc-1", Namespace: "default"},
+		Spec: benchv1alpha1.WorkloadClusterSpec{
+			WorkerPools: []benchv1alpha1.WorkerPoolSpec{
+				{Name: "workers", Replicas: 1, Autoscaling: &benchv1alpha1.AutoscalingSpec{MinReplicas: 1, MaxReplicas: 4}},
+			},
+		},
+	}
+}
+
+func TestHasAutoscalingPool(t *testing.T) {
+	if !HasAutoscalingPool(exampleAutoscalingCluster()) {
+		t.Error("expected HasAutoscalingPool to be true when a pool sets autoscaling")
+	}
+
+	fixed := &benchv1alpha1.WorkloadCluster{
+		Spec: benchv1alpha1.WorkloadClusterSpec{
+			WorkerPools: []benchv1alpha1.WorkerPoolSpec{{Name: "workers", Replicas: 1}},
+		},
+	}
+	if HasAutoscalingPool(fixed) {
+		t.Error("expected HasAutoscalingPool to be false when no pool sets autoscaling")
+	}
+}
+
+// TestClusterAutoscalerHelmValues guards the exact values verified live
+// against the chart's own templates/deployment.yaml (see
+// ClusterAutoscalerHelmRelease's doc comment): clusterAPIMode must be
+// "kubeconfig-incluster" (not the more intuitive-sounding
+// "incluster-kubeconfig"), and clusterAPIKubeconfigSecret must name the
+// exact "<cluster>-kubeconfig" Secret CAPI writes.
+func TestClusterAutoscalerHelmValues(t *testing.T) {
+	wc := exampleAutoscalingCluster()
+	raw, err := ClusterAutoscalerHelmValues(wc)
+	if err != nil {
+		t.Fatalf("ClusterAutoscalerHelmValues: %v", err)
+	}
+
+	var values map[string]any
+	if err := json.Unmarshal(raw.Raw, &values); err != nil {
+		t.Fatalf("unmarshal values: %v", err)
+	}
+
+	if values["cloudProvider"] != "clusterapi" {
+		t.Errorf("cloudProvider = %v, want clusterapi", values["cloudProvider"])
+	}
+	if values["clusterAPIMode"] != "kubeconfig-incluster" {
+		t.Errorf("clusterAPIMode = %v, want kubeconfig-incluster", values["clusterAPIMode"])
+	}
+	if want := KubeconfigSecretName(wc); values["clusterAPIKubeconfigSecret"] != want {
+		t.Errorf("clusterAPIKubeconfigSecret = %v, want %q", values["clusterAPIKubeconfigSecret"], want)
+	}
+
+	autoDiscovery, _ := values["autoDiscovery"].(map[string]any)
+	if autoDiscovery["namespace"] != wc.Namespace {
+		t.Errorf("autoDiscovery.namespace = %v, want %q", autoDiscovery["namespace"], wc.Namespace)
+	}
+	if autoDiscovery["clusterName"] != wc.Name {
+		t.Errorf("autoDiscovery.clusterName = %v, want %q", autoDiscovery["clusterName"], wc.Name)
+	}
+}
+
+// TestClusterAutoscalerHelmReleaseHasNoKubeConfig guards the one thing that
+// makes this addon different from every other one in this package: it must
+// NOT carry spec.kubeConfig, since it needs to install locally (wherever
+// helm-controller itself runs - the management cluster), not remotely onto
+// the workload cluster.
+func TestClusterAutoscalerHelmReleaseHasNoKubeConfig(t *testing.T) {
+	wc := exampleAutoscalingCluster()
+	values, err := ClusterAutoscalerHelmValues(wc)
+	if err != nil {
+		t.Fatalf("ClusterAutoscalerHelmValues: %v", err)
+	}
+	hr := ClusterAutoscalerHelmRelease(wc, values)
+
+	if hr.Spec.KubeConfig != nil {
+		t.Errorf("HelmRelease.spec.kubeConfig = %v, want nil (this installs locally)", hr.Spec.KubeConfig)
+	}
+	if hr.Name != ClusterAutoscalerHelmReleaseName(wc) {
+		t.Errorf("name = %q, want %q", hr.Name, ClusterAutoscalerHelmReleaseName(wc))
+	}
+	if hr.Spec.TargetNamespace != ClusterAutoscalerNamespace(wc) {
+		t.Errorf("targetNamespace = %q, want %q", hr.Spec.TargetNamespace, ClusterAutoscalerNamespace(wc))
+	}
+}
+
+// TestClusterAutoscalerNamesAreUniquePerCluster guards against two
+// WorkloadClusters' cluster-autoscaler installs colliding: every other
+// addon in this package can use a fixed name because it installs once per
+// *workload* cluster, but cluster-autoscaler installs onto the one shared
+// management cluster for every WorkloadCluster that wants it.
+func TestClusterAutoscalerNamesAreUniquePerCluster(t *testing.T) {
+	a := &benchv1alpha1.WorkloadCluster{ObjectMeta: metav1.ObjectMeta{Name: "cluster-a", Namespace: "default"}}
+	b := &benchv1alpha1.WorkloadCluster{ObjectMeta: metav1.ObjectMeta{Name: "cluster-b", Namespace: "default"}}
+
+	if ClusterAutoscalerHelmReleaseName(a) == ClusterAutoscalerHelmReleaseName(b) {
+		t.Error("two different WorkloadClusters rendered the same cluster-autoscaler HelmRelease name")
+	}
+	if ClusterAutoscalerNamespace(a) == ClusterAutoscalerNamespace(b) {
+		t.Error("two different WorkloadClusters rendered the same cluster-autoscaler namespace")
+	}
+}

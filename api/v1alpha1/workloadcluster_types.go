@@ -97,12 +97,19 @@ type IncusProviderSpec struct {
 // Removing a pool from the list deletes its MachineDeployment; adding a new
 // name creates one. The control plane itself is not resizable/reconfigurable
 // this way yet.
+//
+// replicas stops being reconciled once autoscaling is set (see its own doc
+// comment) - cluster-autoscaler owns .spec.replicas from then on, and
+// WorkloadClusterReconciler would otherwise fight it back to replicas on
+// every reconcile.
 type WorkerPoolSpec struct {
 	// name identifies this pool; it becomes part of the MachineDeployment's
 	// own name, so it follows the same naming rules as a Kubernetes object.
 	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
 	Name string `json:"name"`
 
+	// replicas is this pool's initial/fixed size. Only used at creation time
+	// once autoscaling is set - see AutoscalingSpec.
 	// +kubebuilder:validation:Minimum=1
 	// +kubebuilder:default=1
 	// +optional
@@ -112,6 +119,29 @@ type WorkerPoolSpec struct {
 	// spec.provider is Incus.
 	// +optional
 	Incus IncusMachineSpec `json:"incus,omitempty"`
+
+	// autoscaling enables cluster-autoscaler for this pool (see
+	// WorkloadClusterReconciler's ensureClusterAutoscaler). When set, this
+	// pool's MachineDeployment carries cluster-autoscaler's own min/max-size
+	// annotations and replicas above is only used to size it at creation -
+	// cluster-autoscaler scales it from then on.
+	// +optional
+	Autoscaling *AutoscalingSpec `json:"autoscaling,omitempty"`
+}
+
+// AutoscalingSpec bounds cluster-autoscaler's node-group scaling for one
+// WorkerPoolSpec via cluster-autoscaler's own well-known Cluster API
+// annotations (cluster.x-k8s.io/cluster-api-autoscaler-node-group-{min,max}-size
+// - see https://github.com/kubernetes/autoscaler/blob/master/cluster-autoscaler/cloudprovider/clusterapi/README.md),
+// applied to the pool's MachineDeployment by render.MachineDeployment.
+type AutoscalingSpec struct {
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:default=0
+	// +optional
+	MinReplicas int32 `json:"minReplicas,omitempty"`
+
+	// +kubebuilder:validation:Minimum=1
+	MaxReplicas int32 `json:"maxReplicas"`
 }
 
 // WorkloadClusterSpec describes a Kubernetes cluster this operator asks

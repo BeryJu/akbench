@@ -34,6 +34,7 @@ import (
 	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 
 	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
+	"github.com/goauthentik/authentik-bench/internal/render"
 )
 
 var _ = Describe("WorkloadCluster Controller", func() {
@@ -154,6 +155,28 @@ var _ = Describe("WorkloadCluster Controller", func() {
 			Expect(*md.Spec.Replicas).To(Equal(int32(5)))
 			Expect(md.Spec.Template.Spec.InfrastructureRef.Name).NotTo(Equal(originalTemplateName),
 				"a flavor edit must repoint the MachineDeployment at a new LXCMachineTemplate to trigger Cluster API's rollout")
+
+			By("enabling autoscaling on the pool and confirming the annotations appear")
+			Expect(k8sClient.Get(ctx, typeNamespacedName, workloadcluster)).To(Succeed())
+			workloadcluster.Spec.WorkerPools[0].Autoscaling = &benchv1alpha1.AutoscalingSpec{MinReplicas: 1, MaxReplicas: 9}
+			Expect(k8sClient.Update(ctx, workloadcluster)).To(Succeed())
+
+			_, err = controllerReconciler.Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: mdName, Namespace: resourceNamespace}, &md)).To(Succeed())
+			Expect(md.Annotations[render.ClusterAutoscalerMinSizeAnnotation]).To(Equal("1"))
+			Expect(md.Annotations[render.ClusterAutoscalerMaxSizeAnnotation]).To(Equal("9"))
+
+			By("simulating cluster-autoscaler scaling the pool, and confirming a reconcile doesn't fight it back")
+			scaledReplicas := int32(3)
+			md.Spec.Replicas = &scaledReplicas
+			Expect(k8sClient.Update(ctx, &md)).To(Succeed())
+
+			_, err = controllerReconciler.Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: mdName, Namespace: resourceNamespace}, &md)).To(Succeed())
+			Expect(*md.Spec.Replicas).To(Equal(int32(3)),
+				"WorkerPoolSpec.Replicas must not be reasserted once autoscaling is enabled - that would fight every scale-up/down cluster-autoscaler makes")
 
 			By("adding a second pool and confirming it gets its own MachineDeployment")
 			Expect(k8sClient.Get(ctx, typeNamespacedName, workloadcluster)).To(Succeed())
