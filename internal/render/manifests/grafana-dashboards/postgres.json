@@ -142,9 +142,9 @@
     },
     {
       "id": 2,
-      "type": "Running into max_connections is the most common way a topology stops scaling with more authentik replicas.",
+      "type": "timeseries",
       "title": "Connections",
-      "description": "",
+      "description": "Running into max_connections is the most common way a topology stops scaling with more authentik replicas.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -402,9 +402,9 @@
     },
     {
       "id": 6,
-      "type": "Zero here is why every other panel on this dashboard is empty.",
+      "type": "timeseries",
       "title": "Exporter up",
-      "description": "",
+      "description": "Zero here is why every other panel on this dashboard is empty.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"

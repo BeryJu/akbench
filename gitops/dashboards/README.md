@@ -29,12 +29,18 @@ Kubernetes:
   now. The `authentik` dashboard uses `pod` instead, and derives `node` by
   joining through `kube_pod_info`, which is what makes the `Dedicated` vs
   `Default` placement comparison legible.
-- `cluster` is new: reserved for a per-workload-cluster identifier, should
-  one ever get attached to these series (each workload cluster runs its own
-  Prometheus/Grafana today - see `internal/render/metrics.go` - so there is
-  currently exactly one cluster's worth of data behind any given dashboard,
-  and no external label sets this). Every dashboard matches it as a regex,
-  so this stays a no-op until/unless that changes.
+- `cluster` was a reserved per-workload-cluster identifier that never got
+  attached to any real series (each workload cluster runs its own
+  Prometheus/Grafana - see `internal/render/metrics.go` - so there was never
+  more than one cluster's worth of data behind any dashboard anyway). It was
+  removed entirely from `k6.json`/`compare-tests.json` (the only two that had
+  it) after it turned out to be a real bug, not a harmless no-op: it was a
+  templated Grafana variable with `includeAll`, and since no series has a
+  `cluster` label at all, its own discovery query returned zero options,
+  leaving it unresolved - which cascaded into every panel that filtered on it
+  (directly, or indirectly through `$testid`/`$target`/`$profile`, whose own
+  discovery queries were themselves filtered by `$cluster`) showing no data at
+  all, confirmed live.
 
 ## Caveats
 
@@ -44,12 +50,25 @@ Kubernetes:
   (`k6_http_req_duration_seconds`, in seconds - k6's own trends are in
   milliseconds). Quantiles are therefore taken over `sum(rate(...))` with no
   `le` grouping. `TestK6MetricNamesAreReal` guards the names.
-- **`postgres.json` is empty until something scrapes `pg_*` series.** The
-  operator does not deploy a postgres exporter for any of the three postgres
-  modes yet.
-- **`authentik.json` shows resource use, not authentik's own metrics.** Nothing
-  scrapes the release's `/metrics` endpoint until the operator renders a
-  `ServiceMonitor` for it.
+- **`k6.json`'s "Failed requests" panel deliberately doesn't query
+  `k6_dropped_iterations_total`.** That metric is only ever emitted by k6's
+  arrival-rate executors; every scenario this project renders
+  (`k6/scripts/login.ts`/`oauth.ts`) uses `per-vu-iterations` instead -
+  confirmed live that the metric doesn't exist in Prometheus at all for this
+  project, not just that it's currently zero.
+- **`authentik.json`'s "CPU throttling" panel queries
+  `container_pressure_cpu_waiting_seconds_total`, not
+  `container_cpu_cfs_throttled_seconds_total`.** The latter is a cgroup v1
+  metric; confirmed live that this project's nodes (cgroup v2) never expose
+  it at all, only the newer PSI-based "some" CPU-pressure metric.
+- A previous version of eight panels across every dashboard (`Disk I/O time`,
+  `Where the time goes`, `Failures and dropped iterations`, `CPU by node`,
+  `CPU throttling`, `Ready replicas and restarts`, `Connections`, `Exporter
+  up`) had their explanatory text accidentally saved into Grafana's own
+  `type` field instead of `description` - an invalid panel type, so none of
+  them rendered as a real timeseries panel regardless of whether their
+  underlying PromQL/data was fine. Fixed; every panel's `type` is now a real
+  Grafana panel type again.
 - These dashboards were **authored against the label scheme, not ported from
   the Ansible harness's JSON**, which was not reachable from the machine this
   was built on. They cover the same questions; they are not the same files.

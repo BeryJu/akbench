@@ -39,6 +39,7 @@ type dashboardFile struct {
 	} `json:"templating"`
 	Panels []struct {
 		Title   string `json:"title"`
+		Type    string `json:"type"`
 		Targets []struct {
 			Expr string `json:"expr"`
 		} `json:"targets"`
@@ -118,7 +119,12 @@ func TestDashboardsMatchRenderEmbeds(t *testing.T) {
 // nothing.
 var k6MetricNames = func() map[string]bool {
 	names := map[string]bool{}
-	for _, name := range []string{"iterations", "dropped_iterations", "http_reqs"} {
+	// Deliberately NOT "dropped_iterations": k6 only ever emits that series
+	// for its arrival-rate executors, and every scenario this project renders
+	// (k6/scripts/login.ts/oauth.ts) uses per-vu-iterations instead -
+	// confirmed live it never appears in Prometheus at all for this project,
+	// so a dashboard querying it would always show no data.
+	for _, name := range []string{"iterations", "http_reqs"} {
 		names["k6_"+name+"_total"] = true
 	}
 	for _, name := range []string{"data_sent", "data_received"} {
@@ -171,9 +177,48 @@ func TestK6DashboardsSplitOnTheTagScheme(t *testing.T) {
 		for _, v := range dash.Templating.List {
 			vars[v.Name] = true
 		}
-		for _, want := range []string{"testid", "target", "profile", "cluster"} {
+		// Not "cluster": that variable was removed after turning out to be a
+		// real bug, not a harmless placeholder - see gitops/dashboards/README.md's
+		// own "Label scheme" section. No k6 series has ever carried a
+		// "cluster" label, so its discovery query always returned zero
+		// options, leaving it unresolved and breaking every panel that
+		// filtered on it (directly, or indirectly through testid/target/
+		// profile's own cluster-filtered discovery queries).
+		for _, want := range []string{"testid", "target", "profile"} {
 			if !vars[want] {
 				t.Errorf("%s.json has no %q template variable", name, want)
+			}
+		}
+		if vars["cluster"] {
+			t.Errorf("%s.json still has a \"cluster\" template variable - see this test's own doc comment for why that's a regression, not a feature", name)
+		}
+	}
+}
+
+// validGrafanaPanelTypes are the panel types this project's own dashboards
+// actually use - not exhaustive of every type Grafana ships, just enough to
+// catch the real bug this guards: eight panels across every one of these
+// five dashboards once had their own explanatory text saved into Grafana's
+// "type" field instead of "description" (an editing mistake, not a valid
+// panel type at all), which silently made Grafana refuse to render them as
+// a real timeseries panel regardless of whether their underlying PromQL/data
+// was fine - confirmed live. A panel's own "type" should never be prose.
+var validGrafanaPanelTypes = map[string]bool{
+	"timeseries": true,
+	"stat":       true,
+	"table":      true,
+	"gauge":      true,
+	"bargauge":   true,
+	"piechart":   true,
+	"row":        true,
+	"text":       true,
+}
+
+func TestDashboardPanelsHaveARealType(t *testing.T) {
+	for name, dash := range loadDashboards(t) {
+		for _, panel := range dash.Panels {
+			if !validGrafanaPanelTypes[panel.Type] {
+				t.Errorf("%s.json panel %q has type %q, not a real Grafana panel type - did its description end up in \"type\" by mistake?", name, panel.Title, panel.Type)
 			}
 		}
 	}

@@ -250,9 +250,9 @@
     },
     {
       "id": 4,
-      "type": "Saturating here usually means postgres storage, not authentik, is the limit being measured.",
+      "type": "timeseries",
       "title": "Disk I/O time",
-      "description": "",
+      "description": "Saturating here usually means postgres storage, not authentik, is the limit being measured.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"

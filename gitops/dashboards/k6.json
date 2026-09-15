@@ -29,29 +29,6 @@
         "regex": ""
       },
       {
-        "name": "cluster",
-        "label": "Cluster",
-        "description": "Workload cluster the metrics came from",
-        "type": "query",
-        "datasource": {
-          "type": "prometheus",
-          "uid": "${datasource}"
-        },
-        "definition": "label_values(k6_vus, cluster)",
-        "query": {
-          "query": "label_values(k6_vus, cluster)",
-          "refId": "cluster"
-        },
-        "multi": true,
-        "includeAll": true,
-        "allValue": ".*",
-        "current": {},
-        "options": [],
-        "refresh": 2,
-        "sort": 1,
-        "hide": 0
-      },
-      {
         "name": "testid",
         "label": "Test",
         "description": "k6 testid tag - the TestCase name",
@@ -60,9 +37,9 @@
           "type": "prometheus",
           "uid": "${datasource}"
         },
-        "definition": "label_values(k6_iterations_total{cluster=~\"$cluster\"}, testid)",
+        "definition": "label_values(k6_iterations_total, testid)",
         "query": {
-          "query": "label_values(k6_iterations_total{cluster=~\"$cluster\"}, testid)",
+          "query": "label_values(k6_iterations_total, testid)",
           "refId": "testid"
         },
         "multi": true,
@@ -83,9 +60,9 @@
           "type": "prometheus",
           "uid": "${datasource}"
         },
-        "definition": "label_values(k6_iterations_total{cluster=~\"$cluster\"}, target)",
+        "definition": "label_values(k6_iterations_total, target)",
         "query": {
-          "query": "label_values(k6_iterations_total{cluster=~\"$cluster\"}, target)",
+          "query": "label_values(k6_iterations_total, target)",
           "refId": "target"
         },
         "multi": true,
@@ -106,9 +83,9 @@
           "type": "prometheus",
           "uid": "${datasource}"
         },
-        "definition": "label_values(k6_iterations_total{cluster=~\"$cluster\"}, profile)",
+        "definition": "label_values(k6_iterations_total, profile)",
         "query": {
-          "query": "label_values(k6_iterations_total{cluster=~\"$cluster\"}, profile)",
+          "query": "label_values(k6_iterations_total, profile)",
           "refId": "profile"
         },
         "multi": true,
@@ -165,7 +142,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by (target) (rate(k6_http_reqs_total{cluster=~\"$cluster\", testid=~\"$testid\", target=~\"$target\", profile=~\"$profile\"}[$__rate_interval]))",
+          "expr": "sum by (target) (rate(k6_http_reqs_total{testid=~\"$testid\", target=~\"$target\", profile=~\"$profile\"}[$__rate_interval]))",
           "legendFormat": "{{target}}",
           "refId": "A",
           "editorMode": "code",
@@ -219,7 +196,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by (target) (rate(k6_iterations_total{cluster=~\"$cluster\", testid=~\"$testid\", target=~\"$target\", profile=~\"$profile\"}[$__rate_interval]))",
+          "expr": "sum by (target) (rate(k6_iterations_total{testid=~\"$testid\", target=~\"$target\", profile=~\"$profile\"}[$__rate_interval]))",
           "legendFormat": "{{target}}",
           "refId": "A",
           "editorMode": "code",
@@ -273,7 +250,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "histogram_quantile(0.5, sum(rate(k6_http_req_duration_seconds{cluster=~\"$cluster\", testid=~\"$testid\", target=~\"$target\", profile=~\"$profile\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.5, sum(rate(k6_http_req_duration_seconds{testid=~\"$testid\", target=~\"$target\", profile=~\"$profile\"}[$__rate_interval])))",
           "legendFormat": "p50",
           "refId": "A",
           "editorMode": "code",
@@ -284,7 +261,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "histogram_quantile(0.95, sum(rate(k6_http_req_duration_seconds{cluster=~\"$cluster\", testid=~\"$testid\", target=~\"$target\", profile=~\"$profile\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.95, sum(rate(k6_http_req_duration_seconds{testid=~\"$testid\", target=~\"$target\", profile=~\"$profile\"}[$__rate_interval])))",
           "legendFormat": "p95",
           "refId": "B",
           "editorMode": "code",
@@ -295,7 +272,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "histogram_quantile(0.99, sum(rate(k6_http_req_duration_seconds{cluster=~\"$cluster\", testid=~\"$testid\", target=~\"$target\", profile=~\"$profile\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.99, sum(rate(k6_http_req_duration_seconds{testid=~\"$testid\", target=~\"$target\", profile=~\"$profile\"}[$__rate_interval])))",
           "legendFormat": "p99",
           "refId": "C",
           "editorMode": "code",
@@ -330,9 +307,9 @@
     },
     {
       "id": 4,
-      "type": "Waiting is time-to-first-byte, i.e. the target's own latency, with connection setup and body transfer separated out.",
+      "type": "timeseries",
       "title": "Where the time goes",
-      "description": "",
+      "description": "Waiting is time-to-first-byte, i.e. the target's own latency, with connection setup and body transfer separated out.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -349,7 +326,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "histogram_quantile(0.95, sum(rate(k6_http_req_waiting_seconds{cluster=~\"$cluster\", testid=~\"$testid\", target=~\"$target\", profile=~\"$profile\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.95, sum(rate(k6_http_req_waiting_seconds{testid=~\"$testid\", target=~\"$target\", profile=~\"$profile\"}[$__rate_interval])))",
           "legendFormat": "waiting p95",
           "refId": "A",
           "editorMode": "code",
@@ -360,7 +337,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "histogram_quantile(0.95, sum(rate(k6_http_req_connecting_seconds{cluster=~\"$cluster\", testid=~\"$testid\", target=~\"$target\", profile=~\"$profile\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.95, sum(rate(k6_http_req_connecting_seconds{testid=~\"$testid\", target=~\"$target\", profile=~\"$profile\"}[$__rate_interval])))",
           "legendFormat": "connecting p95",
           "refId": "B",
           "editorMode": "code",
@@ -371,7 +348,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "histogram_quantile(0.95, sum(rate(k6_http_req_receiving_seconds{cluster=~\"$cluster\", testid=~\"$testid\", target=~\"$target\", profile=~\"$profile\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.95, sum(rate(k6_http_req_receiving_seconds{testid=~\"$testid\", target=~\"$target\", profile=~\"$profile\"}[$__rate_interval])))",
           "legendFormat": "receiving p95",
           "refId": "C",
           "editorMode": "code",
@@ -425,7 +402,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by (testid) (k6_vus{cluster=~\"$cluster\", testid=~\"$testid\", target=~\"$target\", profile=~\"$profile\"})",
+          "expr": "sum by (testid) (k6_vus{testid=~\"$testid\", target=~\"$target\", profile=~\"$profile\"})",
           "legendFormat": "{{testid}} active",
           "refId": "A",
           "editorMode": "code",
@@ -436,7 +413,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by (testid) (k6_vus_max{cluster=~\"$cluster\", testid=~\"$testid\", target=~\"$target\", profile=~\"$profile\"})",
+          "expr": "sum by (testid) (k6_vus_max{testid=~\"$testid\", target=~\"$target\", profile=~\"$profile\"})",
           "legendFormat": "{{testid}} max",
           "refId": "B",
           "editorMode": "code",
@@ -471,9 +448,9 @@
     },
     {
       "id": 6,
-      "type": "Dropped iterations mean k6 itself could not keep up: the runner, not the target, is the bottleneck, and the run's numbers understate what the target could take.",
-      "title": "Failures and dropped iterations",
-      "description": "",
+      "type": "timeseries",
+      "title": "Failed requests",
+      "description": "k6_dropped_iterations_total (dropped iterations, meaning k6 itself couldn't keep up) is deliberately not queried here: it's only ever emitted by k6's arrival-rate executors, and every scenario this project renders uses per-vu-iterations (k6/scripts/login.ts, oauth.ts) instead - confirmed live that the metric doesn't exist in Prometheus at all, not just that it's currently zero.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -490,20 +467,9 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "avg by (testid) (k6_http_req_failed_rate{cluster=~\"$cluster\", testid=~\"$testid\", target=~\"$target\", profile=~\"$profile\"})",
+          "expr": "avg by (testid) (k6_http_req_failed_rate{testid=~\"$testid\", target=~\"$target\", profile=~\"$profile\"})",
           "legendFormat": "{{testid}} failed requests",
           "refId": "A",
-          "editorMode": "code",
-          "range": true
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "sum by (testid) (rate(k6_dropped_iterations_total{cluster=~\"$cluster\", testid=~\"$testid\", target=~\"$target\", profile=~\"$profile\"}[$__rate_interval]))",
-          "legendFormat": "{{testid}} dropped iterations/s",
-          "refId": "B",
           "editorMode": "code",
           "range": true
         }
@@ -555,7 +521,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by (testid) (rate(k6_data_received_total{cluster=~\"$cluster\", testid=~\"$testid\", target=~\"$target\", profile=~\"$profile\"}[$__rate_interval]))",
+          "expr": "sum by (testid) (rate(k6_data_received_total{testid=~\"$testid\", target=~\"$target\", profile=~\"$profile\"}[$__rate_interval]))",
           "legendFormat": "{{testid}} received",
           "refId": "A",
           "editorMode": "code",
@@ -566,7 +532,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by (testid) (rate(k6_data_sent_total{cluster=~\"$cluster\", testid=~\"$testid\", target=~\"$target\", profile=~\"$profile\"}[$__rate_interval]))",
+          "expr": "sum by (testid) (rate(k6_data_sent_total{testid=~\"$testid\", target=~\"$target\", profile=~\"$profile\"}[$__rate_interval]))",
           "legendFormat": "{{testid}} sent",
           "refId": "B",
           "editorMode": "code",
