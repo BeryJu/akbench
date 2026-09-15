@@ -23,6 +23,7 @@ import { Alert, Button, Chip } from '@mui/material';
 import { useParams } from 'react-router-dom';
 import { api, ApiError, headlampClusterName, MANAGEMENT_CLUSTER } from './api';
 import { ClusterForm } from './ClusterForm';
+import { WorkloadClusterSection } from './DetailSections';
 import { PrimaryLinkButton } from './PrimaryLinkButton';
 import { StatusChip } from './StatusPopover';
 import { useResource } from './useResource';
@@ -135,5 +136,12 @@ export function ClusterEditPage() {
       </SectionBox>
     );
   }
-  return <ClusterForm existing={existing.data} />;
+  return (
+    <>
+      <ClusterForm existing={existing.data} />
+      <SectionBox title="Cluster">
+        <WorkloadClusterSection name={name} />
+      </SectionBox>
+    </>
+  );
 }

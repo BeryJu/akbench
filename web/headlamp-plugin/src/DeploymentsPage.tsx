@@ -24,6 +24,7 @@ import { useParams } from 'react-router-dom';
 import { api, ApiError, headlampClusterName, MANAGEMENT_CLUSTER } from './api';
 import { ClusterResourceButton } from './ClusterResourceButton';
 import { DeploymentForm } from './DeploymentForm';
+import { DeploymentSection } from './DetailSections';
 import { PrimaryLinkButton } from './PrimaryLinkButton';
 import { StatusChip } from './StatusPopover';
 import { useResource } from './useResource';
@@ -164,5 +165,12 @@ export function DeploymentEditPage() {
       </SectionBox>
     );
   }
-  return <DeploymentForm existing={existing.data} />;
+  return (
+    <>
+      <DeploymentForm existing={existing.data} />
+      <SectionBox title="Benchmark metrics">
+        <DeploymentSection deploymentName={name} />
+      </SectionBox>
+    </>
+  );
 }

@@ -20,9 +20,11 @@
 // DetailSections' TestCaseSection), never hand-authored - so this page is
 // list + delete only, matching api.testRuns()/api.deleteTestRun() which
 // were otherwise unused since the Headlamp pivot.
-import { EmptyContent, SectionBox, SimpleTable } from '@kinvolk/headlamp-plugin/lib/CommonComponents';
+import { EmptyContent, Link, SectionBox, SimpleTable } from '@kinvolk/headlamp-plugin/lib/CommonComponents';
 import { Alert, Button } from '@mui/material';
+import { useParams } from 'react-router-dom';
 import { api, ApiError, MANAGEMENT_CLUSTER } from './api';
+import { TestRunSection } from './DetailSections';
 import { StatusChip } from './StatusPopover';
 import { useResource } from './useResource';
 
@@ -54,7 +56,14 @@ export function TestRunsPage() {
       )}
       <SimpleTable
         columns={[
-          { label: 'Run', getter: run => run.metadata.name },
+          {
+            label: 'Run',
+            getter: run => (
+              <Link routeName="authentik-bench-testruns-view" params={{ name: run.metadata.name }}>
+                {run.metadata.name}
+              </Link>
+            ),
+          },
           { label: 'Test case', getter: run => run.spec.testCaseRef.name },
           {
             label: 'Phase',
@@ -85,6 +94,18 @@ export function TestRunsPage() {
         emptyMessage="No test runs yet."
       />
       {runs.length === 0 && <EmptyContent>Run a Quick test case to see its history here.</EmptyContent>}
+    </SectionBox>
+  );
+}
+
+// TestRunViewPage: a TestRun is never hand-edited (see this file's own
+// top-of-file comment), so this is read-only - just TestRunSection's own
+// links/metrics, reached by clicking a run's own name above.
+export function TestRunViewPage() {
+  const { name } = useParams<{ name: string }>();
+  return (
+    <SectionBox title={`Test run: ${name}`}>
+      <TestRunSection name={name} />
     </SectionBox>
   );
 }

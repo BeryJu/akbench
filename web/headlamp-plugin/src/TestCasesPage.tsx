@@ -21,6 +21,7 @@ import { Alert, Button, Chip, Stack } from '@mui/material';
 import { useParams } from 'react-router-dom';
 import { api, ApiError, headlampClusterName, MANAGEMENT_CLUSTER } from './api';
 import { ClusterResourceButton } from './ClusterResourceButton';
+import { TestCaseSection } from './DetailSections';
 import { PrimaryLinkButton } from './PrimaryLinkButton';
 import { StatusChip } from './StatusPopover';
 import { TestCaseForm } from './TestCaseForm';
@@ -165,5 +166,12 @@ export function TestCaseEditPage() {
       </SectionBox>
     );
   }
-  return <TestCaseForm existing={existing.data} />;
+  return (
+    <>
+      <TestCaseForm existing={existing.data} />
+      <SectionBox title="Benchmark">
+        <TestCaseSection name={name} profile={existing.data?.spec.profile} />
+      </SectionBox>
+    </>
+  );
 }

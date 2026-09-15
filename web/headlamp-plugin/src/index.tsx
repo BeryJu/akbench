@@ -84,7 +84,7 @@ import {
   TestCaseTemplateEditPage,
   TestCaseTemplatesPage,
 } from './TestCaseTemplatesPage';
-import { TestRunsPage } from './TestRunsPage';
+import { TestRunsPage, TestRunViewPage } from './TestRunsPage';
 
 const HOME_SIDEBAR = 'HOME';
 
@@ -258,6 +258,15 @@ registerRoute({
   useClusterURL: false,
   noAuthRequired: true,
   component: () => <TestRunsPage />,
+});
+registerRoute({
+  path: '/authentik-bench/testruns/:name',
+  sidebar: { item: 'authentik-bench-testruns', sidebar: HOME_SIDEBAR },
+  name: 'authentik-bench-testruns-view',
+  exact: true,
+  useClusterURL: false,
+  noAuthRequired: true,
+  component: () => <TestRunViewPage />,
 });
 
 registerSidebarEntry({

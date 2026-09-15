@@ -24,6 +24,7 @@ import { EmptyContent, Link, SectionBox, SimpleTable } from '@kinvolk/headlamp-p
 import { Alert, Button, Chip, Stack } from '@mui/material';
 import { useParams } from 'react-router-dom';
 import { api, ApiError, MANAGEMENT_CLUSTER } from './api';
+import { TestCaseTemplateSection } from './DetailSections';
 import { PrimaryLinkButton } from './PrimaryLinkButton';
 import { StatusChip } from './StatusPopover';
 import { TestCaseTemplateForm } from './TestCaseTemplateForm';
@@ -128,5 +129,12 @@ export function TestCaseTemplateEditPage() {
       </SectionBox>
     );
   }
-  return <TestCaseTemplateForm existing={existing.data} />;
+  return (
+    <>
+      <TestCaseTemplateForm existing={existing.data} />
+      <SectionBox title="Used by">
+        <TestCaseTemplateSection name={name} />
+      </SectionBox>
+    </>
+  );
 }
