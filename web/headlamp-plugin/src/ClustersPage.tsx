@@ -63,7 +63,7 @@ export function ClustersPage() {
               cluster.management ? (
                 cluster.name
               ) : (
-                <Link to={`/c/${headlampClusterName(cluster.name)}`}>
+                <Link routeName="authentik-bench-clusters-view" params={{ name: cluster.name }}>
                   {cluster.name}
                 </Link>
               ),
@@ -136,12 +136,23 @@ export function ClusterEditPage() {
       </SectionBox>
     );
   }
+  return <ClusterForm existing={existing.data} />;
+}
+
+export function ClusterViewPage() {
+  const { name } = useParams<{ name: string }>();
   return (
-    <>
-      <ClusterForm existing={existing.data} />
-      <SectionBox title="Cluster">
-        <WorkloadClusterSection name={name} />
-      </SectionBox>
-    </>
+    <SectionBox
+      title={name}
+      headerProps={{
+        actions: [
+          <Link key="switch" to={`/c/${headlampClusterName(name)}`}>
+            Switch Headlamp to this cluster
+          </Link>,
+        ],
+      }}
+    >
+      <WorkloadClusterSection name={name} />
+    </SectionBox>
   );
 }

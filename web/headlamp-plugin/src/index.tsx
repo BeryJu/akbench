@@ -63,26 +63,29 @@
 // custom entry. DefaultSidebars is exported type-only from this SDK
 // version, so the literal string (HOME_SIDEBAR below) is used directly
 // instead of importing the enum.
-import { registerDetailsViewSection, registerRoute, registerSidebarEntry } from '@kinvolk/headlamp-plugin/lib';
-import { SectionBox } from '@kinvolk/headlamp-plugin/lib/CommonComponents';
-import { ClusterCreatePage, ClusterEditPage, ClustersPage } from './ClustersPage';
+import { registerRoute, registerSidebarEntry } from '@kinvolk/headlamp-plugin/lib';
+import { ClusterCreatePage, ClusterEditPage, ClustersPage, ClusterViewPage } from './ClustersPage';
 import { ComparePage } from './ComparePage';
 import { DashboardPage } from './DashboardPage';
-import { DeploymentCreatePage, DeploymentEditPage,DeploymentsPage } from './DeploymentsPage';
 import {
-  DeploymentSection,
-  TestCaseSection,
-  TestCaseTemplateSection,
-  TestRunSection,
-  WorkloadClusterSection,
-} from './DetailSections';
+  DeploymentCreatePage,
+  DeploymentEditPage,
+  DeploymentsPage,
+  DeploymentViewPage,
+} from './DeploymentsPage';
 import { GrafanaPage } from './GrafanaPage';
 import { registerAuthentikIcon } from "./icon";
-import { TestCaseCreatePage, TestCaseEditPage, TestCasesPage } from './TestCasesPage';
+import {
+  TestCaseCreatePage,
+  TestCaseEditPage,
+  TestCasesPage,
+  TestCaseViewPage,
+} from './TestCasesPage';
 import {
   TestCaseTemplateCreatePage,
   TestCaseTemplateEditPage,
   TestCaseTemplatesPage,
+  TestCaseTemplateViewPage,
 } from './TestCaseTemplatesPage';
 import { TestRunsPage, TestRunViewPage } from './TestRunsPage';
 
@@ -141,6 +144,15 @@ registerRoute({
   noAuthRequired: true,
   component: () => <DeploymentEditPage />,
 });
+registerRoute({
+  path: '/authentik-bench/deployments/:name',
+  sidebar: { item: 'authentik-bench-deployments', sidebar: HOME_SIDEBAR },
+  name: 'authentik-bench-deployments-view',
+  exact: true,
+  useClusterURL: false,
+  noAuthRequired: true,
+  component: () => <DeploymentViewPage />,
+});
 
 registerSidebarEntry({
   parent: 'authentik-bench',
@@ -174,6 +186,15 @@ registerRoute({
   useClusterURL: false,
   noAuthRequired: true,
   component: () => <TestCaseEditPage />,
+});
+registerRoute({
+  path: '/authentik-bench/testcases/:name',
+  sidebar: { item: 'authentik-bench-testcases', sidebar: HOME_SIDEBAR },
+  name: 'authentik-bench-testcases-view',
+  exact: true,
+  useClusterURL: false,
+  noAuthRequired: true,
+  component: () => <TestCaseViewPage />,
 });
 
 registerSidebarEntry({
@@ -209,6 +230,15 @@ registerRoute({
   noAuthRequired: true,
   component: () => <TestCaseTemplateEditPage />,
 });
+registerRoute({
+  path: '/authentik-bench/testcasetemplates/:name',
+  sidebar: { item: 'authentik-bench-testcasetemplates', sidebar: HOME_SIDEBAR },
+  name: 'authentik-bench-testcasetemplates-view',
+  exact: true,
+  useClusterURL: false,
+  noAuthRequired: true,
+  component: () => <TestCaseTemplateViewPage />,
+});
 
 registerSidebarEntry({
   parent: 'authentik-bench',
@@ -242,6 +272,15 @@ registerRoute({
   useClusterURL: false,
   noAuthRequired: true,
   component: () => <ClusterEditPage />,
+});
+registerRoute({
+  path: '/authentik-bench/clusters/:name',
+  sidebar: { item: 'authentik-bench-clusters', sidebar: HOME_SIDEBAR },
+  name: 'authentik-bench-clusters-view',
+  exact: true,
+  useClusterURL: false,
+  noAuthRequired: true,
+  component: () => <ClusterViewPage />,
 });
 
 registerSidebarEntry({
@@ -299,59 +338,4 @@ registerRoute({
   useClusterURL: false,
   noAuthRequired: true,
   component: () => <GrafanaPage />,
-});
-
-registerDetailsViewSection(resource => {
-  if (resource?.kind !== 'TestCase') {
-    return null;
-  }
-  return (
-    <SectionBox title="Benchmark">
-      <TestCaseSection name={resource.metadata.name} profile={resource.jsonData?.spec?.profile} />
-    </SectionBox>
-  );
-});
-
-registerDetailsViewSection(resource => {
-  if (resource?.kind !== 'AuthentikDeployment') {
-    return null;
-  }
-  return (
-    <SectionBox title="Benchmark metrics">
-      <DeploymentSection deploymentName={resource.metadata.name} />
-    </SectionBox>
-  );
-});
-
-registerDetailsViewSection(resource => {
-  if (resource?.kind !== 'WorkloadCluster') {
-    return null;
-  }
-  return (
-    <SectionBox title="Cluster">
-      <WorkloadClusterSection name={resource.metadata.name} />
-    </SectionBox>
-  );
-});
-
-registerDetailsViewSection(resource => {
-  if (resource?.kind !== 'TestRun') {
-    return null;
-  }
-  return (
-    <SectionBox title="Run">
-      <TestRunSection name={resource.metadata.name} />
-    </SectionBox>
-  );
-});
-
-registerDetailsViewSection(resource => {
-  if (resource?.kind !== 'TestCaseTemplate') {
-    return null;
-  }
-  return (
-    <SectionBox title="Used by">
-      <TestCaseTemplateSection name={resource.metadata.name} />
-    </SectionBox>
-  );
 });

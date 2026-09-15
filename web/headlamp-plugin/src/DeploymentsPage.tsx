@@ -22,7 +22,6 @@ import { EmptyContent, Link, SectionBox, SimpleTable } from '@kinvolk/headlamp-p
 import { Alert, Button, Stack } from '@mui/material';
 import { useParams } from 'react-router-dom';
 import { api, ApiError, headlampClusterName, MANAGEMENT_CLUSTER } from './api';
-import { ClusterResourceButton } from './ClusterResourceButton';
 import { DeploymentForm } from './DeploymentForm';
 import { DeploymentSection } from './DetailSections';
 import { PrimaryLinkButton } from './PrimaryLinkButton';
@@ -60,15 +59,11 @@ export function DeploymentsPage() {
         columns={[
           {
             label: 'Name',
-            getter: deployment => {
-              const cluster = headlampClusterName(deployment.spec.clusterRef?.name);
-              return <Link
-                  routeName="Namespace"
-                  params={{name: deployment.spec.namespace}}
-                  activeCluster={cluster}>
-                    {deployment.metadata.name}
-                </Link>
-            },
+            getter: deployment => (
+              <Link routeName="authentik-bench-deployments-view" params={{ name: deployment.metadata.name }}>
+                {deployment.metadata.name}
+              </Link>
+            ),
           },
           { label: 'Target', getter: deployment => deployment.spec.targetName || deployment.metadata.name },
           { label: 'Cluster', getter: deployment => deployment.spec.clusterRef?.name ?? 'management' },
@@ -92,49 +87,16 @@ export function DeploymentsPage() {
             },
           },
           {
-            label: 'Resources',
-            getter: deployment => {
-              const cluster = headlampClusterName(deployment.spec.clusterRef?.name);
-              return (
-                <Stack direction="row" spacing={1} flexWrap="wrap">
-                  <ClusterResourceButton
-                    kind="Deployment"
-                    cluster={cluster}
-                    namespace={deployment.spec.namespace}
-                    name={`${deployment.metadata.name}-authentik-server`}
-                    label="Server"
-                  />
-                  <ClusterResourceButton
-                    kind="Deployment"
-                    cluster={cluster}
-                    namespace={deployment.spec.namespace}
-                    name={`${deployment.metadata.name}-authentik-worker`}
-                    label="Worker"
-                  />
-                  {deployment.spec.postgres.mode === 'Embedded' && (
-                    <ClusterResourceButton
-                      kind="StatefulSet"
-                      cluster={cluster}
-                      namespace={deployment.spec.namespace}
-                      name={`${deployment.metadata.name}-postgresql`}
-                      label="Postgres"
-                    />
-                  )}
-                </Stack>
-              );
-            },
-          },
-          {
             label: '',
             getter: deployment => (
-              <>
+              <Stack direction="row" spacing={1}>
                 <Link routeName="authentik-bench-deployments-edit" params={{ name: deployment.metadata.name }}>
                   Edit
                 </Link>
                 <Button color="error" onClick={() => void remove(deployment.metadata.name)}>
                   Delete
                 </Button>
-              </>
+              </Stack>
             ),
           },
         ]}
@@ -165,12 +127,14 @@ export function DeploymentEditPage() {
       </SectionBox>
     );
   }
+  return <DeploymentForm existing={existing.data} />;
+}
+
+export function DeploymentViewPage() {
+  const { name } = useParams<{ name: string }>();
   return (
-    <>
-      <DeploymentForm existing={existing.data} />
-      <SectionBox title="Benchmark metrics">
-        <DeploymentSection deploymentName={name} />
-      </SectionBox>
-    </>
+    <SectionBox title={name}>
+      <DeploymentSection deploymentName={name} />
+    </SectionBox>
   );
 }

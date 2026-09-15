@@ -64,7 +64,7 @@ export function TestCaseTemplatesPage() {
           {
             label: 'Name',
             getter: template => (
-              <Link routeName="authentik-bench-testcasetemplates-edit" params={{ name: template.metadata.name }}>
+              <Link routeName="authentik-bench-testcasetemplates-view" params={{ name: template.metadata.name }}>
                 {template.metadata.name}
               </Link>
             ),
@@ -92,6 +92,9 @@ export function TestCaseTemplatesPage() {
             label: '',
             getter: template => (
               <Stack direction="row" spacing={1}>
+                <Link routeName="authentik-bench-testcasetemplates-edit" params={{ name: template.metadata.name }}>
+                  Edit
+                </Link>
                 <Button size="small" color="error" onClick={() => void remove(template.metadata.name)}>
                   Delete
                 </Button>
@@ -129,12 +132,14 @@ export function TestCaseTemplateEditPage() {
       </SectionBox>
     );
   }
+  return <TestCaseTemplateForm existing={existing.data} />;
+}
+
+export function TestCaseTemplateViewPage() {
+  const { name } = useParams<{ name: string }>();
   return (
-    <>
-      <TestCaseTemplateForm existing={existing.data} />
-      <SectionBox title="Used by">
-        <TestCaseTemplateSection name={name} />
-      </SectionBox>
-    </>
+    <SectionBox title={name}>
+      <TestCaseTemplateSection name={name} />
+    </SectionBox>
   );
 }

@@ -19,8 +19,7 @@
 import { EmptyContent, Link, SectionBox, SimpleTable } from '@kinvolk/headlamp-plugin/lib/CommonComponents';
 import { Alert, Button, Chip, Stack } from '@mui/material';
 import { useParams } from 'react-router-dom';
-import { api, ApiError, headlampClusterName, MANAGEMENT_CLUSTER } from './api';
-import { ClusterResourceButton } from './ClusterResourceButton';
+import { api, ApiError, MANAGEMENT_CLUSTER } from './api';
 import { TestCaseSection } from './DetailSections';
 import { PrimaryLinkButton } from './PrimaryLinkButton';
 import { StatusChip } from './StatusPopover';
@@ -29,13 +28,6 @@ import { useResource } from './useResource';
 
 export function TestCasesPage() {
   const testCases = useResource(() => api.testCases());
-  // Only needed to resolve which cluster a Burn test case's k6 Deployment
-  // runs on - TestCaseSpec has no clusterRef of its own, it inherits the
-  // deployment's (or an explicit runnerClusterRef override).
-  const deployments = useResource(() => api.deployments(), [], 0);
-  const clusterByDeployment = new Map(
-    (deployments.data ?? []).map(deployment => [deployment.metadata.name, deployment.spec.clusterRef?.name])
-  );
 
   async function remove(name: string) {
     if (!window.confirm(`Delete test case "${name}"?`)) {
@@ -75,7 +67,7 @@ export function TestCasesPage() {
           {
             label: 'Name',
             getter: testCase => (
-              <Link routeName="authentik-bench-testcases-edit" params={{ name: testCase.metadata.name }}>
+              <Link routeName="authentik-bench-testcases-view" params={{ name: testCase.metadata.name }}>
                 {testCase.metadata.name}
               </Link>
             ),
@@ -103,27 +95,6 @@ export function TestCasesPage() {
             ),
           },
           {
-            label: 'Resources',
-            getter: testCase => {
-              const burnDeployment = testCase.status?.burnWorkloadRef?.name;
-              if (!burnDeployment || !testCase.metadata.namespace) {
-                return null;
-              }
-              const cluster = headlampClusterName(
-                testCase.spec.runnerClusterRef?.name ?? clusterByDeployment.get(testCase.spec.deploymentRef.name)
-              );
-              return (
-                <ClusterResourceButton
-                  kind="Deployment"
-                  cluster={cluster}
-                  namespace={testCase.metadata.namespace}
-                  name={burnDeployment}
-                  label="k6 Deployment"
-                />
-              );
-            },
-          },
-          {
             label: '',
             getter: testCase => (
               <Stack direction="row" spacing={1}>
@@ -132,6 +103,9 @@ export function TestCasesPage() {
                     Run now
                   </Button>
                 )}
+                <Link routeName="authentik-bench-testcases-edit" params={{ name: testCase.metadata.name }}>
+                  Edit
+                </Link>
                 <Button size="small" color="error" onClick={() => void remove(testCase.metadata.name)}>
                   Delete
                 </Button>
@@ -166,12 +140,15 @@ export function TestCaseEditPage() {
       </SectionBox>
     );
   }
+  return <TestCaseForm existing={existing.data} />;
+}
+
+export function TestCaseViewPage() {
+  const { name } = useParams<{ name: string }>();
+  const existing = useResource(() => api.testCase(name), [name], 0);
   return (
-    <>
-      <TestCaseForm existing={existing.data} />
-      <SectionBox title="Benchmark">
-        <TestCaseSection name={name} profile={existing.data?.spec.profile} />
-      </SectionBox>
-    </>
+    <SectionBox title={name}>
+      <TestCaseSection name={name} profile={existing.data?.spec.profile} />
+    </SectionBox>
   );
 }
