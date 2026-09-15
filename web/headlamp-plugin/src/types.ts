@@ -80,6 +80,7 @@ export interface AuthentikDeploymentSpec {
 export interface AuthentikDeploymentStatus {
   conditions?: Condition[];
   phase?: string;
+  observedGeneration?: number;
   serviceEndpoint?: string;
   helmReleaseRef?: { name: string };
   cnpgClusterRef?: { name: string };
@@ -96,6 +97,10 @@ export interface TestCaseSpec {
   runnerClusterRef?: { name: string };
   template?: string;
   inline?: string;
+  // scriptConfigMapRef is a power-user escape hatch (bring-your-own
+  // ConfigMap, overrides inline/template) - deliberately not exposed as a
+  // TestCaseForm input, but still a real spec field a TestCase can carry.
+  scriptConfigMapRef?: { name: string };
   profile: TestProfile;
   vus: number;
   iterations?: number;
@@ -112,6 +117,7 @@ export interface TestCase {
   status?: {
     conditions?: Condition[];
     phase?: string;
+    observedGeneration?: number;
     burnWorkloadRef?: { name: string };
   };
 }
@@ -128,6 +134,7 @@ export interface TestCaseTemplate {
   status?: {
     conditions?: Condition[];
     phase?: string;
+    observedGeneration?: number;
   };
 }
 
@@ -145,6 +152,13 @@ export interface TestRun {
     completionTime?: string;
     jobRef?: { name: string };
     conditions?: Condition[];
+    // resolvedSpec is an audit snapshot of the exact TestCaseSpec +
+    // overrides this run actually used (internal/controller/testrun_controller.go
+    // sets it) - what a historical run's own "what ran" record is.
+    resolvedSpec?: TestCaseSpec;
+    // grafanaAnnotationID is the annotation TestRunReconciler posts to the
+    // target deployment's own Grafana on start/completion (internal/grafana/annotate.go).
+    grafanaAnnotationID?: number;
   };
 }
 
@@ -173,10 +187,19 @@ export interface IncusProviderSpec {
   controlPlane?: IncusMachineSpec;
 }
 
+export interface AutoscalingSpec {
+  minReplicas?: number;
+  maxReplicas: number;
+}
+
 export interface WorkerPoolSpec {
   name: string;
   replicas: number;
   incus?: IncusMachineSpec;
+  // autoscaling hands this pool's replica count over to cluster-autoscaler
+  // (WorkloadClusterReconciler's ensureClusterAutoscaler) - once set,
+  // replicas above only sizes the pool at creation time.
+  autoscaling?: AutoscalingSpec;
 }
 
 export interface WorkloadClusterSpec {
@@ -190,9 +213,16 @@ export interface WorkloadClusterSpec {
 export interface WorkloadClusterStatus {
   conditions?: Condition[];
   phase?: string;
+  observedGeneration?: number;
   controlPlaneReady?: boolean;
   infrastructureReady?: boolean;
   kubeconfigSecretRef?: { name: string };
+  // prometheusURL/grafanaURL are reachable *from the management cluster*
+  // (a node's InternalIP + a fixed NodePort - see
+  // render.PrometheusNodePort/GrafanaNodePort), populated once
+  // ensurePrometheus/ensureGrafana succeed.
+  prometheusURL?: string;
+  grafanaURL?: string;
 }
 
 export interface WorkloadCluster {

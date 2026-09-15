@@ -44,10 +44,11 @@ import (
 // itself - only the direct one came back correct). cmd/apiserver's own
 // reverse proxy is a single hop the browser reaches directly via a
 // NodePort (GrafanaNodePort below), sidestepping that entirely. Not the
-// separate, unrelated Config.GrafanaURL/BENCH_GRAFANA_URL mechanisms
-// (internal/api/grafana.go, internal/grafana/annotate.go), both of which
-// assume one central, directly browser-reachable Grafana and are left
-// alone.
+// separate, unrelated BENCH_GRAFANA_URL mechanism (internal/grafana/annotate.go,
+// used only for posting TestRun annotations), which assumes one central,
+// directly browser-reachable Grafana and is left alone. The embed-URL
+// allowlist this comment used to also reference (internal/api/grafana.go)
+// was deleted once this reverse-proxy design replaced it.
 const (
 	GrafanaServiceName = "grafana"
 	GrafanaPort        = 3000
