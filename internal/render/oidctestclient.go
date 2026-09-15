@@ -32,12 +32,12 @@ import (
 // own README: a Go OIDC relying-party test client (uses
 // github.com/coreos/go-oidc), OIDC_BIND defaulting to 0.0.0.0:9009, serving
 // "/" (starts an authorization-code flow) and "/auth/callback" (receives
-// it). The image tag is a placeholder, not yet confirmed against a real
-// published registry - matching this project's own posture elsewhere
-// (K6BrowserImage) for a dependency whose exact release artifact hasn't
-// been independently verified.
+// it). The tag is pinned to the newest version actually published to
+// ghcr.io/beryju/oidc-test-client (confirmed directly against the registry's
+// own tag list, not assumed) rather than left floating on :latest - bump
+// deliberately.
 const (
-	OIDCTestClientImage = "ghcr.io/beryju/oidc-test-client:latest"
+	OIDCTestClientImage = "ghcr.io/beryju/oidc-test-client:2.7.1"
 	OIDCTestClientPort  = 9009
 )
 

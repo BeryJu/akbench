@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"time"
 
 	batchv1 "k8s.io/api/batch/v1"
@@ -46,14 +47,41 @@ const testRunFinalizer = "bench.goauthentik.io/remote-cleanup"
 //
 // The Job runs on the same cluster TestCaseReconciler resolves for its
 // TestCase (spec.runnerClusterRef, else the deployment's own clusterRef, else
-// local), resolved fresh via Tracker. Grafana annotations are posted only
-// when internal/grafana.FromEnv reports Enabled().
+// local), resolved fresh via Tracker. Grafana annotations are posted to
+// whichever Grafana WorkloadClusterReconciler installed for the target
+// AuthentikDeployment's own cluster (see resolveGrafanaClient) - resolved
+// per-run rather than a single fixed Client, since different TestRuns can
+// target deployments on different workload clusters, each with its own
+// Grafana.
 type TestRunReconciler struct {
 	client.Client
 	Scheme   *runtime.Scheme
-	Grafana  *grafana.Client
 	Tracker  *multicluster.Tracker
 	Recorder record.EventRecorder
+}
+
+// resolveGrafanaClient finds the Grafana WorkloadClusterReconciler installed
+// for the cluster the named AuthentikDeployment runs on (ensureGrafana
+// records this at WorkloadCluster.status.grafanaURL) and returns a Client
+// pointed at it - disabled (Enabled() == false) if the deployment has no
+// clusterRef (the management cluster itself gets no Grafana installed by
+// this operator) or its WorkloadCluster hasn't reconciled a URL yet.
+// Grafana itself runs with anonymous Admin access (see
+// render.GrafanaObjects' own doc comment), so no token is needed here.
+func (r *TestRunReconciler) resolveGrafanaClient(ctx context.Context, namespace, deploymentName string) *grafana.Client {
+	var topo benchv1alpha1.AuthentikDeployment
+	if err := r.Get(ctx, types.NamespacedName{Name: deploymentName, Namespace: namespace}, &topo); err != nil {
+		return &grafana.Client{}
+	}
+	if topo.Spec.ClusterRef.Name == "" {
+		return &grafana.Client{}
+	}
+	var wc benchv1alpha1.WorkloadCluster
+	key := types.NamespacedName{Name: topo.Spec.ClusterRef.Name, Namespace: namespace}
+	if err := r.Get(ctx, key, &wc); err != nil || wc.Status.GrafanaURL == "" {
+		return &grafana.Client{}
+	}
+	return &grafana.Client{BaseURL: wc.Status.GrafanaURL, HTTP: &http.Client{Timeout: 10 * time.Second}}
 }
 
 // +kubebuilder:rbac:groups=bench.goauthentik.io,resources=testruns,verbs=get;list;watch;create;update;patch;delete
@@ -202,9 +230,10 @@ func (r *TestRunReconciler) start(ctx context.Context, run *benchv1alpha1.TestRu
 	setCondition(r.Recorder, run, &run.Status.Conditions, run.Generation, benchv1alpha1.ConditionReady, metav1.ConditionFalse,
 		benchv1alpha1.ReasonReconciling, "quick job started")
 
-	if r.Grafana.Enabled() {
+	gc := r.resolveGrafanaClient(ctx, run.Namespace, tc.Spec.DeploymentRef.Name)
+	if gc.Enabled() {
 		text := fmt.Sprintf("quick test %s against %s: %d VUs x %d iterations", tc.Name, targetName, resolved.VUs, resolved.Iterations)
-		id, err := r.Grafana.Annotate(ctx, now.Time, time.Time{}, []string{"k6", "quick", "test:" + tc.Name, "target:" + targetName}, text)
+		id, err := gc.Annotate(ctx, now.Time, time.Time{}, []string{"k6", "quick", "test:" + tc.Name, "target:" + targetName}, text)
 		if err != nil {
 			logf.FromContext(ctx).Error(err, "failed to post Grafana start annotation")
 		} else if id != 0 {
@@ -268,15 +297,15 @@ func (r *TestRunReconciler) finish(ctx context.Context, run *benchv1alpha1.TestR
 	}
 	setCondition(r.Recorder, run, &run.Status.Conditions, run.Generation, benchv1alpha1.ConditionReady, ready, benchv1alpha1.ReasonReady, message)
 
-	if r.Grafana.Enabled() && run.Status.StartTime != nil {
-		targetName := ""
+	if run.Status.StartTime != nil && run.Status.ResolvedSpec != nil {
+		targetName := run.Status.ResolvedSpec.DeploymentRef.Name
 		testName := run.Spec.TestCaseRef.Name
-		if run.Status.ResolvedSpec != nil {
-			targetName = run.Status.ResolvedSpec.DeploymentRef.Name
-		}
-		if _, err := r.Grafana.Annotate(ctx, run.Status.StartTime.Time, now.Time,
-			[]string{"k6", "quick", "test:" + testName, "target:" + targetName}, message); err != nil {
-			logf.FromContext(ctx).Error(err, "failed to post Grafana completion annotation")
+		gc := r.resolveGrafanaClient(ctx, run.Namespace, targetName)
+		if gc.Enabled() {
+			if _, err := gc.Annotate(ctx, run.Status.StartTime.Time, now.Time,
+				[]string{"k6", "quick", "test:" + testName, "target:" + targetName}, message); err != nil {
+				logf.FromContext(ctx).Error(err, "failed to post Grafana completion annotation")
+			}
 		}
 	}
 	return r.Status().Update(ctx, run)
@@ -321,9 +350,6 @@ func applyOverrides(spec *benchv1alpha1.TestCaseSpec, overrides *benchv1alpha1.T
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *TestRunReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	if r.Grafana == nil {
-		r.Grafana = grafana.FromEnv()
-	}
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&benchv1alpha1.TestRun{}).
 		Owns(&batchv1.Job{}).

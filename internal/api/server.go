@@ -16,7 +16,8 @@ limitations under the License.
 
 // Package api implements the benchmark web UI's backend: a thin REST/JSON
 // layer over the management cluster's bench.goauthentik.io CRDs, plus a
-// read-only PromQL proxy and Grafana embed-URL builder.
+// read-only PromQL proxy and a per-workload-cluster Grafana reverse proxy
+// (grafana_proxy.go).
 //
 // It deliberately talks to nothing but the management cluster - all
 // multi-cluster logic lives in the operator, so the UI never needs a
@@ -46,10 +47,6 @@ type Config struct {
 	// PrometheusURL is the base URL of the central Prometheus the PromQL
 	// proxy forwards to (e.g. http://prometheus.monitoring:9090).
 	PrometheusURL string
-
-	// GrafanaURL is the browser-reachable Grafana base URL used to build
-	// embed URLs. Empty disables the embed endpoint.
-	GrafanaURL string
 
 	// CAPIAvailable reports whether cluster.x-k8s.io Clusters can be listed.
 	// False (M3's single-cluster case) makes /clusters report just the
@@ -128,7 +125,6 @@ func (s *Server) Router() http.Handler {
 		r.Get("/metrics/query", s.proxyQuery)
 		r.Get("/metrics/compare", s.compare)
 		r.Get("/metrics/range", s.metricsRange)
-		r.Get("/grafana/embed-url", s.embedURL)
 	})
 
 	return r

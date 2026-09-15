@@ -67,7 +67,6 @@ func run() error {
 		addr            string
 		namespace       string
 		prometheusURL   string
-		grafanaURL      string
 		tokenSecretName string
 		corsOrigin      string
 	)
@@ -76,8 +75,6 @@ func run() error {
 		"The namespace bench CRs are read from and written to.")
 	flag.StringVar(&prometheusURL, "prometheus-url", os.Getenv("BENCH_PROMETHEUS_URL"),
 		"Base URL of the Prometheus the PromQL proxy forwards to.")
-	flag.StringVar(&grafanaURL, "grafana-url", os.Getenv("BENCH_GRAFANA_URL"),
-		"Browser-reachable Grafana base URL used to build dashboard embed URLs.")
 	flag.StringVar(&tokenSecretName, "token-secret", os.Getenv("BENCH_API_TOKEN_SECRET"),
 		"Name of a Secret in --namespace holding the UI bearer token under key \"token\". "+
 			"Overridden by BENCH_API_TOKEN when that is set.")
@@ -114,7 +111,6 @@ func run() error {
 		Namespace:     namespace,
 		Token:         token,
 		PrometheusURL: prometheusURL,
-		GrafanaURL:    grafanaURL,
 		CAPIAvailable: capiAvailable,
 	})
 

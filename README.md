@@ -53,10 +53,10 @@ Implemented so far:
   `Deployment`; `Quick` profile just validates readiness (execution belongs
   to a `TestRun`). Mirrors the built-in k6 script into a `ConfigMap`.
 - **`TestRunReconciler`**: executes one bounded `Quick` run as a k6 `Job`,
-  tracks it to completion, and (optionally, if `BENCH_GRAFANA_URL` is set)
-  posts start/completion Grafana annotations - reproducing
-  `roles/runner/tasks/annotate.yml`'s behavior with a service-account token
-  instead of the anonymous-admin approach.
+  tracks it to completion, and posts start/completion Grafana annotations to
+  whichever Grafana `WorkloadClusterReconciler` installed for the target
+  deployment's own cluster - reproducing `roles/runner/tasks/annotate.yml`'s
+  behavior.
 - **k6 tag/env contract**: `k6/scripts/login.ts` is ported byte-for-byte from
   the reference repo; `internal/render` reproduces its exact
   `testid`/`target`/`profile` tag scheme and env var contract

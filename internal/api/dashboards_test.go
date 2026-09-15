@@ -17,6 +17,7 @@ limitations under the License.
 package api
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -68,45 +69,42 @@ func loadDashboards(t *testing.T) map[string]dashboardFile {
 	return out
 }
 
-// The embed endpoint hands the browser a /d/<uid>/ URL, so a UID that drifts
-// from the dashboard it names produces a 404 inside an iframe - the least
-// debuggable failure this UI can have.
-func TestDashboardsMatchEmbedAllowlist(t *testing.T) {
-	files := loadDashboards(t)
+// renderEmbeddedDashboardDir is internal/render's own copy of these exact
+// dashboards, vendored via go:embed since go:embed can't reach outside its
+// own package's directory tree (see internal/render/grafana.go's own doc
+// comment on the embed directives). Nothing enforced the two copies ever
+// stayed in sync - TestDashboardsMatchRenderEmbeds does.
+const renderEmbeddedDashboardDir = "../render/manifests/grafana-dashboards"
 
-	for name, dash := range dashboards {
-		file, ok := files[name]
-		if !ok {
-			t.Errorf("dashboard %q is embeddable but has no %s/%s.json", name, dashboardDir, name)
+// TestDashboardsMatchRenderEmbeds guards against gitops/dashboards/*.json
+// (what a human edits, and what this file's other tests validate) silently
+// drifting from internal/render/manifests/grafana-dashboards/*.json (what
+// GrafanaObjects actually ships to every workload cluster) - the two are
+// meant to be byte-identical copies of the same file, and nothing else in
+// this repo would ever have caught them diverging.
+func TestDashboardsMatchRenderEmbeds(t *testing.T) {
+	entries, err := os.ReadDir(dashboardDir)
+	if err != nil {
+		t.Fatalf("read %s: %v", dashboardDir, err)
+	}
+	for _, entry := range entries {
+		if filepath.Ext(entry.Name()) != ".json" {
 			continue
 		}
-		if file.UID != dash.UID {
-			t.Errorf("dashboard %q has uid %q in its JSON, %q in the allowlist", name, file.UID, dash.UID)
+		source, err := os.ReadFile(filepath.Join(dashboardDir, entry.Name()))
+		if err != nil {
+			t.Fatalf("read %s: %v", entry.Name(), err)
 		}
-		if got := slugify(file.Title); got != dash.Slug {
-			t.Errorf("dashboard %q title %q slugifies to %q, allowlist says %q", name, file.Title, got, dash.Slug)
+		embedded, err := os.ReadFile(filepath.Join(renderEmbeddedDashboardDir, entry.Name()))
+		if err != nil {
+			t.Errorf("%s exists in %s but not %s: %v", entry.Name(), dashboardDir, renderEmbeddedDashboardDir, err)
+			continue
 		}
-	}
-	for name := range files {
-		if _, ok := dashboards[name]; !ok {
-			t.Errorf("%s.json exists but is not embeddable; add it to the allowlist", name)
-		}
-	}
-}
-
-// slugify reproduces how Grafana derives a dashboard's URL slug from its title.
-func slugify(title string) string {
-	var b strings.Builder
-	for _, r := range strings.ToLower(title) {
-		switch {
-		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
-			b.WriteRune(r)
-		default:
-			b.WriteRune('-')
+		if !bytes.Equal(source, embedded) {
+			t.Errorf("%s differs between %s and %s - keep the two copies in sync (see internal/render/grafana.go's own doc comment)",
+				entry.Name(), dashboardDir, renderEmbeddedDashboardDir)
 		}
 	}
-	slug := regexp.MustCompile(`-+`).ReplaceAllString(b.String(), "-")
-	return strings.Trim(slug, "-")
 }
 
 // k6MetricNames is every series k6's experimental-prometheus-rw output can

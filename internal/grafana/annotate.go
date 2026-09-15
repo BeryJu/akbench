@@ -9,27 +9,21 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os"
 	"time"
 )
 
-// Client posts annotations to a Grafana instance using a service-account
-// token (never the Ansible harness's anonymous-admin approach).
+// Client posts annotations to a Grafana instance. Token is left empty in
+// practice: every Grafana this project installs (render.GrafanaObjects) runs
+// with anonymous Admin access, the same posture the Ansible harness's own
+// compose.yml used, so there's no service-account token to carry. Built per
+// TestRun by TestRunReconciler.resolveGrafanaClient, pointed at whichever
+// Grafana WorkloadClusterReconciler installed for the target
+// AuthentikDeployment's own cluster - not a single fixed instance, since
+// different TestRuns can target deployments on different workload clusters.
 type Client struct {
 	BaseURL string
 	Token   string
 	HTTP    *http.Client
-}
-
-// FromEnv builds a Client from BENCH_GRAFANA_URL/BENCH_GRAFANA_TOKEN. Both
-// empty is a valid, deliberate "annotations disabled" configuration - M1 has
-// no Grafana deployed yet, per the repo plan.
-func FromEnv() *Client {
-	return &Client{
-		BaseURL: os.Getenv("BENCH_GRAFANA_URL"),
-		Token:   os.Getenv("BENCH_GRAFANA_TOKEN"),
-		HTTP:    &http.Client{Timeout: 10 * time.Second},
-	}
 }
 
 // Enabled reports whether this client has enough configuration to post

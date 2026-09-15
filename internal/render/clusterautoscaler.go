@@ -59,18 +59,28 @@ const (
 	clusterAutoscalerChartVersion = "9.59.0"
 )
 
-// ClusterAutoscalerHelmReleaseName/ClusterAutoscalerNamespace are unique per
-// WorkloadCluster (unlike CNI/CSI/metrics-server, which each only ever
-// install once per *workload* cluster and so can use a fixed name/namespace
-// there) - every cluster-autoscaler instance this operator installs lives
-// in the one shared management cluster, so a fixed name/namespace would
-// collide the moment a second WorkloadCluster also wants autoscaling.
+// ClusterAutoscalerHelmReleaseName is unique per WorkloadCluster (unlike
+// CNI/CSI/metrics-server, which each only ever install once per *workload*
+// cluster and so can use a fixed name there) - every cluster-autoscaler
+// instance this operator installs lives in the one shared management
+// cluster, so a fixed name would collide the moment a second WorkloadCluster
+// also wants autoscaling. The chart's own fullname template folds this
+// release name into every object it renders, so object names stay unique
+// even though every instance now shares one namespace (see
+// ClusterAutoscalerNamespace's own doc comment for why).
 func ClusterAutoscalerHelmReleaseName(wc *benchv1alpha1.WorkloadCluster) string {
 	return "cluster-autoscaler-" + wc.Name
 }
 
+// ClusterAutoscalerNamespace is wc.Namespace itself - confirmed live this
+// can't be a separate per-cluster namespace the way the release name is
+// per-cluster: clusterAPIKubeconfigSecret names a plain Secret volume mount,
+// and a Secret volume can only ever be mounted from the same namespace the
+// pod itself runs in. The "<cluster>-kubeconfig" Secret CAPI writes lives in
+// wc.Namespace, so this pod has to run there too, not in a dedicated
+// namespace of its own.
 func ClusterAutoscalerNamespace(wc *benchv1alpha1.WorkloadCluster) string {
-	return ClusterAutoscalerHelmReleaseName(wc)
+	return wc.Namespace
 }
 
 // HasAutoscalingPool reports whether any of this WorkloadCluster's worker

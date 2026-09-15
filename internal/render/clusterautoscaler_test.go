@@ -97,18 +97,32 @@ func TestClusterAutoscalerHelmReleaseHasNoKubeConfig(t *testing.T) {
 }
 
 // TestClusterAutoscalerNamesAreUniquePerCluster guards against two
-// WorkloadClusters' cluster-autoscaler installs colliding: every other
-// addon in this package can use a fixed name because it installs once per
-// *workload* cluster, but cluster-autoscaler installs onto the one shared
-// management cluster for every WorkloadCluster that wants it.
-func TestClusterAutoscalerNamesAreUniquePerCluster(t *testing.T) {
+// WorkloadClusters' cluster-autoscaler HelmReleases colliding: every other
+// addon in this package can use a fixed release name because it installs
+// once per *workload* cluster, but cluster-autoscaler installs onto the one
+// shared management cluster for every WorkloadCluster that wants it -
+// sharing wc.Namespace too (see ClusterAutoscalerNamespace's own doc
+// comment for why it must), so the release name is what has to stay unique.
+func TestClusterAutoscalerReleaseNamesAreUniquePerCluster(t *testing.T) {
 	a := &benchv1alpha1.WorkloadCluster{ObjectMeta: metav1.ObjectMeta{Name: "cluster-a", Namespace: "default"}}
 	b := &benchv1alpha1.WorkloadCluster{ObjectMeta: metav1.ObjectMeta{Name: "cluster-b", Namespace: "default"}}
 
 	if ClusterAutoscalerHelmReleaseName(a) == ClusterAutoscalerHelmReleaseName(b) {
 		t.Error("two different WorkloadClusters rendered the same cluster-autoscaler HelmRelease name")
 	}
-	if ClusterAutoscalerNamespace(a) == ClusterAutoscalerNamespace(b) {
-		t.Error("two different WorkloadClusters rendered the same cluster-autoscaler namespace")
+}
+
+// TestClusterAutoscalerNamespaceMatchesKubeconfigSecret guards the actual
+// bug this caught live: clusterAPIKubeconfigSecret names a plain Secret
+// volume mount, which can only ever be satisfied from the same namespace
+// the pod itself runs in - a dedicated per-cluster namespace (this file's
+// first version) left the pod unable to mount CAPI's own
+// "<cluster>-kubeconfig" Secret at all, stuck in ContainerCreating
+// (FailedMount) forever.
+func TestClusterAutoscalerNamespaceMatchesKubeconfigSecret(t *testing.T) {
+	wc := exampleAutoscalingCluster()
+	if ClusterAutoscalerNamespace(wc) != wc.Namespace {
+		t.Errorf("ClusterAutoscalerNamespace = %q, want wc.Namespace (%q) - the kubeconfig Secret lives there",
+			ClusterAutoscalerNamespace(wc), wc.Namespace)
 	}
 }
