@@ -16,15 +16,18 @@ limitations under the License.
 
 // Package api implements the benchmark web UI's backend: a thin REST/JSON
 // layer over the management cluster's bench.goauthentik.io CRDs, plus a
-// read-only PromQL proxy and a per-workload-cluster Grafana reverse proxy
-// (grafana_proxy.go).
+// read-only PromQL proxy, a per-workload-cluster Grafana reverse proxy
+// (grafana_proxy.go), an in-browser kubectl shell (shell.go) and the web UI's
+// own static assets (static.go).
 //
-// It deliberately talks to nothing but the management cluster - all
-// multi-cluster logic lives in the operator, so the UI never needs a
-// workload cluster's credentials.
+// The REST API deliberately talks to nothing but the management cluster -
+// all multi-cluster logic lives in the operator. The shell is the one
+// exception: it hands the user the operator's merged kubeconfig, which is
+// the point of it.
 package api
 
 import (
+	"io/fs"
 	"net/http"
 	"time"
 
@@ -39,10 +42,23 @@ type Config struct {
 	// to. The UI is not namespace-aware by design.
 	Namespace string
 
-	// Token is the shared bearer token every request must present. Empty
-	// disables authentication and is only ever valid in tests - New's caller
-	// is responsible for refusing to start without one.
+	// Token is a shared static bearer token requests may present. With both
+	// Token and OIDC unset authentication is disabled, which is only ever
+	// valid in tests - New's caller is responsible for refusing to start
+	// that way.
 	Token string
+
+	// OIDC verifies OIDC-issued bearer tokens (oidc.go); nil disables OIDC
+	// login. OIDCConfig is what the SPA is told to log in with.
+	OIDC       TokenVerifier
+	OIDCConfig OIDCConfig
+
+	// Shell enables the kubectl shell (shell.go); nil disables it.
+	Shell *ShellConfig
+
+	// UI is the built web UI (web/ui's dist/) served at every path the API
+	// doesn't claim; nil serves no UI.
+	UI fs.FS
 
 	// PrometheusURL is the base URL of the central Prometheus the PromQL
 	// proxy forwards to (e.g. http://prometheus.monitoring:9090).
@@ -62,6 +78,7 @@ type Server struct {
 	client client.Client
 	cfg    Config
 	http   *http.Client
+	shell  *shellState
 }
 
 // New builds a Server. The client must be backed by the management cluster
@@ -74,7 +91,7 @@ func New(c client.Client, cfg Config) *Server {
 	if httpClient == nil {
 		httpClient = &http.Client{Timeout: 30 * time.Second}
 	}
-	return &Server{client: c, cfg: cfg, http: httpClient}
+	return &Server{client: c, cfg: cfg, http: httpClient, shell: newShellState()}
 }
 
 // probeStatusField is the JSON key /healthz and /readyz answer under -
@@ -83,8 +100,11 @@ func New(c client.Client, cfg Config) *Server {
 // sake.
 const probeStatusField = "status"
 
-// Router builds the full HTTP surface. Everything under /api/v1 requires the
-// bearer token; /healthz and /readyz do not, so probes stay credential-free.
+// Router builds the full HTTP surface. Everything under /api/v1 requires a
+// bearer token except the auth discovery endpoint the login screen needs and
+// the shell's WebSocket, which authenticates with a single-use ticket minted
+// by an authenticated request (see shell.go). /healthz, /readyz and the UI's
+// static assets are public.
 func (s *Server) Router() http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID, middleware.Recoverer)
@@ -95,37 +115,56 @@ func (s *Server) Router() http.Handler {
 	r.Get("/healthz", probeOK)
 	r.Get("/readyz", probeOK)
 
-	// Unauthenticated by design - an <iframe src=> can't carry the
-	// X-Bench-Api-Token header s.requireToken demands. See
-	// grafana_proxy.go's own doc comment for the full rationale.
+	// Unauthenticated by design - an <iframe src=> can't carry a bearer
+	// token. See grafana_proxy.go's own doc comment for the full rationale.
 	r.HandleFunc("/grafana-proxy/{cluster}/*", s.grafanaProxy)
 
 	r.Route("/api/v1", func(r chi.Router) {
-		r.Use(s.requireToken)
+		r.Get("/auth/config", s.authConfig)
+		r.Get("/shell/connect", s.connectShell)
 
-		r.Get("/clusters", s.listClusters)
-		r.Post("/clusters", s.registerCluster)
-		r.Get("/clusters/{name}", s.getCluster)
-		r.Delete("/clusters/{name}", s.deleteCluster)
+		r.Group(func(r chi.Router) {
+			r.Use(s.requireToken)
 
-		for path, kind := range resourceKinds {
-			r.Get("/"+path, s.listResource(kind))
-			r.Post("/"+path, s.createResource(kind))
-			r.Get("/"+path+"/{name}", s.getResource(kind))
-			r.Put("/"+path+"/{name}", s.replaceResource(kind))
-			r.Delete("/"+path+"/{name}", s.deleteResource(kind))
-			r.Get("/"+path+"/{name}/status", s.getResourceStatus(kind))
-		}
+			r.Get("/clusters", s.listClusters)
+			r.Post("/clusters", s.registerCluster)
+			r.Get("/clusters/{name}", s.getCluster)
+			r.Delete("/clusters/{name}", s.deleteCluster)
 
-		r.Get("/deployments/{name}/extra-values", s.getExtraValues)
-		r.Put("/deployments/{name}/extra-values", s.putExtraValues)
+			for path, kind := range resourceKinds {
+				r.Get("/"+path, s.listResource(kind))
+				r.Post("/"+path, s.createResource(kind))
+				r.Get("/"+path+"/{name}", s.getResource(kind))
+				r.Put("/"+path+"/{name}", s.replaceResource(kind))
+				r.Delete("/"+path+"/{name}", s.deleteResource(kind))
+				r.Get("/"+path+"/{name}/status", s.getResourceStatus(kind))
+			}
 
-		r.Post("/testcases/{name}/runs", s.createRun)
+			r.Get("/deployments/{name}/extra-values", s.getExtraValues)
+			r.Put("/deployments/{name}/extra-values", s.putExtraValues)
 
-		r.Get("/metrics/query", s.proxyQuery)
-		r.Get("/metrics/compare", s.compare)
-		r.Get("/metrics/range", s.metricsRange)
+			r.Post("/testcases/{name}/runs", s.createRun)
+
+			r.Get("/metrics/query", s.proxyQuery)
+			r.Get("/metrics/compare", s.compare)
+			r.Get("/metrics/range", s.metricsRange)
+
+			r.Get("/shell/contexts", s.listShellContexts)
+			r.Post("/shell/sessions", s.createShellSession)
+		})
+
+		// Without this, an unknown /api/v1 path would fall through to the
+		// SPA's index.html and answer 200 with HTML.
+		r.NotFound(func(w http.ResponseWriter, r *http.Request) {
+			writeError(w, r, http.StatusNotFound, "no such API route")
+		})
 	})
+
+	if s.cfg.UI != nil {
+		spa := spaHandler(s.cfg.UI)
+		r.Get("/*", spa.ServeHTTP)
+		r.Head("/*", spa.ServeHTTP)
+	}
 
 	return r
 }

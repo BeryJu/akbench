@@ -3,6 +3,9 @@ module github.com/goauthentik/authentik-bench
 go 1.26.0
 
 require (
+	github.com/coder/websocket v1.8.15
+	github.com/coreos/go-oidc/v3 v3.21.0
+	github.com/creack/pty v1.1.24
 	github.com/fluxcd/helm-controller/api v1.6.3
 	github.com/fluxcd/pkg/apis/meta v1.31.0
 	github.com/fluxcd/source-controller/api v1.9.4
@@ -36,6 +39,7 @@ require (
 	github.com/fluxcd/pkg/apis/kustomize v1.19.1 // indirect
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
 	github.com/fxamacker/cbor/v2 v2.9.2 // indirect
+	github.com/go-jose/go-jose/v4 v4.1.4 // indirect
 	github.com/go-logr/logr v1.4.4 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-logr/zapr v1.3.0 // indirect

@@ -23,6 +23,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"os"
 	"strings"
@@ -69,6 +70,12 @@ func run() error {
 		prometheusURL   string
 		tokenSecretName string
 		corsOrigin      string
+		uiDir           string
+		oidcCfg         api.OIDCConfig
+		oidcScopes      string
+		shellBinary     string
+		shellKubeconfig string
+		shellSecret     string
 	)
 	flag.StringVar(&addr, "bind-address", ":8080", "The address the web API binds to.")
 	flag.StringVar(&namespace, "namespace", envOr("BENCH_NAMESPACE", "authentik-bench"),
@@ -80,6 +87,25 @@ func run() error {
 			"Overridden by BENCH_API_TOKEN when that is set.")
 	flag.StringVar(&corsOrigin, "cors-origin", os.Getenv("BENCH_CORS_ORIGIN"),
 		"Origin allowed to call the API cross-origin, for running the frontend dev server against a remote backend.")
+	flag.StringVar(&uiDir, "ui-dir", os.Getenv("BENCH_UI_DIR"),
+		"Directory holding the built web UI (web/ui's dist/), served at every path the API doesn't claim. "+
+			"Empty serves no UI.")
+	flag.StringVar(&oidcCfg.Issuer, "oidc-issuer", os.Getenv("BENCH_OIDC_ISSUER"),
+		"OIDC issuer URL. Enables OIDC login alongside (or, without a token, instead of) the static token.")
+	flag.StringVar(&oidcCfg.ClientID, "oidc-client-id", os.Getenv("BENCH_OIDC_CLIENT_ID"),
+		"OIDC client ID of the web UI (a public client); also the audience accepted tokens must carry.")
+	flag.StringVar(&oidcScopes, "oidc-scopes", os.Getenv("BENCH_OIDC_SCOPES"),
+		"Comma-separated scopes the web UI requests. Defaults to openid,profile,email.")
+	flag.StringVar(&oidcCfg.RequiredGroup, "oidc-required-group", os.Getenv("BENCH_OIDC_REQUIRED_GROUP"),
+		"If set, OIDC tokens must list this group in their groups claim.")
+	flag.StringVar(&shellBinary, "shell", envOr("BENCH_SHELL", "/bin/sh"),
+		"Shell the in-browser kubectl shell runs.")
+	flag.StringVar(&shellKubeconfig, "shell-kubeconfig", os.Getenv("BENCH_SHELL_KUBECONFIG"),
+		"Kubeconfig file the in-browser shell uses. For local development; in-cluster, use --shell-kubeconfig-secret.")
+	flag.StringVar(&shellSecret, "shell-kubeconfig-secret", os.Getenv("BENCH_SHELL_KUBECONFIG_SECRET"),
+		"<namespace>/<name> of the merged-kubeconfig Secret the operator maintains (key \"config\"), "+
+			"which the in-browser shell uses. Read fresh for every session. Without this or --shell-kubeconfig "+
+			"the shell is disabled.")
 	opts := zap.Options{Development: true}
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
@@ -97,9 +123,36 @@ func run() error {
 	}
 
 	ctx := ctrl.SetupSignalHandler()
-	token, err := resolveToken(ctx, c, namespace, tokenSecretName)
+	token, err := resolveToken(ctx, c, namespace, tokenSecretName, oidcCfg.Issuer != "")
 	if err != nil {
 		return err
+	}
+
+	var verifier api.TokenVerifier
+	if oidcCfg.Issuer != "" {
+		if oidcScopes != "" {
+			oidcCfg.Scopes = strings.Split(oidcScopes, ",")
+		}
+		if verifier, err = api.NewOIDCVerifier(oidcCfg); err != nil {
+			return err
+		}
+		log.Info("OIDC login enabled", "issuer", oidcCfg.Issuer, "clientID", oidcCfg.ClientID)
+	}
+
+	shell, err := shellConfig(c, shellBinary, shellKubeconfig, shellSecret, corsOrigin)
+	if err != nil {
+		return err
+	}
+	if shell == nil {
+		log.Info("No shell kubeconfig configured; the in-browser kubectl shell is disabled")
+	}
+
+	var ui fs.FS
+	if uiDir != "" {
+		if _, err := os.Stat(uiDir + "/index.html"); err != nil {
+			return fmt.Errorf("--ui-dir: %w", err)
+		}
+		ui = os.DirFS(uiDir)
 	}
 
 	capiAvailable := hasCAPI(cfg)
@@ -112,6 +165,10 @@ func run() error {
 		Token:         token,
 		PrometheusURL: prometheusURL,
 		CAPIAvailable: capiAvailable,
+		OIDC:          verifier,
+		OIDCConfig:    oidcCfg,
+		Shell:         shell,
+		UI:            ui,
 	})
 
 	handler := srv.Router()
@@ -141,15 +198,19 @@ func run() error {
 }
 
 // resolveToken loads the shared bearer token, preferring the environment (for
-// local development) over the Secret the deployment mounts. Starting without
-// one is refused rather than defaulted: an unauthenticated backend has full
-// write access to every benchmark CRD.
-func resolveToken(ctx context.Context, c client.Client, namespace, secretName string) (string, error) {
+// local development) over the Secret the deployment mounts. Starting with
+// neither a token nor OIDC is refused rather than defaulted: an
+// unauthenticated backend has full write access to every benchmark CRD and
+// hands out cluster-admin shells.
+func resolveToken(ctx context.Context, c client.Client, namespace, secretName string, oidcEnabled bool) (string, error) {
 	if token := os.Getenv("BENCH_API_TOKEN"); token != "" {
 		return token, nil
 	}
 	if secretName == "" {
-		return "", errors.New("no API token configured: set BENCH_API_TOKEN or --token-secret")
+		if oidcEnabled {
+			return "", nil
+		}
+		return "", errors.New("no authentication configured: set BENCH_API_TOKEN, --token-secret or --oidc-issuer")
 	}
 	var secret corev1.Secret
 	if err := c.Get(ctx, types.NamespacedName{Name: secretName, Namespace: namespace}, &secret); err != nil {
@@ -160,6 +221,45 @@ func resolveToken(ctx context.Context, c client.Client, namespace, secretName st
 		return "", fmt.Errorf("secret %s/%s has no non-empty \"token\" key", namespace, secretName)
 	}
 	return token, nil
+}
+
+// shellConfig builds the in-browser shell's configuration from whichever
+// kubeconfig source is set, or returns nil (shell disabled) for neither.
+func shellConfig(c client.Client, shellBinary, file, secretRef, corsOrigin string) (*api.ShellConfig, error) {
+	var load func(context.Context) ([]byte, error)
+	switch {
+	case file != "" && secretRef != "":
+		return nil, errors.New("set only one of --shell-kubeconfig and --shell-kubeconfig-secret")
+	case file != "":
+		load = func(context.Context) ([]byte, error) { return os.ReadFile(file) }
+	case secretRef != "":
+		ns, name, ok := strings.Cut(secretRef, "/")
+		if !ok || ns == "" || name == "" {
+			return nil, fmt.Errorf("--shell-kubeconfig-secret %q: want <namespace>/<name>", secretRef)
+		}
+		load = func(ctx context.Context) ([]byte, error) {
+			var secret corev1.Secret
+			if err := c.Get(ctx, types.NamespacedName{Namespace: ns, Name: name}, &secret); err != nil {
+				return nil, err
+			}
+			raw := secret.Data["config"]
+			if len(raw) == 0 {
+				return nil, fmt.Errorf("secret %s has no \"config\" key", secretRef)
+			}
+			return raw, nil
+		}
+	default:
+		return nil, nil
+	}
+	if _, err := os.Stat(shellBinary); err != nil {
+		return nil, fmt.Errorf("--shell: %w", err)
+	}
+	var origins []string
+	if corsOrigin != "" {
+		// AcceptOptions.OriginPatterns match host[:port], not full origins.
+		origins = []string{strings.TrimPrefix(strings.TrimPrefix(corsOrigin, "https://"), "http://")}
+	}
+	return &api.ShellConfig{Kubeconfig: load, Shell: shellBinary, OriginPatterns: origins}, nil
 }
 
 // hasCAPI reports whether cluster.x-k8s.io Clusters are servable, which is
@@ -178,7 +278,7 @@ func hasCAPI(cfg *rest.Config) bool {
 	return err == nil
 }
 
-// withCORS allows the Next.js dev server to call a backend on another origin.
+// withCORS allows a frontend dev server to call a backend on another origin.
 // Deliberately narrow: one configured origin, the methods this API uses, and
 // the Authorization header.
 func withCORS(next http.Handler, origin string) http.Handler {

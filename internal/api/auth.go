@@ -20,28 +20,44 @@ import (
 	"crypto/subtle"
 	"net/http"
 	"strings"
+
+	logf "sigs.k8s.io/controller-runtime/pkg/log"
 )
 
-// requireToken enforces the static bearer token the UI is configured with.
-// Real SSO (OIDC via authentik, dogfooding the product under test) is a
-// later milestone; until then this is the only thing between the public
-// internet and the CRDs, so it compares in constant time and fails closed.
+// requireToken enforces the caller's credentials: either the static bearer
+// token the UI can be configured with, or an OIDC-issued JWT (oidc.go) when
+// an issuer is configured. This is the only thing between the public
+// internet and the CRDs (and, via shell.go, a cluster-admin shell), so the
+// static comparison runs in constant time and everything fails closed.
 func (s *Server) requireToken(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if s.cfg.Token == "" {
+		if s.cfg.Token == "" && s.cfg.OIDC == nil {
 			// Only reachable in tests - cmd/apiserver refuses to start
-			// without a token.
+			// without either.
 			next.ServeHTTP(w, r)
 			return
 		}
-		presented, ok := bearerToken(r)
-		if !ok || subtle.ConstantTimeCompare([]byte(presented), []byte(s.cfg.Token)) != 1 {
-			w.Header().Set("WWW-Authenticate", `Bearer realm="authentik-bench"`)
-			writeError(w, r, http.StatusUnauthorized, "missing or invalid bearer token")
+		if presented, ok := bearerToken(r); ok && s.authenticate(r, presented) {
+			next.ServeHTTP(w, r)
 			return
 		}
-		next.ServeHTTP(w, r)
+		w.Header().Set("WWW-Authenticate", `Bearer realm="authentik-bench"`)
+		writeError(w, r, http.StatusUnauthorized, "missing or invalid bearer token")
 	})
+}
+
+func (s *Server) authenticate(r *http.Request, presented string) bool {
+	if s.cfg.Token != "" && subtle.ConstantTimeCompare([]byte(presented), []byte(s.cfg.Token)) == 1 {
+		return true
+	}
+	if s.cfg.OIDC == nil {
+		return false
+	}
+	if err := s.cfg.OIDC.Verify(r.Context(), presented); err != nil {
+		logf.FromContext(r.Context()).V(1).Info("Rejected bearer token", "reason", err.Error())
+		return false
+	}
+	return true
 }
 
 // tokenHeader is a fallback to Authorization: a request proxied through
