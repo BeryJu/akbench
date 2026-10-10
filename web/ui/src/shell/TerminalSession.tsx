@@ -133,20 +133,28 @@ export function TerminalSession({
           ws!.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
           term.focus();
         };
-        // The prefill is typed once the shell has printed its banner and
-        // prompt and gone quiet, so it lands on the prompt rather than being
-        // echoed into the middle of the startup output.
+        // The prefill is typed once the shell shows its prompt (output that
+        // ends like one), so it isn't echoed into the middle of the startup
+        // banner; a fallback covers prompts that don't look like one.
         let prefillPending = Boolean(prefill) && attempt === 0;
-        let prefillTimer: ReturnType<typeof setTimeout> | undefined;
-        ws.onmessage = ev => {
-          term.write(typeof ev.data === 'string' ? ev.data : new Uint8Array(ev.data as ArrayBuffer));
+        const typePrefill = () => {
           if (prefillPending) {
-            clearTimeout(prefillTimer);
-            prefillTimer = setTimeout(() => {
-              prefillPending = false;
-              // Typed, not run - see links.ts's sanitizePrefill.
-              ws?.send(JSON.stringify({ type: 'data', data: prefill }));
-            }, 250);
+            prefillPending = false;
+            // Typed, not run - see links.ts's sanitizePrefill.
+            ws?.send(JSON.stringify({ type: 'data', data: prefill }));
+          }
+        };
+        const prefillFallback = prefillPending ? setTimeout(typePrefill, 3000) : undefined;
+        const decoder = new TextDecoder();
+        ws.onmessage = ev => {
+          const chunk = typeof ev.data === 'string' ? ev.data : new Uint8Array(ev.data as ArrayBuffer);
+          term.write(chunk);
+          if (prefillPending) {
+            const text = typeof chunk === 'string' ? chunk : decoder.decode(chunk, { stream: true });
+            if (/[$#>%]\s*$/.test(text)) {
+              clearTimeout(prefillFallback);
+              typePrefill();
+            }
           }
         };
         ws.onclose = ev => {
