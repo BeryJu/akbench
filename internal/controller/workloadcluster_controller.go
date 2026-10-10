@@ -413,19 +413,25 @@ func reachableNodeIP(ctx context.Context, remoteClient client.Client) (string, e
 
 // ensurePrometheus installs kube-prometheus-stack (prometheus-operator +
 // Prometheus with the remote-write receiver enabled + node-exporter +
-// kube-state-metrics) onto the workload cluster via its own official Helm
-// chart - the same Flux HelmRepository + HelmRelease mechanism ensureCNI/
-// ensureCSIIncus/ensureMetricsServer already use, applied here on the
-// management cluster with spec.kubeConfig pointing at the workload cluster,
-// rather than the hand-rolled single-Deployment Prometheus this replaces.
-// node-exporter is the actual point of the switch: the prior install had no
-// per-node CPU/memory/disk/network metrics at all. Records a
-// management-cluster-reachable URL for it in this object's own status so
-// cmd/apiserver can query it directly (see internal/api/metrics.go's
-// per-testid Prometheus resolution) - unchanged from before, since the
-// chart-managed Prometheus is still reachable at the exact same compat
-// Service name/NodePort (see render.PrometheusServiceName's own doc
-// comment for why no other consumer needed to change).
+// kube-state-metrics + Alertmanager, pre-wired with this project's own
+// default alert rules - see render.KubePrometheusStackHelmValues) onto the
+// workload cluster via its own official Helm chart - the same Flux
+// HelmRepository + HelmRelease mechanism ensureCNI/ensureCSIIncus/
+// ensureMetricsServer already use, applied here on the management cluster
+// with spec.kubeConfig pointing at the workload cluster, rather than the
+// hand-rolled single-Deployment Prometheus this replaces. node-exporter is
+// the actual point of the switch: the prior install had no per-node
+// CPU/memory/disk/network metrics at all. Alertmanager is bundled into this
+// same ensure-step (not a separate one) because prometheus-operator wires
+// the Alertmanager CR it creates straight to the Prometheus CR it also
+// creates - splitting them would only add a second HelmRelease for no
+// benefit. Records management-cluster-reachable URLs for both in this
+// object's own status so cmd/apiserver/the web UI can query them directly
+// (see internal/api/metrics.go's per-testid Prometheus resolution) -
+// Prometheus's own URL is unchanged from before, since the chart-managed
+// Prometheus is still reachable at the exact same compat Service
+// name/NodePort (see render.PrometheusServiceName's own doc comment for why
+// no other consumer needed to change).
 func (r *WorkloadClusterReconciler) ensurePrometheus(ctx context.Context, wc *benchv1alpha1.WorkloadCluster) error {
 	values, err := render.KubePrometheusStackHelmValues()
 	if err != nil {
@@ -443,11 +449,19 @@ func (r *WorkloadClusterReconciler) ensurePrometheus(ctx context.Context, wc *be
 	if err != nil {
 		return err
 	}
+	// Applied directly, not through the HelmRelease's own extraManifests -
+	// see render.KubePrometheusStackHelmValues' own doc comment on why a
+	// PrometheusRule containing "{{ $labels... }}" annotations can't go
+	// through that path.
+	if err := createAll(ctx, remoteClient, []client.Object{render.DefaultAlertRules()}); err != nil {
+		return fmt.Errorf("apply default PrometheusRule: %w", err)
+	}
 	nodeIP, err := reachableNodeIP(ctx, remoteClient)
 	if err != nil {
 		return fmt.Errorf("resolve reachable node IP: %w", err)
 	}
 	wc.Status.PrometheusURL = fmt.Sprintf("http://%s:%d", nodeIP, render.PrometheusNodePort)
+	wc.Status.AlertmanagerURL = fmt.Sprintf("http://%s:%d", nodeIP, render.AlertmanagerNodePort)
 	return nil
 }
 

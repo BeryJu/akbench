@@ -171,11 +171,20 @@ func prometheusCompatServices() []map[string]any {
 //     chart's own values.yaml exposes is for a different, still-experimental
 //     set of features), unlike the hand-rolled v2.55.1 install this
 //     replaces, which needed it explicitly.
-//   - grafana.enabled/alertmanager.enabled both false: this project already
-//     installs its own Grafana (render.GrafanaObjects, pre-wired with
-//     Prometheus/Pyroscope/Tempo datasources) and has no alerting need
-//     anywhere else, matching the "no HA, dev-scale, only what's actually
+//   - grafana.enabled false: this project already installs its own Grafana
+//     (render.GrafanaObjects, pre-wired with Prometheus/Pyroscope/Tempo
+//     datasources), matching the "no HA, dev-scale, only what's actually
 //     used" posture the rest of this addon set already follows.
+//   - alertmanager.enabled true, with alertmanager.config set to
+//     defaultAlertmanagerConfig()'s "null"-receiver config (see that
+//     function's own doc comment for why no real notification integration
+//     is wired yet) and ruleSelectorNilUsesHelmValues: false alongside the
+//     two selectors already below it, for the same reason: this package's
+//     own DefaultAlertRules() PrometheusRule (applied directly by
+//     ensurePrometheus, not through this chart at all - see that
+//     function's own doc comment for why) doesn't carry the chart's own
+//     release-name label, so it would otherwise be invisible to this
+//     Prometheus.
 //   - nodeExporter/kubeStateMetrics left at the chart's own enabled-by-default
 //     value - node-exporter is the actual point of this chart (per-node CPU/
 //     memory/disk/network metrics the hand-rolled install never had), and
@@ -199,19 +208,36 @@ func prometheusCompatServices() []map[string]any {
 //     everything," in every namespace (serviceMonitorNamespaceSelector/
 //     podMonitorNamespaceSelector already default to {} too).
 func KubePrometheusStackHelmValues() (*apiextensionsv1.JSON, error) {
+	// DefaultAlertRules is deliberately NOT in extraManifests alongside the
+	// compat Services below: confirmed live that this chart's own
+	// extra-objects.yaml template runs every extraManifests entry through
+	// Helm's own `tpl` function before applying it, which means the
+	// PrometheusRule's own "{{ $labels.job }}"-style annotations (meant for
+	// Prometheus's rule engine to expand when an alert fires, not for Helm
+	// to expand at install time) fail immediately with "undefined variable
+	// $labels" - Helm has no idea what $labels is. Applied directly via the
+	// remote client instead (see ensurePrometheus), the same way Pyroscope/
+	// Tempo/Grafana's own objects already are, which never passes through
+	// any templating engine at all.
+	extraManifests := append(prometheusCompatServices(), alertmanagerCompatServices()...)
+
 	raw, err := json.Marshal(map[string]any{
 		"fullnameOverride":                   kubePrometheusStackFullname,
 		"cleanPrometheusOperatorObjectNames": true,
 		"grafana":                            map[string]any{"enabled": false},
-		"alertmanager":                       map[string]any{"enabled": false},
+		"alertmanager": map[string]any{
+			"enabled": true,
+			"config":  defaultAlertmanagerConfig(),
+		},
 		"prometheus": map[string]any{
 			"prometheusSpec": map[string]any{
 				"enableRemoteWriteReceiver":               true,
 				"serviceMonitorSelectorNilUsesHelmValues": false,
 				"podMonitorSelectorNilUsesHelmValues":     false,
+				"ruleSelectorNilUsesHelmValues":           false,
 			},
 		},
-		"extraManifests": prometheusCompatServices(),
+		"extraManifests": extraManifests,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("marshal kube-prometheus-stack helm values: %w", err)

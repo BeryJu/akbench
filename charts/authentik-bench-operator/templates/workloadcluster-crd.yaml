@@ -273,6 +273,16 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              alertmanagerURL:
+                description: |-
+                  AlertmanagerURL is where this cluster's own Alertmanager (bundled in
+                  the same kube-prometheus-stack install ensurePrometheus applies) is
+                  reachable *from the management cluster* - a node's InternalIP plus
+                  the fixed NodePort render.AlertmanagerNodePort exposes. Lets a client
+                  (e.g. the web UI) query/list firing alerts (GET /api/v2/alerts)
+                  without a central receiver, the same reachability model
+                  PrometheusURL/GrafanaURL already use.
+                type: string
               controlPlaneReady:
                 type: boolean
               grafanaURL:

@@ -214,6 +214,16 @@ type WorkloadClusterStatus struct {
 	// +optional
 	GrafanaURL string `json:"grafanaURL,omitempty"`
 
+	// AlertmanagerURL is where this cluster's own Alertmanager (bundled in
+	// the same kube-prometheus-stack install ensurePrometheus applies) is
+	// reachable *from the management cluster* - a node's InternalIP plus
+	// the fixed NodePort render.AlertmanagerNodePort exposes. Lets a client
+	// (e.g. the web UI) query/list firing alerts (GET /api/v2/alerts)
+	// without a central receiver, the same reachability model
+	// PrometheusURL/GrafanaURL already use.
+	// +optional
+	AlertmanagerURL string `json:"alertmanagerURL,omitempty"`
+
 	// +optional
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 }

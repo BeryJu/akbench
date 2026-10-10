@@ -213,6 +213,16 @@ spec:
               WorkloadClusterStatus mirrors the underlying CAPI Cluster's readiness, plus
               where to find the kubeconfig once it exists.
             properties:
+              alertmanagerURL:
+                description: |-
+                  AlertmanagerURL is where this cluster's own Alertmanager (bundled in
+                  the same kube-prometheus-stack install ensurePrometheus applies) is
+                  reachable *from the management cluster* - a node's InternalIP plus
+                  the fixed NodePort render.AlertmanagerNodePort exposes. Lets a client
+                  (e.g. the web UI) query/list firing alerts (GET /api/v2/alerts)
+                  without a central receiver, the same reachability model
+                  PrometheusURL/GrafanaURL already use.
+                type: string
               conditions:
                 items:
                   description: Condition contains details for one aspect of the current

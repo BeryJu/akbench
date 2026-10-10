@@ -217,12 +217,14 @@ export interface WorkloadClusterStatus {
   controlPlaneReady?: boolean;
   infrastructureReady?: boolean;
   kubeconfigSecretRef?: { name: string };
-  // prometheusURL/grafanaURL are reachable *from the management cluster*
-  // (a node's InternalIP + a fixed NodePort - see
-  // render.PrometheusNodePort/GrafanaNodePort), populated once
-  // ensurePrometheus/ensureGrafana succeed.
+  // prometheusURL/grafanaURL/alertmanagerURL are reachable *from the
+  // management cluster* (a node's InternalIP + a fixed NodePort - see
+  // render.PrometheusNodePort/GrafanaNodePort/AlertmanagerNodePort),
+  // populated once ensurePrometheus/ensureGrafana succeed (Alertmanager is
+  // bundled into the same ensurePrometheus step as Prometheus itself).
   prometheusURL?: string;
   grafanaURL?: string;
+  alertmanagerURL?: string;
 }
 
 export interface WorkloadCluster {

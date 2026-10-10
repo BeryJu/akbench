@@ -2,9 +2,11 @@ package render
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	helmv2 "github.com/fluxcd/helm-controller/api/v2"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
 func TestKubePrometheusStackHelmRepository(t *testing.T) {
@@ -25,9 +27,11 @@ func TestKubePrometheusStackHelmRepository(t *testing.T) {
 // depends on: the remote-write receiver k6 pushes to (no matching
 // enable-feature for native histograms - see KubePrometheusStackHelmValues'
 // own doc comment for why that's correct, not an oversight), the bundled
-// Grafana/Alertmanager both disabled (this project runs its own Grafana and
-// has no alerting need), and the two compatibility Services every other
-// consumer of PrometheusServiceName/PrometheusNodePortServiceName expects.
+// Grafana disabled (this project runs its own Grafana), Alertmanager
+// enabled with this project's own default config/rules, and the
+// compatibility Services every other consumer of
+// PrometheusServiceName/PrometheusNodePortServiceName/
+// AlertmanagerServiceName/AlertmanagerNodePortServiceName expects.
 func TestKubePrometheusStackHelmValues(t *testing.T) {
 	raw, err := KubePrometheusStackHelmValues()
 	if err != nil {
@@ -54,19 +58,31 @@ func TestKubePrometheusStackHelmValues(t *testing.T) {
 	if v, ok := prometheusSpec["podMonitorSelectorNilUsesHelmValues"].(bool); !ok || v {
 		t.Errorf("prometheus.prometheusSpec.podMonitorSelectorNilUsesHelmValues = %v, want false", prometheusSpec["podMonitorSelectorNilUsesHelmValues"])
 	}
+	if v, ok := prometheusSpec["ruleSelectorNilUsesHelmValues"].(bool); !ok || v {
+		t.Errorf("prometheus.prometheusSpec.ruleSelectorNilUsesHelmValues = %v, want false", prometheusSpec["ruleSelectorNilUsesHelmValues"])
+	}
 
 	if enabled, _ := values["grafana"].(map[string]any)["enabled"].(bool); enabled {
 		t.Error("grafana.enabled = true, want false (this project runs its own Grafana)")
 	}
-	if enabled, _ := values["alertmanager"].(map[string]any)["enabled"].(bool); enabled {
-		t.Error("alertmanager.enabled = true, want false (no alerting need)")
+	alertmanager, _ := values["alertmanager"].(map[string]any)
+	if enabled, _ := alertmanager["enabled"].(bool); !enabled {
+		t.Error("alertmanager.enabled = false, want true")
+	}
+	if _, ok := alertmanager["config"].(map[string]any)["route"]; !ok {
+		t.Errorf("alertmanager.config.route missing: %v", alertmanager["config"])
 	}
 
+	// DefaultAlertRules is deliberately NOT among these - see its own doc
+	// comment (and KubePrometheusStackHelmValues') for why a PrometheusRule
+	// containing "{{ $labels... }}" can't survive this chart's own
+	// extraManifests -> tpl pipeline; it's applied directly by
+	// ensurePrometheus instead (TestDefaultAlertRules covers it).
 	manifests, ok := values["extraManifests"].([]any)
-	if !ok || len(manifests) != 2 {
-		t.Fatalf("extraManifests = %v, want 2 compatibility Service objects", values["extraManifests"])
+	if !ok || len(manifests) != 4 {
+		t.Fatalf("extraManifests = %v, want 4 objects (2 Prometheus compat Services, 2 Alertmanager compat Services)", values["extraManifests"])
 	}
-	var sawClusterIP, sawNodePort bool
+	var sawClusterIP, sawNodePort, sawAlertmanagerClusterIP, sawAlertmanagerNodePort bool
 	for _, m := range manifests {
 		obj, ok := m.(map[string]any)
 		if !ok {
@@ -74,6 +90,7 @@ func TestKubePrometheusStackHelmValues(t *testing.T) {
 		}
 		if obj["kind"] != "Service" {
 			t.Errorf("extraManifests entry kind = %v, want Service", obj["kind"])
+			continue
 		}
 		metadata, _ := obj["metadata"].(map[string]any)
 		if metadata["namespace"] != ObservabilityNamespace {
@@ -88,13 +105,101 @@ func TestKubePrometheusStackHelmValues(t *testing.T) {
 			if spec["type"] != "NodePort" {
 				t.Errorf("%s spec.type = %v, want NodePort", PrometheusNodePortServiceName, spec["type"])
 			}
+		case AlertmanagerServiceName:
+			sawAlertmanagerClusterIP = true
+		case AlertmanagerNodePortServiceName:
+			sawAlertmanagerNodePort = true
+			spec, _ := obj["spec"].(map[string]any)
+			if spec["type"] != "NodePort" {
+				t.Errorf("%s spec.type = %v, want NodePort", AlertmanagerNodePortServiceName, spec["type"])
+			}
 		}
 	}
-	if !sawClusterIP {
-		t.Errorf("extraManifests missing a Service named %q", PrometheusServiceName)
+	for name, saw := range map[string]bool{
+		PrometheusServiceName:           sawClusterIP,
+		PrometheusNodePortServiceName:   sawNodePort,
+		AlertmanagerServiceName:         sawAlertmanagerClusterIP,
+		AlertmanagerNodePortServiceName: sawAlertmanagerNodePort,
+	} {
+		if !saw {
+			t.Errorf("extraManifests missing a Service named %q", name)
+		}
 	}
-	if !sawNodePort {
-		t.Errorf("extraManifests missing a Service named %q", PrometheusNodePortServiceName)
+}
+
+// TestDefaultAlertRules guards the one thing that actually broke live when
+// this was first wired through extraManifests instead (see
+// KubePrometheusStackHelmValues' own doc comment): every alert's
+// annotations must keep their "{{ $labels... }}" Prometheus/Alertmanager
+// templating syntax intact, verbatim, since nothing in this project's own
+// code ever touches it - only Prometheus's rule engine expands it, at alert
+// time.
+func TestDefaultAlertRules(t *testing.T) {
+	rule := DefaultAlertRules()
+
+	if rule.GetKind() != "PrometheusRule" {
+		t.Errorf("kind = %q, want PrometheusRule", rule.GetKind())
+	}
+	if rule.GetName() != DefaultAlertRulesName {
+		t.Errorf("name = %q, want %q", rule.GetName(), DefaultAlertRulesName)
+	}
+	if rule.GetNamespace() != ObservabilityNamespace {
+		t.Errorf("namespace = %q, want %q", rule.GetNamespace(), ObservabilityNamespace)
+	}
+
+	groups, ok, err := unstructured.NestedSlice(rule.Object, "spec", "groups")
+	if err != nil || !ok {
+		t.Fatalf("spec.groups: ok=%v err=%v", ok, err)
+	}
+	group, ok := groups[0].(map[string]any)
+	if !ok {
+		t.Fatalf("spec.groups[0] is not an object: %v", groups[0])
+	}
+	rules, ok := group["rules"].([]any)
+	if !ok || len(rules) == 0 {
+		t.Fatalf("spec.groups[0].rules missing or empty: %v", group["rules"])
+	}
+
+	wantAlerts := map[string]bool{
+		"AuthentikBenchServiceScrapeDown":      false,
+		"AuthentikBenchPostgresDown":           false,
+		"AuthentikBenchHighRequestFailureRate": false,
+		"AuthentikBenchWorkerTaskErrors":       false,
+	}
+	for _, r := range rules {
+		rr, ok := r.(map[string]any)
+		if !ok {
+			t.Fatalf("rule entry is not an object: %v", r)
+		}
+		name, _ := rr["alert"].(string)
+		if _, known := wantAlerts[name]; !known {
+			t.Errorf("unexpected alert name %q", name)
+			continue
+		}
+		wantAlerts[name] = true
+		if _, ok := rr["expr"].(string); !ok || rr["expr"] == "" {
+			t.Errorf("%s: expr missing", name)
+		}
+		if _, ok := rr["for"].(string); !ok {
+			t.Errorf("%s: for missing", name)
+		}
+		// Every alert's summary references at least one $labels field -
+		// confirming it, specifically, keeps its literal "{{ }}" intact is
+		// what actually caught the extraManifests/tpl bug live, not a
+		// generic "annotations exist" check.
+		annotations, _ := rr["annotations"].(map[string]any)
+		summary, _ := annotations["summary"].(string)
+		if !strings.Contains(summary, "{{") || !strings.Contains(summary, "}}") {
+			t.Errorf("%s: annotations.summary = %q, want it to keep its \"{{ $labels... }}\" templating syntax verbatim", name, summary)
+		}
+		if _, ok := annotations["description"].(string); !ok {
+			t.Errorf("%s: annotations.description missing", name)
+		}
+	}
+	for name, saw := range wantAlerts {
+		if !saw {
+			t.Errorf("missing alert %q", name)
+		}
 	}
 }
 
