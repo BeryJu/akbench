@@ -15,3 +15,9 @@
 
 # Re-include Grafana dashboards embedded via go:embed (see internal/render/grafana.go)
 !internal/render/manifests/grafana-dashboards/*.json
+
+# Re-include the web UI's sources for Dockerfile.apiserver's frontend stage
+# (but never a local node_modules or build output)
+!web/ui/**
+web/ui/node_modules
+web/ui/dist
