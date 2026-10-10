@@ -399,7 +399,7 @@ export function ClusterViewPage() {
           <h2>Status</h2>
           <div className="panel">
             <div className="row" style={{ marginBottom: 8 }}>
-              <StatusBadge kind="workloadcluster" name={name} phase={status?.phase} conditions={status?.conditions} />
+              <StatusBadge kind="workloadcluster" name={name} namespace={wc.data.metadata.namespace} phase={status?.phase} conditions={status?.conditions} />
               <span>
                 Control plane <Badge value={status?.controlPlaneReady ? 'Ready' : 'Not ready'} />
               </span>

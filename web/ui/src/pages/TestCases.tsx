@@ -68,7 +68,7 @@ export function TestCasesPage() {
           {
             label: 'Status',
             render: tc => (
-              <StatusBadge kind="testcase" name={tc.metadata.name} phase={tc.status?.phase} conditions={tc.status?.conditions} />
+              <StatusBadge kind="testcase" name={tc.metadata.name} namespace={tc.metadata.namespace} phase={tc.status?.phase} conditions={tc.status?.conditions} />
             ),
           },
           {
@@ -359,7 +359,7 @@ export function TestCaseViewPage() {
       {tc && (
         <div className="panel">
           <div className="row" style={{ marginBottom: 8 }}>
-            <StatusBadge kind="testcase" name={name} phase={tc.status?.phase} conditions={tc.status?.conditions} />
+            <StatusBadge kind="testcase" name={name} namespace={tc.metadata.namespace} phase={tc.status?.phase} conditions={tc.status?.conditions} />
             <Link to={`/deployments/${tc.spec.deploymentRef.name}`}>Deployment: {tc.spec.deploymentRef.name}</Link>
             {tc.status?.burnWorkloadRef && tc.metadata.namespace && (
               <Link

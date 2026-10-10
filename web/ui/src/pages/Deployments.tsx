@@ -57,6 +57,7 @@ export function DeploymentsPage() {
               <StatusBadge
                 kind="authentikdeployment"
                 name={d.metadata.name}
+                namespace={d.metadata.namespace}
                 phase={d.status?.phase}
                 conditions={d.status?.conditions}
               />
@@ -536,7 +537,7 @@ export function DeploymentViewPage() {
         <>
           <div className="panel">
             <div className="row" style={{ marginBottom: 8 }}>
-              <StatusBadge kind="authentikdeployment" name={name} phase={d.status?.phase} conditions={d.status?.conditions} />
+              <StatusBadge kind="authentikdeployment" name={name} namespace={d.metadata.namespace} phase={d.status?.phase} conditions={d.status?.conditions} />
               {d.status?.serviceEndpoint && (
                 <span className="muted">
                   Service: <code>{d.status.serviceEndpoint}</code>

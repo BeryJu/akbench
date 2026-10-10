@@ -50,12 +50,15 @@ export function Badge({ value }: { value: string | undefined }) {
 export function StatusBadge({
   kind,
   name,
+  namespace,
   phase,
   conditions,
 }: {
   /** The CRD resource name for kubectl, e.g. "authentikdeployments". */
   kind: string;
   name: string;
+  /** Where the object itself lives on the management cluster. */
+  namespace?: string;
   phase?: string;
   conditions?: Condition[];
 }) {
@@ -86,7 +89,7 @@ export function StatusBadge({
           <h3>Conditions</h3>
           <ConditionList conditions={conditions} />
           <div style={{ marginTop: 10 }}>
-            <Link to={shellLink(MANAGEMENT_CLUSTER, `kubectl describe ${kind} ${name}`)}>
+            <Link to={shellLink(MANAGEMENT_CLUSTER, `kubectl describe ${kind} ${name}${namespace ? ` -n ${namespace}` : ''}`)}>
               Describe in shell (events) →
             </Link>
           </div>

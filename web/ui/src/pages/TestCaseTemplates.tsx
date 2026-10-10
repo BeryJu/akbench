@@ -51,6 +51,7 @@ export function TestCaseTemplatesPage() {
               <StatusBadge
                 kind="testcasetemplate"
                 name={t.metadata.name}
+                namespace={t.metadata.namespace}
                 phase={t.status?.phase}
                 conditions={t.status?.conditions}
               />
@@ -187,7 +188,7 @@ export function TestCaseTemplateViewPage() {
       <Alert>{template.error}</Alert>
       {t && (
         <div className="row" style={{ marginBottom: 8 }}>
-          <StatusBadge kind="testcasetemplate" name={name} phase={t.status?.phase} conditions={t.status?.conditions} />
+          <StatusBadge kind="testcasetemplate" name={name} namespace={t.metadata.namespace} phase={t.status?.phase} conditions={t.status?.conditions} />
           {t.spec.requiresOAuthClient && <span className="muted">Provisions an OAuth client</span>}
         </div>
       )}
