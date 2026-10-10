@@ -57,7 +57,15 @@ const (
 	// scsi-id naming inserts before a serial that already starts with a
 	// dash-adjacent segment (device name/serial vs. the on-disk
 	// "scsi-0QEMU_QEMU_HARDDISK_incus_csi--<id>" symlink actually created).
-	csiIncusChartVersion = "0.1.2"
+	// 0.1.3 fixed the csi-resizer sidecar's own ClusterRole missing
+	// cluster-scoped `pods: get/list/watch` - every resize attempt
+	// (csi-resizer polling the pod mounting the PVC to detect a running
+	// FilesystemResizePending condition) failed with "pods is forbidden...
+	// cannot list resource \"pods\" at the cluster scope", confirmed live
+	// on default-dev-vm-incus. No live RBAC patch was applied as a
+	// stop-gap (would have needed explicit approval); this version bump is
+	// the real fix.
+	csiIncusChartVersion = "0.1.3"
 
 	CSIIncusHelmReleaseName = "csi-incus"
 
