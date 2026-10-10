@@ -1,0 +1,406 @@
+/*
+ * Copyright 2026
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+import { FormEvent, useState } from 'react';
+import { Link, useNavigate, useParams } from 'react-router';
+import { api } from '../api';
+import { CodeEditor } from '../components/CodeEditor';
+import { MetricsGrid } from '../components/MetricsChart';
+import { ObjectYaml } from '../components/ObjectYaml';
+import { Badge, ConditionList, StatusBadge } from '../components/Status';
+import { Alert, confirmAndRun, errorMessage, Field, formatTimestamp, Page, Table } from '../components/ui';
+import { metricsAnchorFromRuns } from '../format';
+import { shellLinkForCluster } from '../shell/links';
+import { TestCase, TestCaseSpec, TestProfile } from '../types';
+import { useResource } from '../useResource';
+
+export function TestCasesPage() {
+  const testCases = useResource(() => api.testCases());
+  const [notice, setNotice] = useState<string>();
+
+  async function runNow(name: string) {
+    try {
+      const run = await api.runTestCase(name);
+      setNotice(`Started test run ${run.metadata.name}`);
+    } catch (err) {
+      window.alert(errorMessage(err));
+    }
+  }
+
+  return (
+    <Page
+      title="Test cases"
+      subtitle="k6 load tests against a deployment. Quick runs once per test run; Burn runs until stopped."
+      actions={
+        <Link className="button primary" to="/testcases/new">
+          New test case
+        </Link>
+      }
+    >
+      <Alert>{testCases.error}</Alert>
+      <Alert kind="success">{notice}</Alert>
+      <Table
+        rows={testCases.data}
+        rowKey={tc => tc.metadata.name}
+        empty="No test cases yet."
+        columns={[
+          { label: 'Name', render: tc => <Link to={`/testcases/${tc.metadata.name}`}>{tc.metadata.name}</Link> },
+          {
+            label: 'Deployment',
+            render: tc => <Link to={`/deployments/${tc.spec.deploymentRef.name}`}>{tc.spec.deploymentRef.name}</Link>,
+          },
+          { label: 'Template', render: tc => (tc.spec.inline !== undefined ? <em>inline</em> : (tc.spec.template ?? '-')) },
+          { label: 'Profile', render: tc => <Badge value={tc.spec.profile} /> },
+          { label: 'VUs', render: tc => tc.spec.vus },
+          {
+            label: 'Status',
+            render: tc => (
+              <StatusBadge kind="testcase" name={tc.metadata.name} phase={tc.status?.phase} conditions={tc.status?.conditions} />
+            ),
+          },
+          {
+            label: '',
+            className: 'actions',
+            render: tc => (
+              <span className="row" style={{ justifyContent: 'flex-end' }}>
+                {tc.spec.profile === 'Quick' && (
+                  <button className="small" onClick={() => void runNow(tc.metadata.name)}>
+                    Run now
+                  </button>
+                )}
+                <Link className="button small" to={`/testcases/${tc.metadata.name}/edit`}>
+                  Edit
+                </Link>
+                <button
+                  className="small danger"
+                  onClick={() =>
+                    void confirmAndRun(
+                      `Delete test case "${tc.metadata.name}"?`,
+                      () => api.deleteTestCase(tc.metadata.name),
+                      testCases.reload
+                    )
+                  }
+                >
+                  Delete
+                </button>
+              </span>
+            ),
+          },
+        ]}
+      />
+    </Page>
+  );
+}
+
+const INLINE_TEMPLATE = '__inline__';
+
+function emptySpec(): TestCaseSpec {
+  return {
+    deploymentRef: { name: '' },
+    template: 'login',
+    profile: 'Quick',
+    vus: 8,
+    iterations: 1000,
+    flow: 'default-authentication-flow',
+    quickDuration: '150s',
+    burnDuration: '8760h',
+    traceSampleRate: '0.01',
+  };
+}
+
+function TestCaseForm({ existing }: { existing?: TestCase }) {
+  const navigate = useNavigate();
+  const deployments = useResource(() => api.deployments(), [], 0);
+  const templates = useResource(() => api.testCaseTemplates(), [], 0);
+  const [name, setName] = useState(existing?.metadata.name ?? '');
+  const [spec, setSpec] = useState<TestCaseSpec>(existing?.spec ?? emptySpec());
+  const [error, setError] = useState<string>();
+  const [saving, setSaving] = useState(false);
+
+  const patch = (changes: Partial<TestCaseSpec>) => setSpec(current => ({ ...current, ...changes }));
+
+  // scriptConfigMapRef (bring-your-own ConfigMap) is a power-user escape
+  // hatch deliberately not offered here - it survives a save untouched.
+  const scriptChoice = spec.inline !== undefined ? INLINE_TEMPLATE : (spec.template ?? 'login');
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    setSaving(true);
+    setError(undefined);
+    try {
+      const savedName = existing?.metadata.name ?? name;
+      if (existing) {
+        await api.updateTestCase(savedName, { spec });
+      } else {
+        await api.createTestCase({ metadata: { name }, spec });
+      }
+      navigate(`/testcases/${savedName}`);
+    } catch (err) {
+      setError(errorMessage(err));
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Page title={existing ? `Edit ${existing.metadata.name}` : 'New test case'}>
+      <form onSubmit={submit}>
+        <Alert>{error}</Alert>
+        <fieldset>
+          <legend>Identity</legend>
+          <div className="fields">
+            <Field label="Name" help="Also the k6 testid every metric is split on">
+              <input required value={name} disabled={Boolean(existing)} onChange={e => setName(e.target.value)} />
+            </Field>
+            <Field label="Deployment to drive">
+              <select
+                required
+                value={spec.deploymentRef.name}
+                onChange={e => patch({ deploymentRef: { name: e.target.value } })}
+              >
+                <option value="">Choose a deployment</option>
+                {(deployments.data ?? []).map(d => (
+                  <option key={d.metadata.name} value={d.metadata.name}>
+                    {d.metadata.name}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          </div>
+        </fieldset>
+
+        <fieldset>
+          <legend>Test template</legend>
+          <div className="fields">
+            <Field label="Template" help={<Link to="/testcasetemplates">Manage test case templates</Link>}>
+              <select
+                value={scriptChoice}
+                onChange={e => {
+                  const value = e.target.value;
+                  if (value === INLINE_TEMPLATE) {
+                    patch({ inline: spec.inline ?? '', template: undefined });
+                  } else {
+                    patch({ template: value, inline: undefined });
+                  }
+                }}
+              >
+                {(templates.data ?? []).map(t => (
+                  <option key={t.metadata.name} value={t.metadata.name}>
+                    {t.metadata.name}
+                    {t.spec.description ? ` - ${t.spec.description}` : ''}
+                  </option>
+                ))}
+                <option value={INLINE_TEMPLATE}>Custom - inline k6 script</option>
+              </select>
+            </Field>
+          </div>
+          {scriptChoice === INLINE_TEMPLATE && (
+            <>
+              <p className="muted">Inline k6 script (TypeScript), stored on this TestCase.</p>
+              <CodeEditor language="typescript" value={spec.inline ?? ''} onChange={v => patch({ inline: v })} />
+            </>
+          )}
+        </fieldset>
+
+        <fieldset>
+          <legend>Load</legend>
+          <div className="fields">
+            <Field label="Profile">
+              <select value={spec.profile} onChange={e => patch({ profile: e.target.value as TestProfile })}>
+                <option value="Quick">Quick - a bounded run, started from a test run</option>
+                <option value="Burn">Burn - sustained load until stopped</option>
+              </select>
+            </Field>
+            <Field label="Virtual users">
+              <input type="number" min={1} value={spec.vus} onChange={e => patch({ vus: Number(e.target.value) })} />
+            </Field>
+            {spec.profile === 'Quick' ? (
+              <>
+                <Field label="Logins per virtual user">
+                  <input
+                    type="number"
+                    min={1}
+                    value={spec.iterations ?? 1000}
+                    onChange={e => patch({ iterations: Number(e.target.value) })}
+                  />
+                </Field>
+                <Field label="Time limit" help="Caps a run that cannot finish its logins">
+                  <input
+                    value={spec.quickDuration ?? ''}
+                    placeholder="150s"
+                    onChange={e => patch({ quickDuration: e.target.value })}
+                  />
+                </Field>
+              </>
+            ) : (
+              <Field label="Time limit">
+                <input
+                  value={spec.burnDuration ?? ''}
+                  placeholder="8760h"
+                  onChange={e => patch({ burnDuration: e.target.value })}
+                />
+              </Field>
+            )}
+            <Field label="Flow slug">
+              <input
+                value={spec.flow ?? ''}
+                placeholder="default-authentication-flow"
+                onChange={e => patch({ flow: e.target.value })}
+              />
+            </Field>
+            <Field label="Trace sample rate">
+              <input
+                value={spec.traceSampleRate ?? ''}
+                placeholder="0.01"
+                onChange={e => patch({ traceSampleRate: e.target.value })}
+              />
+            </Field>
+          </div>
+        </fieldset>
+
+        <div className="form-actions">
+          <button type="submit" className="primary" disabled={saving}>
+            {saving ? 'Saving…' : existing ? 'Save changes' : 'Create test case'}
+          </button>
+          <button type="button" onClick={() => navigate(-1)}>
+            Cancel
+          </button>
+        </div>
+      </form>
+    </Page>
+  );
+}
+
+export function TestCaseCreatePage() {
+  return <TestCaseForm />;
+}
+
+export function TestCaseEditPage() {
+  const { name = '' } = useParams();
+  const existing = useResource(() => api.testCase(name), [name], 0);
+  if (existing.error) {
+    return (
+      <Page title="Edit test case">
+        <Alert>{existing.error}</Alert>
+      </Page>
+    );
+  }
+  return existing.data ? <TestCaseForm key={name} existing={existing.data} /> : null;
+}
+
+export function TestCaseViewPage() {
+  const { name = '' } = useParams();
+  const testCase = useResource(() => api.testCase(name), [name], 10000);
+  const tc = testCase.data;
+  const profile = tc?.spec.profile;
+  const deploymentName = tc?.spec.deploymentRef.name;
+  const deployment = useResource(
+    () => (deploymentName ? api.deployment(deploymentName) : Promise.resolve(undefined)),
+    [deploymentName],
+    0
+  );
+  // A TestCase runs where its runnerClusterRef says, defaulting to its
+  // deployment's own cluster.
+  const cluster = tc?.spec.runnerClusterRef?.name ?? deployment.data?.spec.clusterRef?.name;
+  const runs = useResource(() => api.testRuns(name), [name], 10000);
+  const sortedRuns = [...(runs.data ?? [])].sort((a, b) =>
+    (b.metadata.creationTimestamp ?? '').localeCompare(a.metadata.creationTimestamp ?? '')
+  );
+  // Burn runs continuously, so "now" is right for it; a Quick test's data
+  // ends with its latest completed run.
+  const anchor = profile === 'Quick' ? metricsAnchorFromRuns(runs.data ?? []) : undefined;
+
+  const [running, setRunning] = useState(false);
+  const [runError, setRunError] = useState<string>();
+
+  async function runNow() {
+    setRunning(true);
+    setRunError(undefined);
+    try {
+      await api.runTestCase(name);
+      runs.reload();
+    } catch (err) {
+      setRunError(errorMessage(err));
+    } finally {
+      setRunning(false);
+    }
+  }
+
+  return (
+    <Page
+      title={name}
+      subtitle={tc && `${tc.spec.profile} test against ${tc.spec.deploymentRef.name}, ${tc.spec.vus} VUs`}
+      actions={
+        <>
+          {profile === 'Quick' && (
+            <button className="primary" disabled={running} onClick={() => void runNow()}>
+              {running ? 'Starting…' : 'Run now'}
+            </button>
+          )}
+          <Link className="button" to={`/testcases/${name}/edit`}>
+            Edit
+          </Link>
+        </>
+      }
+    >
+      <Alert>{testCase.error ?? runError}</Alert>
+      {tc && (
+        <div className="panel">
+          <div className="row" style={{ marginBottom: 8 }}>
+            <StatusBadge kind="testcase" name={name} phase={tc.status?.phase} conditions={tc.status?.conditions} />
+            <Link to={`/deployments/${tc.spec.deploymentRef.name}`}>Deployment: {tc.spec.deploymentRef.name}</Link>
+            {tc.status?.burnWorkloadRef && tc.metadata.namespace && (
+              <Link
+                className="button small"
+                to={shellLinkForCluster(
+                  cluster,
+                  `kubectl logs -n ${tc.metadata.namespace} deploy/${tc.status.burnWorkloadRef.name} -f --tail=200`
+                )}
+              >
+                k6 logs
+              </Link>
+            )}
+          </div>
+          <ConditionList conditions={tc.status?.conditions} />
+        </div>
+      )}
+
+      {profile === 'Quick' && (
+        <>
+          <h2>Runs</h2>
+          <Table
+            rows={runs.data && sortedRuns.slice(0, 10)}
+            rowKey={r => r.metadata.name}
+            empty="No runs yet."
+            columns={[
+              { label: 'Run', render: r => <Link to={`/testruns/${r.metadata.name}`}>{r.metadata.name}</Link> },
+              { label: 'Phase', render: r => <Badge value={r.status?.phase ?? 'Pending'} /> },
+              { label: 'Started', render: r => formatTimestamp(r.status?.startTime ?? r.metadata.creationTimestamp) },
+              { label: 'Completed', render: r => formatTimestamp(r.status?.completionTime) },
+            ]}
+          />
+        </>
+      )}
+
+      <h2>Metrics</h2>
+      {profile === 'Quick' && !anchor && (runs.data?.length ?? 0) > 0 && (
+        <Alert kind="info">Latest run is still in progress - metrics will show once it completes.</Alert>
+      )}
+      <MetricsGrid testids={[name]} endSeconds={anchor?.endSeconds} rangeSeconds={anchor?.rangeSeconds} />
+
+      <ObjectYaml object={tc} />
+    </Page>
+  );
+}
