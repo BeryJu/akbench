@@ -14,20 +14,31 @@
  * limitations under the License.
  */
 
-// One metric over time, one line per test, from /metrics/range. Natively
-// rendered (recharts) - no Grafana iframe.
+// One metric over time, one line per test, from /metrics/range or
+// /metrics/resources. Natively rendered (Chart.js via react-chartjs-2) - no
+// Grafana iframe.
 import { useMemo } from 'react';
-import { CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import {
+  Chart as ChartJS,
+  Legend as ChartJSLegend,
+  LinearScale,
+  LineElement,
+  PointElement,
+  Tooltip as ChartJSTooltip,
+  type ChartOptions,
+  type TooltipItem,
+} from 'chart.js';
+import { Line } from 'react-chartjs-2';
 import { api } from '../api';
-import { colorFor, formatMetricValue, shortPodLabels } from '../format';
-import { CompareMetric, PodMetricsResponse, RangeResponse } from '../types';
+import { colorFor, formatMetricValue } from '../format';
+import { CompareMetric, RangeResponse } from '../types';
 import { useResource } from '../useResource';
+
+ChartJS.register(LinearScale, PointElement, LineElement, ChartJSLegend, ChartJSTooltip);
 
 function formatTime(seconds: number): string {
   return new Date(seconds * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
-
-const axisStyle = { fontSize: 11, fill: 'var(--muted)' };
 
 /**
  * useAvailableMetrics discovers the metric definitions cmd/apiserver knows
@@ -45,6 +56,72 @@ export function useAvailableMetrics(testids: string[]): CompareMetric[] {
     0
   );
   return result.data?.metrics ?? [];
+}
+
+/**
+ * rangeChartOptions builds the Chart.js options shared by every line chart
+ * on this page - a numeric (unix-seconds) x axis rather than Chart.js' own
+ * 'time' scale, which would need the date-fns adapter as an extra
+ * dependency for a feature (calendar-aware ticks) nothing here needs.
+ */
+function rangeChartOptions(unit: string, showLegend: boolean): ChartOptions<'line'> {
+  return {
+    responsive: true,
+    maintainAspectRatio: false,
+    animation: false,
+    normalized: true,
+    interaction: { mode: 'index', intersect: false },
+    scales: {
+      x: {
+        type: 'linear',
+        ticks: { callback: v => formatTime(v as number), color: 'var(--muted)', font: { size: 11 }, maxTicksLimit: 8 },
+        grid: { color: 'var(--border)' },
+        border: { color: 'var(--border)' },
+      },
+      y: {
+        beginAtZero: true,
+        // Ratios capped at 100%; everything else auto-scales.
+        max: unit === 'ratio' ? 1 : undefined,
+        ticks: { callback: v => formatMetricValue(v as number, unit), color: 'var(--muted)', font: { size: 11 } },
+        grid: { color: 'var(--border)' },
+        border: { color: 'var(--border)' },
+      },
+    },
+    plugins: {
+      legend: { display: showLegend, labels: { color: 'var(--text)', font: { size: 12 }, boxHeight: 8 } },
+      tooltip: {
+        backgroundColor: 'var(--panel)',
+        titleColor: 'var(--text)',
+        bodyColor: 'var(--text)',
+        borderColor: 'var(--border)',
+        borderWidth: 1,
+        titleFont: { size: 12 },
+        bodyFont: { size: 12 },
+        callbacks: {
+          title: items => formatTime(items[0]?.parsed.x ?? 0),
+          label: (item: TooltipItem<'line'>) =>
+            `${item.dataset.label}: ${formatMetricValue(item.parsed.y ?? undefined, unit)}`,
+        },
+      },
+    },
+    elements: {
+      point: { radius: 0, hoverRadius: 3 },
+      line: { tension: 0.25, borderWidth: 2 },
+    },
+  };
+}
+
+/** rangeDatasets turns a RangeResponse into Chart.js datasets, one per
+ * series, labeled by whatever the caller wants (a plain testid, or a
+ * shortened pod name) - spanGaps true mirrors recharts' own connectNulls. */
+function rangeDatasets(data: RangeResponse | undefined, labelFor: (seriesKey: string) => string) {
+  return (data?.series ?? []).map((series, i) => ({
+    label: labelFor(series.testid),
+    data: (series.points ?? []).map(p => ({ x: p.time, y: p.value })),
+    borderColor: colorFor(i),
+    backgroundColor: colorFor(i),
+    spanGaps: true,
+  }));
 }
 
 export function MetricsChart({
@@ -79,82 +156,24 @@ export function MetricsChart({
     endSeconds !== undefined ? 0 : refreshMs
   );
 
-  const { rows, unit, label } = useMemo(() => {
-    if (!data) {
-      return { rows: [] as Record<string, number>[], unit: '', label: metric };
-    }
-    const byTime = new Map<number, Record<string, number>>();
-    for (const series of data.series ?? []) {
-      // points is always [] server-side, but never trust that blindly.
-      for (const point of series.points ?? []) {
-        const row = byTime.get(point.time) ?? { time: point.time };
-        row[series.testid] = point.value;
-        byTime.set(point.time, row);
-      }
-    }
-    return {
-      rows: Array.from(byTime.values()).sort((a, b) => a.time - b.time),
-      unit: data.metric.unit,
-      label: data.metric.label,
-    };
-  }, [data, metric]);
+  const unit = data?.metric.unit ?? '';
+  const label = data?.metric.label ?? metric;
+  const datasets = useMemo(() => rangeDatasets(data, id => id), [data]);
+  const hasData = datasets.some(d => d.data.length > 0);
+  const options = useMemo(() => rangeChartOptions(unit, testids.length > 1), [unit, testids.length]);
 
   return (
     <div className="panel">
       <h3>{label}</h3>
       {error && <div className="alert error">{error}</div>}
-      {rows.length === 0 ? (
+      {!hasData ? (
         <div className="muted" style={{ height, display: 'grid', placeItems: 'center' }}>
           No data in this window yet.
         </div>
       ) : (
-        <ResponsiveContainer width="100%" height={height}>
-          <LineChart data={rows} margin={{ top: 4, right: 12, left: 0, bottom: 0 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-            <XAxis
-              dataKey="time"
-              type="number"
-              domain={['dataMin', 'dataMax']}
-              tickFormatter={v => formatTime(v as number)}
-              tick={axisStyle}
-              stroke="var(--border)"
-              minTickGap={40}
-            />
-            <YAxis
-              tick={axisStyle}
-              stroke="var(--border)"
-              tickFormatter={v => formatMetricValue(v as number, unit)}
-              width={64}
-              // Zero-based, so a flat series doesn't look like a trend;
-              // ratios capped at 100%.
-              domain={unit === 'ratio' ? [0, 1] : [0, 'auto']}
-            />
-            <Tooltip
-              labelFormatter={v => formatTime(v as number)}
-              formatter={v => formatMetricValue(v as number, unit)}
-              contentStyle={{
-                background: 'var(--panel)',
-                border: '1px solid var(--border)',
-                borderRadius: 6,
-                fontSize: 13,
-              }}
-            />
-            {testids.length > 1 && <Legend wrapperStyle={{ fontSize: 12 }} />}
-            {testids.map((testid, i) => (
-              <Line
-                key={testid}
-                type="monotone"
-                dataKey={testid}
-                name={testid}
-                stroke={colorFor(i)}
-                strokeWidth={2}
-                dot={false}
-                isAnimationActive={false}
-                connectNulls
-              />
-            ))}
-          </LineChart>
-        </ResponsiveContainer>
+        <div style={{ height }}>
+          <Line data={{ datasets }} options={options} />
+        </div>
       )}
     </div>
   );
@@ -187,125 +206,70 @@ export function MetricsGrid({
 }
 
 /**
- * PodMetricsChart charts one resource (cpu/memory), one line per pod, for a
- * single testid's own deployment - unlike MetricsChart, which overlays
- * multiple *tests* as lines in one chart, this overlays the *pods* of one
- * test's deployment, since cAdvisor's container metrics are tagged by
- * namespace/pod, never by k6 testid (see internal/api/podmetrics.go's own
- * doc comment).
+ * ResourceChart is one big chart for one resource (cpu/memory), one line per
+ * *test* - each line is that test's own deployment summed across its pods
+ * (internal/api/podmetrics.go), not broken out per pod: confirmed live that
+ * reads as unreadable (a deployment mid-rollout leaves its old ReplicaSet
+ * generation's pods in the same time window as the new one, turning a
+ * single test into 6+ tangled lines). Matches MetricsChart's own "one line
+ * per test" shape above - this is the Compare page's resource-usage
+ * equivalent of the k6-metric charts, not a per-pod drill-down.
  */
-export function PodMetricsChart({
+export function ResourceChart({
   resource,
-  testid,
+  testids,
   rangeSeconds = 900,
   step = '15s',
   refreshMs = 15000,
-  height = 220,
+  height = 320,
   endSeconds,
 }: {
   resource: 'cpu' | 'memory';
-  testid: string;
+  testids: string[];
   rangeSeconds?: number;
   step?: string;
   refreshMs?: number;
   height?: number;
   endSeconds?: number;
 }) {
-  const { data, error } = useResource<PodMetricsResponse | undefined>(
+  const { data, error } = useResource<RangeResponse | undefined>(
     () => {
+      if (testids.length === 0) {
+        return Promise.resolve(undefined);
+      }
       const end = endSeconds ?? Math.floor(Date.now() / 1000);
-      return api.podMetrics([testid], resource, end - rangeSeconds, end, step);
+      return api.resourceRange(testids, resource, end - rangeSeconds, end, step);
     },
-    [testid, resource, rangeSeconds, step, endSeconds],
+    [testids.join(','), resource, rangeSeconds, step, endSeconds],
     endSeconds !== undefined ? 0 : refreshMs
   );
 
-  const { rows, pods, unit, label } = useMemo(() => {
-    if (!data) {
-      return { rows: [] as Record<string, number>[], pods: [] as string[], unit: '', label: resource };
-    }
-    const byTime = new Map<number, Record<string, number>>();
-    const podSet = new Set<string>();
-    for (const series of data.series ?? []) {
-      podSet.add(series.pod);
-      for (const point of series.points ?? []) {
-        const row = byTime.get(point.time) ?? { time: point.time };
-        row[series.pod] = point.value;
-        byTime.set(point.time, row);
-      }
-    }
-    return {
-      rows: Array.from(byTime.values()).sort((a, b) => a.time - b.time),
-      pods: Array.from(podSet).sort(),
-      unit: data.unit,
-      label: data.label,
-    };
-  }, [data, resource]);
-  const podLabels = useMemo(() => shortPodLabels(pods), [pods]);
+  const unit = data?.metric.unit ?? '';
+  const label = data?.metric.label ?? resource;
+  const datasets = useMemo(() => rangeDatasets(data, id => id), [data]);
+  const hasData = datasets.some(d => d.data.length > 0);
+  const options = useMemo(() => rangeChartOptions(unit, testids.length > 1), [unit, testids.length]);
 
   return (
     <div className="panel">
-      <h3>
-        {label} <span className="muted">({testid})</span>
-      </h3>
+      <h3>{label}</h3>
       {error && <div className="alert error">{error}</div>}
-      {rows.length === 0 ? (
+      {!hasData ? (
         <div className="muted" style={{ height, display: 'grid', placeItems: 'center' }}>
           No data in this window yet.
         </div>
       ) : (
-        <ResponsiveContainer width="100%" height={height}>
-          <LineChart data={rows} margin={{ top: 4, right: 12, left: 0, bottom: 0 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-            <XAxis
-              dataKey="time"
-              type="number"
-              domain={['dataMin', 'dataMax']}
-              tickFormatter={v => formatTime(v as number)}
-              tick={axisStyle}
-              stroke="var(--border)"
-              minTickGap={40}
-            />
-            <YAxis
-              tick={axisStyle}
-              stroke="var(--border)"
-              tickFormatter={v => formatMetricValue(v as number, unit)}
-              width={64}
-              domain={[0, 'auto']}
-            />
-            <Tooltip
-              labelFormatter={v => formatTime(v as number)}
-              formatter={v => formatMetricValue(v as number, unit)}
-              contentStyle={{
-                background: 'var(--panel)',
-                border: '1px solid var(--border)',
-                borderRadius: 6,
-                fontSize: 13,
-              }}
-            />
-            {pods.length > 1 && <Legend wrapperStyle={{ fontSize: 12 }} />}
-            {pods.map((pod, i) => (
-              <Line
-                key={pod}
-                type="monotone"
-                dataKey={pod}
-                name={podLabels[pod]}
-                stroke={colorFor(i)}
-                strokeWidth={2}
-                dot={false}
-                isAnimationActive={false}
-                connectNulls
-              />
-            ))}
-          </LineChart>
-        </ResponsiveContainer>
+        <div style={{ height }}>
+          <Line data={{ datasets }} options={options} />
+        </div>
       )}
     </div>
   );
 }
 
-/** PodMetricsGrid charts CPU and memory per pod for every given testid. */
-export function PodMetricsGrid({
+/** ResourceCharts renders exactly two big charts - CPU and memory - each
+ * with one line per given test. */
+export function ResourceCharts({
   testids,
   endSeconds,
   rangeSeconds,
@@ -316,17 +280,8 @@ export function PodMetricsGrid({
 }) {
   return (
     <div className="grid2">
-      {testids.flatMap(testid =>
-        (['cpu', 'memory'] as const).map(resource => (
-          <PodMetricsChart
-            key={`${testid}/${resource}`}
-            resource={resource}
-            testid={testid}
-            endSeconds={endSeconds}
-            rangeSeconds={rangeSeconds}
-          />
-        ))
-      )}
+      <ResourceChart resource="cpu" testids={testids} endSeconds={endSeconds} rangeSeconds={rangeSeconds} />
+      <ResourceChart resource="memory" testids={testids} endSeconds={endSeconds} rangeSeconds={rangeSeconds} />
     </div>
   );
 }

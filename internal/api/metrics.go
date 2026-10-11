@@ -396,18 +396,15 @@ func (s *Server) metricsRange(w http.ResponseWriter, r *http.Request) {
 }
 
 // promMatrixResponse is the query_range shape: one entry per distinct label
-// set. Every CompareMetric.Query aggregates down to a single series
-// (sum(...)/avg(...)/max(...) with no "by"), so promRange only ever reads
-// the first result entry; promRangeMulti (podmetrics.go) reads every entry
-// and its Metric labels, for queries like "by (pod)" that return more than
-// one series on purpose.
+// set. Every CompareMetric.Query and resourceMetric.Query aggregates down to
+// a single series (sum(...)/avg(...)/max(...) with no "by"), so promRange
+// only ever reads the first result entry.
 type promMatrixResponse struct {
 	Status string `json:"status"`
 	Error  string `json:"error"`
 	Data   struct {
 		ResultType string `json:"resultType"`
 		Result     []struct {
-			Metric map[string]string    `json:"metric"`
 			Values [][2]json.RawMessage `json:"values"`
 		} `json:"result"`
 	} `json:"data"`

@@ -15,7 +15,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { colorFor, formatMetricValue, metricsAnchorFromRuns, shortPodLabels } from './format';
+import { colorFor, formatMetricValue, metricsAnchorFromRuns } from './format';
 
 describe('formatMetricValue', () => {
   it('renders undefined as a dash', () => {
@@ -99,37 +99,5 @@ describe('metricsAnchorFromRuns', () => {
     // No startTime -> the function's own 900s default lookback, plus its
     // fixed 120s padding: 900 + 120 = 1020, not the 900s floor itself.
     expect(anchor!.rangeSeconds).toBe(1020);
-  });
-});
-
-describe('shortPodLabels', () => {
-  it('strips the shared deployment-name prefix and collapses the ReplicaSet hash', () => {
-    // Real pod names from a live cluster (the exact case that prompted this
-    // function - PodMetricsChart's first version showed these verbatim and
-    // was unreadable).
-    const pods = [
-      'main-2026-10-10-py315-authentik-server-6fc6497b6-v8l5w',
-      'main-2026-10-10-py315-authentik-worker-9445c47f8-g6chq',
-      'main-2026-10-10-py315-postgresql-0',
-    ];
-    expect(shortPodLabels(pods)).toEqual({
-      'main-2026-10-10-py315-authentik-server-6fc6497b6-v8l5w': 'authentik-server-v8l5w',
-      'main-2026-10-10-py315-authentik-worker-9445c47f8-g6chq': 'authentik-worker-g6chq',
-      'main-2026-10-10-py315-postgresql-0': 'postgresql-0',
-    });
-  });
-
-  it('does not cut a shared prefix mid-word', () => {
-    // "foo" and "foobar" share every character of "foo", but collapsing to
-    // that raw prefix would leave "bar" for the second pod with no
-    // indication it was ever "foobar" - must back up to the last dash.
-    const pods = ['foo-abcdefghi-abcde', 'foobar-abcdefghi-abcde'];
-    const labels = shortPodLabels(pods);
-    expect(labels['foo-abcdefghi-abcde']).toBe('foo-abcde');
-    expect(labels['foobar-abcdefghi-abcde']).toBe('foobar-abcde');
-  });
-
-  it('leaves a single pod/StatefulSet-style name alone when there is no hash pair to collapse', () => {
-    expect(shortPodLabels(['my-app-postgresql-0'])).toEqual({ 'my-app-postgresql-0': 'my-app-postgresql-0' });
   });
 });

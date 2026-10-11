@@ -20,7 +20,7 @@
 import { useMemo } from 'react';
 import { useSearchParams } from 'react-router';
 import { api } from '../api';
-import { MetricsChart, PodMetricsGrid } from '../components/MetricsChart';
+import { MetricsChart, ResourceCharts } from '../components/MetricsChart';
 import { Alert, Empty, Field, Page } from '../components/ui';
 import { formatMetricValue, metricsAnchorFromRuns } from '../format';
 import { CompareResponse } from '../types';
@@ -202,10 +202,10 @@ export function ComparePage() {
 
           <h2>Resource usage</h2>
           <p className="muted">
-            Per-pod CPU and memory for each test's own deployment - cAdvisor tags these by pod, not by test, so
-            unlike the charts above each test gets its own pair of panels.
+            CPU and memory for each test's own deployment, summed across its pods - one line per test, same as the
+            charts above.
           </p>
-          <PodMetricsGrid testids={selected} rangeSeconds={rangeSeconds} endSeconds={anchor?.endSeconds} />
+          <ResourceCharts testids={selected} rangeSeconds={rangeSeconds} endSeconds={anchor?.endSeconds} />
         </>
       )}
     </Page>

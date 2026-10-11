@@ -24,7 +24,6 @@ import {
   AuthentikDeploymentSpec,
   Cluster,
   CompareResponse,
-  PodMetricsResponse,
   RangeResponse,
   TestCase,
   TestCaseSpec,
@@ -189,11 +188,13 @@ export const api = {
       `/api/v1/metrics/range?testids=${seg(testids.join(','))}` +
         `&metric=${seg(metric)}&start=${startSeconds}&end=${endSeconds}&step=${seg(step)}`
     ),
-  // Per-pod CPU/memory for a testid's own deployment - scoped to its
-  // namespace, not its testid label (see internal/api/podmetrics.go).
-  podMetrics: (testids: string[], resource: 'cpu' | 'memory', startSeconds: number, endSeconds: number, step: string) =>
-    request<PodMetricsResponse>(
-      `/api/v1/metrics/pods?testids=${seg(testids.join(','))}` +
+  // CPU/memory for each testid's own deployment, summed across its pods -
+  // scoped by namespace, not by a testid label the way metricsRange's
+  // queries are (cAdvisor never tags container metrics with a k6 testid).
+  // Same RangeResponse shape as metricsRange (see internal/api/podmetrics.go).
+  resourceRange: (testids: string[], resource: 'cpu' | 'memory', startSeconds: number, endSeconds: number, step: string) =>
+    request<RangeResponse>(
+      `/api/v1/metrics/resources?testids=${seg(testids.join(','))}` +
         `&resource=${seg(resource)}&start=${startSeconds}&end=${endSeconds}&step=${seg(step)}`
     ),
 

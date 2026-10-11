@@ -149,7 +149,7 @@ func (s *Server) Router() http.Handler {
 			r.Get("/metrics/query", s.proxyQuery)
 			r.Get("/metrics/compare", s.compare)
 			r.Get("/metrics/range", s.metricsRange)
-			r.Get("/metrics/pods", s.listPodMetrics)
+			r.Get("/metrics/resources", s.listResourceMetrics)
 
 			r.Get("/alerts", s.listAlerts)
 
