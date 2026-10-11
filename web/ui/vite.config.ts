@@ -13,6 +13,8 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/api': { target: apiTarget, ws: true, changeOrigin: true },
+      // Grafana Live uses a WebSocket too.
+      '/grafana-proxy': { target: apiTarget, ws: true, changeOrigin: true },
       '/healthz': { target: apiTarget },
     },
   },

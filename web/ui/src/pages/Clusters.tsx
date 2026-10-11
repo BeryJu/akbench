@@ -469,9 +469,9 @@ export function ClusterViewPage() {
                   </span>
                 )}
                 {status?.grafanaURL && (
-                  <a className="button" href={`/grafana-proxy/${encodeURIComponent(name)}/`} target="_blank" rel="noreferrer">
-                    Open Grafana ↗
-                  </a>
+                  <Link className="button" to={`/grafana/${encodeURIComponent(name)}`}>
+                    Open Grafana
+                  </Link>
                 )}
               </div>
             </>

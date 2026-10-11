@@ -48,6 +48,7 @@ const testCases = () => import('./pages/TestCases');
 const templates = () => import('./pages/TestCaseTemplates');
 const clusters = () => import('./pages/Clusters');
 const testRuns = () => import('./pages/TestRuns');
+const grafana = () => import('./pages/Grafana');
 
 function NotFound() {
   return (
@@ -92,6 +93,8 @@ const router = createBrowserRouter([
       { path: 'testruns/:name', element: page(testRuns, 'TestRunViewPage') },
       { path: 'compare', element: page(() => import('./pages/Compare'), 'ComparePage') },
       { path: 'alerts', element: page(() => import('./pages/Alerts'), 'AlertsPage') },
+      { path: 'grafana', element: page(grafana, 'GrafanaPage') },
+      { path: 'grafana/:cluster', element: page(grafana, 'GrafanaPage') },
       // Rendered by Layout's persistent ShellWorkspace, not an Outlet.
       { path: 'shell', element: null },
       { path: '*', element: <NotFound /> },

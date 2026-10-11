@@ -42,6 +42,7 @@ const navSections: { label?: string; items: { to: string; label: string; end?: b
       { to: '/testruns', label: 'Test runs' },
       { to: '/compare', label: 'Compare' },
       { to: '/alerts', label: 'Alerts' },
+      { to: '/grafana', label: 'Grafana' },
     ],
   },
 ];
