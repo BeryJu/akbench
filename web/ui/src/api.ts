@@ -24,6 +24,7 @@ import {
   AuthentikDeploymentSpec,
   Cluster,
   CompareResponse,
+  PodMetricsResponse,
   RangeResponse,
   TestCase,
   TestCaseSpec,
@@ -187,6 +188,13 @@ export const api = {
     request<RangeResponse>(
       `/api/v1/metrics/range?testids=${seg(testids.join(','))}` +
         `&metric=${seg(metric)}&start=${startSeconds}&end=${endSeconds}&step=${seg(step)}`
+    ),
+  // Per-pod CPU/memory for a testid's own deployment - scoped to its
+  // namespace, not its testid label (see internal/api/podmetrics.go).
+  podMetrics: (testids: string[], resource: 'cpu' | 'memory', startSeconds: number, endSeconds: number, step: string) =>
+    request<PodMetricsResponse>(
+      `/api/v1/metrics/pods?testids=${seg(testids.join(','))}` +
+        `&resource=${seg(resource)}&start=${startSeconds}&end=${endSeconds}&step=${seg(step)}`
     ),
 
   // -- Alerts (internal/api/alerts.go) - aggregated across every workload

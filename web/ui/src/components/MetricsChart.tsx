@@ -20,7 +20,7 @@ import { useMemo } from 'react';
 import { CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { api } from '../api';
 import { colorFor, formatMetricValue } from '../format';
-import { CompareMetric, RangeResponse } from '../types';
+import { CompareMetric, PodMetricsResponse, RangeResponse } from '../types';
 import { useResource } from '../useResource';
 
 function formatTime(seconds: number): string {
@@ -182,6 +182,150 @@ export function MetricsGrid({
           rangeSeconds={rangeSeconds}
         />
       ))}
+    </div>
+  );
+}
+
+/**
+ * PodMetricsChart charts one resource (cpu/memory), one line per pod, for a
+ * single testid's own deployment - unlike MetricsChart, which overlays
+ * multiple *tests* as lines in one chart, this overlays the *pods* of one
+ * test's deployment, since cAdvisor's container metrics are tagged by
+ * namespace/pod, never by k6 testid (see internal/api/podmetrics.go's own
+ * doc comment).
+ */
+export function PodMetricsChart({
+  resource,
+  testid,
+  rangeSeconds = 900,
+  step = '15s',
+  refreshMs = 15000,
+  height = 220,
+  endSeconds,
+}: {
+  resource: 'cpu' | 'memory';
+  testid: string;
+  rangeSeconds?: number;
+  step?: string;
+  refreshMs?: number;
+  height?: number;
+  endSeconds?: number;
+}) {
+  const { data, error } = useResource<PodMetricsResponse | undefined>(
+    () => {
+      const end = endSeconds ?? Math.floor(Date.now() / 1000);
+      return api.podMetrics([testid], resource, end - rangeSeconds, end, step);
+    },
+    [testid, resource, rangeSeconds, step, endSeconds],
+    endSeconds !== undefined ? 0 : refreshMs
+  );
+
+  const { rows, pods, unit, label } = useMemo(() => {
+    if (!data) {
+      return { rows: [] as Record<string, number>[], pods: [] as string[], unit: '', label: resource };
+    }
+    const byTime = new Map<number, Record<string, number>>();
+    const podSet = new Set<string>();
+    for (const series of data.series ?? []) {
+      podSet.add(series.pod);
+      for (const point of series.points ?? []) {
+        const row = byTime.get(point.time) ?? { time: point.time };
+        row[series.pod] = point.value;
+        byTime.set(point.time, row);
+      }
+    }
+    return {
+      rows: Array.from(byTime.values()).sort((a, b) => a.time - b.time),
+      pods: Array.from(podSet).sort(),
+      unit: data.unit,
+      label: data.label,
+    };
+  }, [data, resource]);
+
+  return (
+    <div className="panel">
+      <h3>
+        {label} <span className="muted">({testid})</span>
+      </h3>
+      {error && <div className="alert error">{error}</div>}
+      {rows.length === 0 ? (
+        <div className="muted" style={{ height, display: 'grid', placeItems: 'center' }}>
+          No data in this window yet.
+        </div>
+      ) : (
+        <ResponsiveContainer width="100%" height={height}>
+          <LineChart data={rows} margin={{ top: 4, right: 12, left: 0, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+            <XAxis
+              dataKey="time"
+              type="number"
+              domain={['dataMin', 'dataMax']}
+              tickFormatter={v => formatTime(v as number)}
+              tick={axisStyle}
+              stroke="var(--border)"
+              minTickGap={40}
+            />
+            <YAxis
+              tick={axisStyle}
+              stroke="var(--border)"
+              tickFormatter={v => formatMetricValue(v as number, unit)}
+              width={64}
+              domain={[0, 'auto']}
+            />
+            <Tooltip
+              labelFormatter={v => formatTime(v as number)}
+              formatter={v => formatMetricValue(v as number, unit)}
+              contentStyle={{
+                background: 'var(--panel)',
+                border: '1px solid var(--border)',
+                borderRadius: 6,
+                fontSize: 13,
+              }}
+            />
+            {pods.length > 1 && <Legend wrapperStyle={{ fontSize: 12 }} />}
+            {pods.map((pod, i) => (
+              <Line
+                key={pod}
+                type="monotone"
+                dataKey={pod}
+                name={pod}
+                stroke={colorFor(i)}
+                strokeWidth={2}
+                dot={false}
+                isAnimationActive={false}
+                connectNulls
+              />
+            ))}
+          </LineChart>
+        </ResponsiveContainer>
+      )}
+    </div>
+  );
+}
+
+/** PodMetricsGrid charts CPU and memory per pod for every given testid. */
+export function PodMetricsGrid({
+  testids,
+  endSeconds,
+  rangeSeconds,
+}: {
+  testids: string[];
+  endSeconds?: number;
+  rangeSeconds?: number;
+}) {
+  return (
+    <div className="grid2">
+      {testids.flatMap(testid =>
+        (['cpu', 'memory'] as const).map(resource => (
+          <PodMetricsChart
+            key={`${testid}/${resource}`}
+            resource={resource}
+            testid={testid}
+            endSeconds={endSeconds}
+            rangeSeconds={rangeSeconds}
+          />
+        ))
+      )}
     </div>
   );
 }

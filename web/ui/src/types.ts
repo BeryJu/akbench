@@ -271,6 +271,22 @@ export interface RangeResponse {
   series: RangeSeries[];
 }
 
+// PodRangeSeries/PodMetricsResponse mirror internal/api/podmetrics.go -
+// per-pod resource usage for a testid's own deployment, not per-testid like
+// RangeSeries above (cAdvisor tags by namespace/pod, never by k6 testid).
+export interface PodRangeSeries {
+  testid: string;
+  pod: string;
+  points: RangePoint[];
+}
+
+export interface PodMetricsResponse {
+  resource: string;
+  label: string;
+  unit: string;
+  series: PodRangeSeries[];
+}
+
 /** readyCondition is the one condition every list view renders. */
 export function readyCondition(conditions?: Condition[]): Condition | undefined {
   return conditions?.find(c => c.type === 'Ready');

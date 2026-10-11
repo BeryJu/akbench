@@ -27,7 +27,25 @@ export function formatMetricValue(value: number | undefined, unit: string): stri
   if (unit === 's') {
     return value < 1 ? `${(value * 1000).toFixed(0)} ms` : `${value.toFixed(2)} s`;
   }
+  if (unit === 'cores') {
+    return value < 1 ? `${Math.round(value * 1000)}m` : `${value.toFixed(2)} cores`;
+  }
+  if (unit === 'bytes') {
+    return formatBytes(value);
+  }
   return value >= 100 ? value.toFixed(0) : value.toFixed(2);
+}
+
+const BYTE_UNITS = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
+
+function formatBytes(value: number): string {
+  let scaled = value;
+  let unitIndex = 0;
+  while (Math.abs(scaled) >= 1024 && unitIndex < BYTE_UNITS.length - 1) {
+    scaled /= 1024;
+    unitIndex++;
+  }
+  return `${scaled.toFixed(unitIndex === 0 ? 0 : 1)} ${BYTE_UNITS[unitIndex]}`;
 }
 
 // A small qualitative palette, cycled by index so the same test keeps the
