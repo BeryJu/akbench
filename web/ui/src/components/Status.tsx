@@ -33,6 +33,8 @@ function phaseClass(phase?: string): string {
     case 'Failed':
     case 'False':
       return 'err';
+    case 'Not ready':
+      return 'warn';
     case 'Reconciling':
     case 'Running':
     case 'Provisioning':

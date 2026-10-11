@@ -48,6 +48,47 @@ function formatBytes(value: number): string {
   return `${scaled.toFixed(unitIndex === 0 ? 0 : 1)} ${BYTE_UNITS[unitIndex]}`;
 }
 
+/** formatDuration renders an elapsed number of seconds as its two largest
+ * units ("3d 4h", "19h 12m", "7m") - how long a Burn test has been running. */
+export function formatDuration(seconds: number): string {
+  const s = Math.max(0, Math.floor(seconds));
+  if (s < 60) {
+    return `${s}s`;
+  }
+  const minutes = Math.floor(s / 60);
+  if (minutes < 60) {
+    return `${minutes}m`;
+  }
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) {
+    return `${hours}h ${minutes % 60}m`;
+  }
+  return `${Math.floor(hours / 24)}d ${hours % 24}h`;
+}
+
+/** relativeDelta is value's change relative to baseline (0.1 = 10% higher),
+ * or undefined when either side is missing or the baseline is zero. */
+export function relativeDelta(value: number | undefined, baseline: number | undefined): number | undefined {
+  if (value === undefined || baseline === undefined || baseline === 0) {
+    return undefined;
+  }
+  return (value - baseline) / baseline;
+}
+
+/** stepFor picks a range query step that keeps a chart around 240 points,
+ * never finer than 15s - a 7 day range at a fixed 15s step would be ~40k
+ * points per series, past Prometheus' own 11k-point limit. */
+export function stepFor(rangeSeconds: number): string {
+  return `${Math.max(15, Math.ceil(rangeSeconds / 240))}s`;
+}
+
+/** targetNameOf is the k6 `target` tag a deployment's own metrics carry -
+ * mirrors internal/api's compareTargetsForTestID: spec.targetName, falling
+ * back to the object name. */
+export function targetNameOf(deployment: { metadata: { name: string }; spec: { targetName?: string } }): string {
+  return deployment.spec.targetName || deployment.metadata.name;
+}
+
 // A small qualitative palette, cycled by index so the same test keeps the
 // same color across every chart on a page.
 const palette = [

@@ -30,7 +30,7 @@ import {
 } from 'chart.js';
 import { Line } from 'react-chartjs-2';
 import { api } from '../api';
-import { colorFor, formatMetricValue } from '../format';
+import { colorFor, formatMetricValue, stepFor } from '../format';
 import { CompareMetric, RangeResponse } from '../types';
 import { useResource } from '../useResource';
 
@@ -138,7 +138,7 @@ export function MetricsChart({
   metric,
   testids,
   rangeSeconds = 900,
-  step = '15s',
+  step,
   refreshMs = 15000,
   height = 220,
   endSeconds,
@@ -146,6 +146,7 @@ export function MetricsChart({
   metric: string;
   testids: string[];
   rangeSeconds?: number;
+  /** Defaults to stepFor(rangeSeconds). */
   step?: string;
   refreshMs?: number;
   height?: number;
@@ -159,7 +160,7 @@ export function MetricsChart({
         return Promise.resolve(undefined);
       }
       const end = endSeconds ?? Math.floor(Date.now() / 1000);
-      return api.metricsRange(testids, metric, end - rangeSeconds, end, step);
+      return api.metricsRange(testids, metric, end - rangeSeconds, end, step ?? stepFor(rangeSeconds));
     },
     [testids.join(','), metric, rangeSeconds, step, endSeconds],
     // A fixed-in-the-past window never gains new data - don't poll it.
@@ -229,7 +230,7 @@ export function ResourceChart({
   resource,
   testids,
   rangeSeconds = 900,
-  step = '15s',
+  step,
   refreshMs = 15000,
   height = 320,
   endSeconds,
@@ -237,6 +238,7 @@ export function ResourceChart({
   resource: 'cpu' | 'memory';
   testids: string[];
   rangeSeconds?: number;
+  /** Defaults to stepFor(rangeSeconds). */
   step?: string;
   refreshMs?: number;
   height?: number;
@@ -248,7 +250,7 @@ export function ResourceChart({
         return Promise.resolve(undefined);
       }
       const end = endSeconds ?? Math.floor(Date.now() / 1000);
-      return api.resourceRange(testids, resource, end - rangeSeconds, end, step);
+      return api.resourceRange(testids, resource, end - rangeSeconds, end, step ?? stepFor(rangeSeconds));
     },
     [testids.join(','), resource, rangeSeconds, step, endSeconds],
     endSeconds !== undefined ? 0 : refreshMs

@@ -46,7 +46,7 @@ export function TestRunsPage() {
             render: r => <Link to={`/testcases/${r.spec.testCaseRef.name}`}>{r.spec.testCaseRef.name}</Link>,
           },
           {
-            label: 'Deployment',
+            label: 'Target',
             // Unset on a run created before multi-deployment TestCases
             // existed, in which case it ran against that TestCase's own
             // (only) deployment - not worth an extra fetch per row just to
@@ -80,6 +80,8 @@ export function TestRunsPage() {
   );
 }
 
+const SIBLING_WINDOW_MS = 10000;
+
 export function TestRunViewPage() {
   const { name = '' } = useParams();
   const run = useResource(() => api.testRun(name), [name], 5000);
@@ -106,10 +108,55 @@ export function TestRunViewPage() {
   // Metrics scoped to exactly this run's own window.
   const anchor = run.data ? metricsAnchorFromRuns([run.data]) : undefined;
   const status = run.data?.status;
+  // "Run now" on a multi-deployment TestCase starts one TestRun per target
+  // in the same request - siblings are that test case's runs created within
+  // a few seconds of this one.
+  const testCaseRuns = useResource(
+    () => (testCaseName ? api.testRuns(testCaseName) : Promise.resolve([])),
+    [testCaseName],
+    10000
+  );
+  const created = Date.parse(run.data?.metadata.creationTimestamp ?? '');
+  const batch = (testCaseRuns.data ?? [])
+    .filter(r => Math.abs(Date.parse(r.metadata.creationTimestamp ?? '') - created) <= SIBLING_WINDOW_MS)
+    .sort((a, b) => (a.spec.deploymentRef?.name ?? '').localeCompare(b.spec.deploymentRef?.name ?? ''));
 
   return (
-    <Page title={name} subtitle={testCaseName && <>Run of <Link to={`/testcases/${testCaseName}`}>{testCaseName}</Link></>}>
+    <Page
+      title={<span className="mono">{name}</span>}
+      subtitle={
+        testCaseName && (
+          <>
+            Run of <Link to={`/testcases/${testCaseName}`}>{testCaseName}</Link>
+            {deploymentName && (
+              <>
+                {' '}against <Link to={`/deployments/${deploymentName}`}>{deploymentName}</Link>
+              </>
+            )}
+          </>
+        )
+      }
+    >
       <Alert>{run.error}</Alert>
+      {batch.length > 1 && (
+        <div className="panel chips">
+          <span className="muted">Run now started {batch.length} runs, one per target:</span>
+          {batch.map(r =>
+            r.metadata.name === name ? (
+              <span key={r.metadata.name} className="chip current" aria-current="page">
+                {r.spec.deploymentRef?.name ?? r.metadata.name} <Badge value={r.status?.phase ?? 'Pending'} />
+              </span>
+            ) : (
+              <Link key={r.metadata.name} className="chip" to={`/testruns/${r.metadata.name}`}>
+                {r.spec.deploymentRef?.name ?? r.metadata.name} <Badge value={r.status?.phase ?? 'Pending'} />
+              </Link>
+            )
+          )}
+          <Link to={`/testcases/${testCaseName}`} style={{ marginLeft: 'auto' }}>
+            Compare targets
+          </Link>
+        </div>
+      )}
       {run.data && (
         <div className="panel">
           <div className="row" style={{ marginBottom: 8 }}>

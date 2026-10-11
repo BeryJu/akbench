@@ -110,11 +110,41 @@ export function Field({ label, help, children }: { label: string; help?: ReactNo
   );
 }
 
-export function Stat({ value, label }: { value: ReactNode; label: string }) {
+export function Stat({ value, label, hint }: { value: ReactNode; label: string; hint?: ReactNode }) {
   return (
     <div className="panel stat">
       <div className="value">{value}</div>
       <div className="label">{label}</div>
+      {hint && <div className="hint">{hint}</div>}
+    </div>
+  );
+}
+
+/** Segmented is a small single-choice toggle (time ranges, windows). */
+export function Segmented<T extends string | number>({
+  label,
+  options,
+  value,
+  onChange,
+}: {
+  label: string;
+  options: { value: T; label: string }[];
+  value: T;
+  onChange: (value: T) => void;
+}) {
+  return (
+    <div className="seg" role="group" aria-label={label}>
+      {options.map(o => (
+        <button
+          key={o.value}
+          type="button"
+          className={o.value === value ? 'on' : undefined}
+          aria-pressed={o.value === value}
+          onClick={() => onChange(o.value)}
+        >
+          {o.label}
+        </button>
+      ))}
     </div>
   );
 }

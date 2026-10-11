@@ -15,13 +15,14 @@
  */
 
 import { FormEvent, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import { api } from '../api';
 import { CodeEditor } from '../components/CodeEditor';
-import { MetricsGrid } from '../components/MetricsChart';
+import { MetricsGrid, ResourceCharts } from '../components/MetricsChart';
 import { ObjectYaml } from '../components/ObjectYaml';
 import { Badge, ConditionList, StatusBadge } from '../components/Status';
-import { Alert, confirmAndRun, errorMessage, Field, formatTimestamp, Page, Table } from '../components/ui';
+import { buildTargetRows, burningFor, TargetTable } from '../components/Targets';
+import { Alert, confirmAndRun, Empty, errorMessage, Field, formatTimestamp, Page, Segmented, Table } from '../components/ui';
 import { metricsAnchorFromRuns } from '../format';
 import { shellLinkForCluster } from '../shell/links';
 import { TestCase, TestCaseSpec, TestProfile, testCaseDeployments } from '../types';
@@ -47,7 +48,7 @@ export function TestCasesPage() {
   return (
     <Page
       title="Test cases"
-      subtitle="k6 load tests against a deployment. Quick runs once per test run; Burn runs until stopped."
+      subtitle="k6 load tests against one or more deployments. Burn runs until stopped; Quick runs once per test run."
       actions={
         <Link className="button primary" to="/testcases/new">
           New test case
@@ -120,11 +121,25 @@ export function TestCasesPage() {
 
 const INLINE_TEMPLATE = '__inline__';
 
+const PROFILES: { value: TestProfile; title: string; description: string }[] = [
+  {
+    value: 'Burn',
+    title: 'Burn',
+    description:
+      'Keeps every target under steady load until you stop it. Change a deployment while it runs and watch the difference live.',
+  },
+  {
+    value: 'Quick',
+    title: 'Quick',
+    description: 'A bounded number of logins per virtual user, started with Run now - one test run per target.',
+  },
+];
+
 function emptySpec(): TestCaseSpec {
   return {
     deploymentRefs: [],
     template: 'login',
-    profile: 'Quick',
+    profile: 'Burn',
     vus: 8,
     iterations: 1000,
     flow: 'default-authentication-flow',
@@ -192,24 +207,27 @@ function TestCaseForm({ existing }: { existing?: TestCase }) {
             <Field label="Name" help="Also the k6 testid every metric is split on">
               <input required value={name} disabled={Boolean(existing)} onChange={e => setName(e.target.value)} />
             </Field>
-            <Field
-              label="Deployment(s) to drive"
-              help="Select more than one to run this same test independently against each - useful for comparing a test's own performance across deployments."
-            >
-              <div className="row">
+            <div className="field">
+              <span id="targets-label">Target deployments</span>
+              <div className="checklist" role="group" aria-labelledby="targets-label">
                 {(deployments.data ?? []).map(d => (
-                  <label className="check" key={d.metadata.name} style={{ marginRight: 12 }}>
+                  <label key={d.metadata.name}>
                     <input
                       type="checkbox"
                       checked={selectedDeployments.includes(d.metadata.name)}
                       onChange={() => toggleDeployment(d.metadata.name)}
                     />
-                    {d.metadata.name}
+                    <span className="mono">{d.metadata.name}</span>
+                    <span className="meta">{d.spec.authentik?.tag ?? 'chart default'}</span>
                   </label>
                 ))}
                 {deployments.data?.length === 0 && <span className="muted">No deployments yet.</span>}
               </div>
-            </Field>
+              <span className="help">
+                Same script and load against each, tagged with its own k6 target. Pick two or more to compare versions
+                or setups side by side; Run now starts one test run per target.
+              </span>
+            </div>
           </div>
         </fieldset>
 
@@ -248,13 +266,24 @@ function TestCaseForm({ existing }: { existing?: TestCase }) {
 
         <fieldset>
           <legend>Load</legend>
+          <div className="choice-cards" role="radiogroup" aria-label="Profile">
+            {PROFILES.map(p => (
+              <label className="choice-card" key={p.value}>
+                <input
+                  type="radio"
+                  name="profile"
+                  value={p.value}
+                  checked={spec.profile === p.value}
+                  onChange={() => patch({ profile: p.value })}
+                />
+                <span>
+                  <strong>{p.title}</strong>
+                  <span className="muted">{p.description}</span>
+                </span>
+              </label>
+            ))}
+          </div>
           <div className="fields">
-            <Field label="Profile">
-              <select value={spec.profile} onChange={e => patch({ profile: e.target.value as TestProfile })}>
-                <option value="Quick">Quick - a bounded run, started from a test run</option>
-                <option value="Burn">Burn - sustained load until stopped</option>
-              </select>
-            </Field>
             <Field label="Virtual users">
               <input type="number" min={1} value={spec.vus} onChange={e => patch({ vus: Number(e.target.value) })} />
             </Field>
@@ -332,97 +361,174 @@ export function TestCaseEditPage() {
   return existing.data ? <TestCaseForm key={name} existing={existing.data} /> : null;
 }
 
+const LIVE_WINDOWS = [
+  { value: '1m', label: 'Last 1 m' },
+  { value: '5m', label: 'Last 5 m' },
+  { value: '15m', label: 'Last 15 m' },
+];
+const DEFAULT_LIVE_WINDOW = '1m';
+const TIMELINE_RANGES = [
+  { value: 3600, label: '1 h' },
+  { value: 21600, label: '6 h' },
+  { value: 86400, label: '24 h' },
+  { value: 604800, label: '7 d' },
+];
+const DEFAULT_TIMELINE_RANGE = 21600;
+
 export function TestCaseViewPage() {
   const { name = '' } = useParams();
   const testCase = useResource(() => api.testCase(name), [name], 10000);
+  const deployments = useResource(() => api.deployments(), [], 30000);
+  const runs = useResource(() => api.testRuns(name), [name], 10000);
   const tc = testCase.data;
   const profile = tc?.spec.profile;
-  const deploymentRefs = tc ? testCaseDeployments(tc.spec) : [];
-  // Fetched so each deployment row can resolve its own cluster (for the "k6
-  // logs" shell link) - a multi-deployment TestCase can legitimately have
-  // targets on different clusters.
-  const deployments = useResource(
-    () => Promise.all(deploymentRefs.map(ref => api.deployment(ref.name).catch(() => undefined))),
-    [deploymentRefs.map(r => r.name).join(',')],
-    0
-  );
-  const deploymentByName = new Map((deployments.data ?? []).filter(Boolean).map(d => [d!.metadata.name, d!]));
-  const runs = useResource(() => api.testRuns(name), [name], 10000);
+
+  // Window, timeline range and baseline live in the URL, so a comparison
+  // can be shared exactly as configured.
+  const [params, setParams] = useSearchParams();
+  function updateParams(patch: Record<string, string | undefined>) {
+    const next = new URLSearchParams(params);
+    for (const [key, value] of Object.entries(patch)) {
+      if (value === undefined) {
+        next.delete(key);
+      } else {
+        next.set(key, value);
+      }
+    }
+    setParams(next, { replace: true });
+  }
+  const windowParam = params.get('window');
+  const liveWindow = LIVE_WINDOWS.some(w => w.value === windowParam) ? windowParam! : DEFAULT_LIVE_WINDOW;
+  const rangeParam = Number(params.get('range'));
+  const timelineRange = TIMELINE_RANGES.some(r => r.value === rangeParam) ? rangeParam : DEFAULT_TIMELINE_RANGE;
+
   const sortedRuns = [...(runs.data ?? [])].sort((a, b) =>
     (b.metadata.creationTimestamp ?? '').localeCompare(a.metadata.creationTimestamp ?? '')
   );
   // Burn runs continuously, so "now" is right for it; a Quick test's data
   // ends with its latest completed run.
   const anchor = profile === 'Quick' ? metricsAnchorFromRuns(runs.data ?? []) : undefined;
+  const summaryWindow = profile === 'Quick' ? '5m' : liveWindow;
+  const summary = useResource(
+    () => (profile ? api.compare([name], summaryWindow, anchor?.endSeconds) : Promise.resolve(undefined)),
+    [name, profile, summaryWindow, anchor?.endSeconds],
+    15000
+  );
+  const rows = tc ? buildTargetRows(tc, summary.data?.results ?? [], deployments.data ?? []) : [];
+  const baseline = params.get('baseline') ?? rows[0]?.target;
+  const since = tc && profile === 'Burn' ? burningFor(tc) : undefined;
 
-  const [running, setRunning] = useState(false);
-  const [runError, setRunError] = useState<string>();
+  const [busy, setBusy] = useState(false);
+  const [actionError, setActionError] = useState<string>();
   const [notice, setNotice] = useState<string>();
 
   async function runNow() {
-    setRunning(true);
-    setRunError(undefined);
+    setBusy(true);
+    setActionError(undefined);
     try {
       const started = await api.runTestCase(name);
-      setNotice(started.length > 1 ? `Started ${started.length} test runs (one per deployment)` : 'Started test run');
+      setNotice(started.length > 1 ? `Started ${started.length} test runs, one per target` : 'Started test run');
       runs.reload();
     } catch (err) {
-      setRunError(errorMessage(err));
+      setActionError(errorMessage(err));
     } finally {
-      setRunning(false);
+      setBusy(false);
     }
+  }
+
+  function switchToQuick() {
+    if (!tc) {
+      return;
+    }
+    void confirmAndRun(
+      `Stop the burn on all ${rows.length} target(s) by switching "${name}" to Quick?`,
+      () => api.updateTestCase(name, { spec: { ...tc.spec, profile: 'Quick' } }),
+      testCase.reload
+    );
   }
 
   return (
     <Page
-      title={name}
+      title={<span className="mono">{name}</span>}
       subtitle={
-        tc &&
-        `${tc.spec.profile} test against ${deploymentRefs.map(r => r.name).join(', ') || '(no deployment set)'}, ${tc.spec.vus} VUs`
+        tc && (
+          <>
+            {tc.spec.profile} · {rows.length} {rows.length === 1 ? 'target' : 'targets'} · {tc.spec.vus} VUs
+            {rows.length > 1 ? ' each' : ''} · {tc.spec.inline !== undefined ? 'inline script' : `template ${tc.spec.template ?? 'login'}`}
+            {since && ` · burning for ${since}`}
+          </>
+        )
       }
       actions={
         <>
+          {tc && (
+            <StatusBadge kind="testcase" name={name} namespace={tc.metadata.namespace} phase={tc.status?.phase} conditions={tc.status?.conditions} />
+          )}
           {profile === 'Quick' && (
-            <button className="primary" disabled={running} onClick={() => void runNow()}>
-              {running ? 'Starting…' : 'Run now'}
+            <button className="primary" disabled={busy} onClick={() => void runNow()}>
+              {busy ? 'Starting…' : 'Run now'}
             </button>
           )}
           <Link className="button" to={`/testcases/${name}/edit`}>
-            Edit
+            {profile === 'Burn' ? 'Change load or targets' : 'Edit'}
           </Link>
+          {profile === 'Burn' && (
+            <button className="danger" onClick={switchToQuick}>
+              Stop burn
+            </button>
+          )}
         </>
       }
     >
-      <Alert>{testCase.error ?? runError}</Alert>
+      <Alert>{testCase.error ?? actionError ?? summary.error}</Alert>
       <Alert kind="success">{notice}</Alert>
-      {tc && (
-        <div className="panel">
-          <div className="row" style={{ marginBottom: 8 }}>
-            <StatusBadge kind="testcase" name={name} namespace={tc.metadata.namespace} phase={tc.status?.phase} conditions={tc.status?.conditions} />
+
+      <div className="section-head">
+        <div>
+          <h2>Targets</h2>
+          <div className="muted">
+            {profile === 'Quick'
+              ? anchor
+                ? `The last 5 minutes of the latest completed run (${new Date(anchor.endSeconds * 1000).toLocaleString()}).`
+                : 'Shows once a run has completed.'
+              : 'Same script and load on each target. Δ is relative to the baseline target.'}
           </div>
-          {deploymentRefs.map(ref => {
-            const depStatus = tc.status?.deployments?.find(d => d.name === ref.name);
-            const cluster = tc.spec.runnerClusterRef?.name ?? deploymentByName.get(ref.name)?.spec.clusterRef?.name;
-            return (
-              <div className="row" key={ref.name} style={{ marginBottom: 4 }}>
-                <Link to={`/deployments/${ref.name}`}>Deployment: {ref.name}</Link>
-                {depStatus && <Badge value={depStatus.ready ? 'Ready' : 'Not ready'} />}
-                {depStatus?.burnWorkloadRef && tc.metadata.namespace && (
-                  <Link
-                    className="button small"
-                    to={shellLinkForCluster(
-                      cluster,
-                      `kubectl logs -n ${tc.metadata.namespace} deploy/${depStatus.burnWorkloadRef.name} -f --tail=200`
-                    )}
-                  >
-                    k6 logs
-                  </Link>
-                )}
-              </div>
-            );
-          })}
-          <ConditionList conditions={tc.status?.conditions} />
         </div>
+        {profile === 'Burn' && (
+          <Segmented
+            label="Summary window"
+            options={LIVE_WINDOWS}
+            value={liveWindow}
+            onChange={v => updateParams({ window: v === DEFAULT_LIVE_WINDOW ? undefined : v })}
+          />
+        )}
+      </div>
+      {tc && rows.length === 0 ? (
+        <Empty>This test case has no target deployments - edit it to pick at least one.</Empty>
+      ) : (
+        <TargetTable
+          rows={rows}
+          metrics={summary.data?.metrics ?? []}
+          baseline={baseline}
+          onBaseline={target => updateParams({ baseline: target === rows[0]?.target ? undefined : target })}
+          actions={row => {
+            const cluster = tc?.spec.runnerClusterRef?.name ?? row.deployment?.spec.clusterRef?.name;
+            return (
+              row.burnWorkload &&
+              tc?.metadata.namespace && (
+                <Link
+                  className="button small"
+                  to={shellLinkForCluster(
+                    cluster,
+                    `kubectl logs -n ${tc.metadata.namespace} deploy/${row.burnWorkload} -f --tail=200`
+                  )}
+                >
+                  k6 logs
+                </Link>
+              )
+            );
+          }}
+        />
       )}
 
       {profile === 'Quick' && (
@@ -434,6 +540,7 @@ export function TestCaseViewPage() {
             empty="No runs yet."
             columns={[
               { label: 'Run', render: r => <Link to={`/testruns/${r.metadata.name}`}>{r.metadata.name}</Link> },
+              { label: 'Target', render: r => r.spec.deploymentRef?.name ?? <span className="muted">-</span> },
               { label: 'Phase', render: r => <Badge value={r.status?.phase ?? 'Pending'} /> },
               { label: 'Started', render: r => formatTimestamp(r.status?.startTime ?? r.metadata.creationTimestamp) },
               { label: 'Completed', render: r => formatTimestamp(r.status?.completionTime) },
@@ -442,12 +549,41 @@ export function TestCaseViewPage() {
         </>
       )}
 
-      <h2>Metrics</h2>
+      <div className="section-head">
+        <div>
+          <h2>Timeline</h2>
+          <div className="muted">One line per target, colored as in the table above.</div>
+        </div>
+        {profile === 'Burn' && (
+          <Segmented
+            label="Time range"
+            options={TIMELINE_RANGES}
+            value={timelineRange}
+            onChange={v => updateParams({ range: v === DEFAULT_TIMELINE_RANGE ? undefined : String(v) })}
+          />
+        )}
+      </div>
       {profile === 'Quick' && !anchor && (runs.data?.length ?? 0) > 0 && (
         <Alert kind="info">Latest run is still in progress - metrics will show once it completes.</Alert>
       )}
-      <MetricsGrid testids={[name]} endSeconds={anchor?.endSeconds} rangeSeconds={anchor?.rangeSeconds} />
+      <MetricsGrid
+        testids={[name]}
+        endSeconds={anchor?.endSeconds}
+        rangeSeconds={profile === 'Quick' ? anchor?.rangeSeconds : timelineRange}
+      />
+      <h2>Resource usage</h2>
+      <ResourceCharts
+        testids={[name]}
+        endSeconds={anchor?.endSeconds}
+        rangeSeconds={profile === 'Quick' ? anchor?.rangeSeconds : timelineRange}
+      />
 
+      {tc && (
+        <details>
+          <summary>Conditions</summary>
+          <ConditionList conditions={tc.status?.conditions} />
+        </details>
+      )}
       <ObjectYaml object={tc} />
     </Page>
   );

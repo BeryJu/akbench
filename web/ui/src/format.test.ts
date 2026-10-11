@@ -15,7 +15,15 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { colorFor, formatMetricValue, metricsAnchorFromRuns } from './format';
+import {
+  colorFor,
+  formatDuration,
+  formatMetricValue,
+  metricsAnchorFromRuns,
+  relativeDelta,
+  stepFor,
+  targetNameOf,
+} from './format';
 
 describe('formatMetricValue', () => {
   it('renders undefined as a dash', () => {
@@ -99,5 +107,51 @@ describe('metricsAnchorFromRuns', () => {
     // No startTime -> the function's own 900s default lookback, plus its
     // fixed 120s padding: 900 + 120 = 1020, not the 900s floor itself.
     expect(anchor!.rangeSeconds).toBe(1020);
+  });
+});
+
+describe('formatDuration', () => {
+  it('renders seconds and minutes as a single unit', () => {
+    expect(formatDuration(42)).toBe('42s');
+    expect(formatDuration(7 * 60 + 5)).toBe('7m');
+  });
+
+  it('renders hours and days as their two largest units', () => {
+    expect(formatDuration(19 * 3600 + 12 * 60)).toBe('19h 12m');
+    expect(formatDuration(3 * 86400 + 4 * 3600 + 59)).toBe('3d 4h');
+  });
+
+  it('clamps a negative duration (clock skew) to zero', () => {
+    expect(formatDuration(-5)).toBe('0s');
+  });
+});
+
+describe('relativeDelta', () => {
+  it('is the change relative to the baseline', () => {
+    expect(relativeDelta(0.362, 0.421)).toBeCloseTo(-0.140, 3);
+    expect(relativeDelta(194, 181)).toBeCloseTo(0.0718, 3);
+  });
+
+  it('is undefined without both values or with a zero baseline', () => {
+    expect(relativeDelta(undefined, 1)).toBeUndefined();
+    expect(relativeDelta(1, undefined)).toBeUndefined();
+    expect(relativeDelta(1, 0)).toBeUndefined();
+  });
+});
+
+describe('stepFor', () => {
+  it('never goes finer than 15s', () => {
+    expect(stepFor(900)).toBe('15s');
+  });
+
+  it('keeps long ranges to about 240 points', () => {
+    expect(stepFor(7 * 86400)).toBe('2520s');
+  });
+});
+
+describe('targetNameOf', () => {
+  it('prefers spec.targetName and falls back to the object name', () => {
+    expect(targetNameOf({ metadata: { name: 'ak-a' }, spec: { targetName: 'a' } })).toBe('a');
+    expect(targetNameOf({ metadata: { name: 'ak-a' }, spec: {} })).toBe('ak-a');
   });
 });
