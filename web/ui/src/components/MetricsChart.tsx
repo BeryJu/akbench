@@ -19,7 +19,7 @@
 import { useMemo } from 'react';
 import { CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { api } from '../api';
-import { colorFor, formatMetricValue } from '../format';
+import { colorFor, formatMetricValue, shortPodLabels } from '../format';
 import { CompareMetric, PodMetricsResponse, RangeResponse } from '../types';
 import { useResource } from '../useResource';
 
@@ -241,6 +241,7 @@ export function PodMetricsChart({
       label: data.label,
     };
   }, [data, resource]);
+  const podLabels = useMemo(() => shortPodLabels(pods), [pods]);
 
   return (
     <div className="panel">
@@ -288,7 +289,7 @@ export function PodMetricsChart({
                 key={pod}
                 type="monotone"
                 dataKey={pod}
-                name={pod}
+                name={podLabels[pod]}
                 stroke={colorFor(i)}
                 strokeWidth={2}
                 dot={false}

@@ -112,6 +112,9 @@ func TestListPodMetricsResolvesDeploymentNamespace(t *testing.T) {
 	if !strings.Contains(*gotQuery, "[1m]") {
 		t.Errorf("cpu query missing its rate() window: %q", *gotQuery)
 	}
+	if !strings.Contains(*gotQuery, `kube_pod_owner{namespace="ak-topo", owner_kind!="Job"}`) {
+		t.Errorf("query doesn't exclude one-shot Job pods (blueprint/postgres-role-fix): %q", *gotQuery)
+	}
 }
 
 func TestListPodMetricsRejectsUnknownResource(t *testing.T) {

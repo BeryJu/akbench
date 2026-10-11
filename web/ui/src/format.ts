@@ -14,6 +14,54 @@
  * limitations under the License.
  */
 
+/**
+ * shortPodLabels maps each full pod name to a short, readable label for a
+ * chart legend - a raw Kubernetes pod name like
+ * "main-2026-10-10-py315-authentik-server-6fc6497b6-v8l5w" is unreadable
+ * repeated across half a dozen legend entries (confirmed: that's exactly
+ * what PodMetricsChart's first version showed). Two steps, both generic
+ * (not specific to this project's own naming):
+ *  1. Strip whatever dash-aligned prefix every pod in the set shares - for
+ *     pods from the same deployment, that's the deployment name itself,
+ *     already redundant with the chart's own title.
+ *  2. Collapse a trailing Deployment-style "-<replicaset-hash>-<pod-hash>"
+ *     down to just "-<pod-hash>" - the ReplicaSet hash segment changes on
+ *     every rollout and carries no information a human reads meaning from,
+ *     unlike StatefulSet pods ("postgresql-0"), which this leaves alone.
+ */
+export function shortPodLabels(pods: string[]): Record<string, string> {
+  const prefix = commonDashPrefix(pods);
+  const out: Record<string, string> = {};
+  for (const pod of pods) {
+    const stripped = prefix && pod.startsWith(prefix) ? pod.slice(prefix.length) : pod;
+    out[pod] = collapseReplicaSetHash(stripped);
+  }
+  return out;
+}
+
+function commonDashPrefix(names: string[]): string {
+  if (names.length < 2) {
+    return '';
+  }
+  let prefix = names[0];
+  for (const name of names.slice(1)) {
+    let i = 0;
+    while (i < prefix.length && i < name.length && prefix[i] === name[i]) {
+      i++;
+    }
+    prefix = prefix.slice(0, i);
+  }
+  // Trim back to the last '-' so a shared word doesn't get cut in half
+  // (e.g. two deployments "foo" and "foobar" sharing namesake don't collide).
+  const lastDash = prefix.lastIndexOf('-');
+  return lastDash >= 0 ? prefix.slice(0, lastDash + 1) : '';
+}
+
+function collapseReplicaSetHash(name: string): string {
+  const match = /^(.*)-[0-9a-z]{8,10}-([0-9a-z]{5})$/.exec(name);
+  return match ? `${match[1]}-${match[2]}` : name;
+}
+
 /** formatMetricValue renders a CompareMetric value the same way in the
  * compare table and every chart tooltip/axis, so a number means the same
  * thing wherever it appears. */

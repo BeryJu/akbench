@@ -55,17 +55,25 @@ type podMetric struct {
 // podMetrics is keyed by the ?resource= query param. container!="",
 // container!="POD" excludes cAdvisor's own per-pod aggregate/pause-container
 // series, the same filter every panel in authentik.json already uses.
+// "and on (pod) kube_pod_owner{owner_kind!=\"Job\"}" additionally excludes
+// one-shot Job pods (the fixtures blueprint import, the postgres role-fix
+// job) - confirmed live these otherwise clutter the chart/legend alongside
+// the deployment's own ongoing server/worker/postgres pods, which is what
+// this panel is actually meant to show. %[1]q is reused for both namespace
+// filters (the cAdvisor metric and the kube_pod_owner join both need it).
 var podMetrics = map[string]podMetric{
 	"cpu": {
 		Label:       "CPU by pod",
 		Unit:        "cores",
 		NeedsWindow: true,
-		Query:       `sum by (pod) (rate(container_cpu_usage_seconds_total{namespace=%q, container!="", container!="POD"}[%s]))`,
+		Query: `sum by (pod) (rate(container_cpu_usage_seconds_total{namespace=%[1]q, container!="", container!="POD"}[%[2]s])` +
+			` and on (pod) kube_pod_owner{namespace=%[1]q, owner_kind!="Job"})`,
 	},
 	"memory": {
 		Label: "Memory by pod",
 		Unit:  "bytes",
-		Query: `sum by (pod) (container_memory_working_set_bytes{namespace=%q, container!="", container!="POD"})`,
+		Query: `sum by (pod) (container_memory_working_set_bytes{namespace=%[1]q, container!="", container!="POD"}` +
+			` and on (pod) kube_pod_owner{namespace=%[1]q, owner_kind!="Job"})`,
 	},
 }
 
