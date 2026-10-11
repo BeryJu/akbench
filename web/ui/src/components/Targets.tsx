@@ -95,7 +95,7 @@ export function TargetKey({ index }: { index: number }) {
   );
 }
 
-export const TARGET_METRICS = ['iterations', 'iteration_duration_p95', 'http_req_duration_p99', 'http_req_failed', 'checks'];
+export const TARGET_METRICS = ['iterations', 'http_reqs', 'iteration_duration_p95', 'http_req_duration_p99', 'http_req_failed', 'checks'];
 
 export function TargetTable({
   rows,
