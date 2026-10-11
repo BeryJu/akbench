@@ -116,7 +116,7 @@ var _ = Describe("AuthentikDeployment Controller", func() {
 					Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "postgresql"}},
 					Template: corev1.PodTemplateSpec{
 						ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "postgresql"}},
-						Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "postgresql", Image: "postgres:17"}}},
+						Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "postgresql", Image: "postgres:17"}}},
 					},
 					ServiceName: render.EmbeddedPostgresStatefulSetName(&topo),
 				},

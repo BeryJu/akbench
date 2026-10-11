@@ -19,7 +19,7 @@
 // difference between rows is the deployments' own.
 import { ReactNode } from 'react';
 import { Link } from 'react-router';
-import { colorFor, formatDuration, formatMetricValue, relativeDelta, targetNameOf } from '../format';
+import { colorFor, formatDuration, formatMetricValue, relativeDelta, shortTag, targetNameOf } from '../format';
 import {
   AuthentikDeployment,
   CompareMetric,
@@ -148,7 +148,13 @@ export function TargetTable({
                   <Link to={`/deployments/${row.deploymentName}`}>{row.deploymentName}</Link>
                 </span>
               </td>
-              <td className="mono">{row.deployment?.spec.authentik?.tag ?? <span className="muted">chart default</span>}</td>
+              <td className="mono" title={row.deployment?.spec.authentik?.tag}>
+                {row.deployment?.spec.authentik?.tag ? (
+                  shortTag(row.deployment.spec.authentik.tag)
+                ) : (
+                  <span className="muted">chart default</span>
+                )}
+              </td>
               {columns.map(m => (
                 <td key={m.key} className="mono num">
                   {formatMetricValue(row.values[m.key], m.unit)}

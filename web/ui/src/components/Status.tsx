@@ -109,9 +109,8 @@ export function ConditionList({ conditions }: { conditions?: Condition[] }) {
     <div className="conditions">
       {conditions.map(c => (
         <div className="cond" key={c.type}>
-          <span>
-            <Badge value={c.status === 'True' ? 'True' : c.status === 'False' ? 'False' : 'Unknown'} /> {c.type}
-          </span>
+          <Badge value={c.status === 'True' ? 'True' : c.status === 'False' ? 'False' : 'Unknown'} />
+          <span className="cond-type">{c.type}</span>
           <span>
             {c.reason}
             {c.message ? `: ${c.message}` : ''}

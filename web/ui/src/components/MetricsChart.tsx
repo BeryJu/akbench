@@ -17,7 +17,7 @@
 // One metric over time, one line per test, from /metrics/range or
 // /metrics/resources. Natively rendered (Chart.js via react-chartjs-2) - no
 // Grafana iframe.
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Chart as ChartJS,
   Legend as ChartJSLegend,
@@ -58,13 +58,50 @@ export function useAvailableMetrics(testids: string[]): CompareMetric[] {
   return result.data?.metrics ?? [];
 }
 
+/** ChartTheme is the resolved theme the charts draw with. Chart.js paints
+ * to a canvas, which can't resolve CSS custom properties - a literal
+ * 'var(--muted)' silently falls back to black - so the values are read off
+ * the document instead. */
+interface ChartTheme {
+  text: string;
+  muted: string;
+  border: string;
+  panel: string;
+  font: string;
+}
+
+function readChartTheme(): ChartTheme {
+  const style = getComputedStyle(document.documentElement);
+  const value = (name: string, fallback: string) => style.getPropertyValue(name).trim() || fallback;
+  return {
+    text: value('--text', '#151515'),
+    muted: value('--muted', '#6a6e73'),
+    border: value('--border', '#d2d2d2'),
+    panel: value('--panel', '#ffffff'),
+    font: value('--ak-global--font-family--body', 'sans-serif'),
+  };
+}
+
+/** useChartTheme re-reads the theme whenever main.tsx flips
+ * html[data-theme] (an OS light/dark switch), so open charts follow along. */
+function useChartTheme(): ChartTheme {
+  const [theme, setTheme] = useState(readChartTheme);
+  useEffect(() => {
+    const observer = new MutationObserver(() => setTheme(readChartTheme()));
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+    return () => observer.disconnect();
+  }, []);
+  return theme;
+}
+
 /**
  * rangeChartOptions builds the Chart.js options shared by every line chart
  * on this page - a numeric (unix-seconds) x axis rather than Chart.js' own
  * 'time' scale, which would need the date-fns adapter as an extra
  * dependency for a feature (calendar-aware ticks) nothing here needs.
  */
-function rangeChartOptions(unit: string, showLegend: boolean): ChartOptions<'line'> {
+function rangeChartOptions(unit: string, showLegend: boolean, theme: ChartTheme): ChartOptions<'line'> {
+  const font = { family: theme.font, size: 11 };
   return {
     responsive: true,
     maintainAspectRatio: false,
@@ -74,29 +111,33 @@ function rangeChartOptions(unit: string, showLegend: boolean): ChartOptions<'lin
     scales: {
       x: {
         type: 'linear',
-        ticks: { callback: v => formatTime(v as number), color: 'var(--muted)', font: { size: 11 }, maxTicksLimit: 8 },
-        grid: { color: 'var(--border)' },
-        border: { color: 'var(--border)' },
+        ticks: { callback: v => formatTime(v as number), color: theme.muted, font, maxTicksLimit: 8 },
+        grid: { color: theme.border },
+        border: { color: theme.border },
       },
       y: {
         beginAtZero: true,
         // Ratios capped at 100%; everything else auto-scales.
         max: unit === 'ratio' ? 1 : undefined,
-        ticks: { callback: v => formatMetricValue(v as number, unit), color: 'var(--muted)', font: { size: 11 } },
-        grid: { color: 'var(--border)' },
-        border: { color: 'var(--border)' },
+        ticks: { callback: v => formatMetricValue(v as number, unit), color: theme.muted, font },
+        grid: { color: theme.border },
+        border: { color: theme.border },
       },
     },
     plugins: {
-      legend: { display: showLegend, labels: { color: 'var(--text)', font: { size: 12 }, boxHeight: 8 } },
+      legend: {
+        display: showLegend,
+        position: 'bottom',
+        labels: { color: theme.text, font: { ...font, size: 12 }, boxWidth: 12, boxHeight: 3, padding: 14 },
+      },
       tooltip: {
-        backgroundColor: 'var(--panel)',
-        titleColor: 'var(--text)',
-        bodyColor: 'var(--text)',
-        borderColor: 'var(--border)',
+        backgroundColor: theme.panel,
+        titleColor: theme.text,
+        bodyColor: theme.text,
+        borderColor: theme.border,
         borderWidth: 1,
-        titleFont: { size: 12 },
-        bodyFont: { size: 12 },
+        titleFont: { ...font, size: 12 },
+        bodyFont: { ...font, size: 12 },
         callbacks: {
           title: items => formatTime(items[0]?.parsed.x ?? 0),
           label: (item: TooltipItem<'line'>) =>
@@ -125,8 +166,15 @@ function rangeDatasets(data: RangeResponse | undefined) {
     targets.add(s.target);
     targetsByTestID.set(s.testid, targets);
   }
+  // A single test's own page needn't repeat its name on every line.
+  const singleTest = targetsByTestID.size === 1;
   return series.map((s, i) => ({
-    label: (targetsByTestID.get(s.testid)?.size ?? 0) > 1 ? `${s.testid} / ${s.target}` : s.testid,
+    label:
+      (targetsByTestID.get(s.testid)?.size ?? 0) > 1
+        ? singleTest
+          ? s.target
+          : `${s.testid} / ${s.target}`
+        : s.testid,
     data: (s.points ?? []).map(p => ({ x: p.time, y: p.value })),
     borderColor: colorFor(i),
     backgroundColor: colorFor(i),
@@ -171,7 +219,8 @@ export function MetricsChart({
   const label = data?.metric.label ?? metric;
   const datasets = useMemo(() => rangeDatasets(data), [data]);
   const hasData = datasets.some(d => d.data.length > 0);
-  const options = useMemo(() => rangeChartOptions(unit, datasets.length > 1), [unit, datasets.length]);
+  const theme = useChartTheme();
+  const options = useMemo(() => rangeChartOptions(unit, datasets.length > 1, theme), [unit, datasets.length, theme]);
 
   return (
     <div className="panel">
@@ -260,7 +309,8 @@ export function ResourceChart({
   const label = data?.metric.label ?? resource;
   const datasets = useMemo(() => rangeDatasets(data), [data]);
   const hasData = datasets.some(d => d.data.length > 0);
-  const options = useMemo(() => rangeChartOptions(unit, datasets.length > 1), [unit, datasets.length]);
+  const theme = useChartTheme();
+  const options = useMemo(() => rangeChartOptions(unit, datasets.length > 1, theme), [unit, datasets.length, theme]);
 
   return (
     <div className="panel">

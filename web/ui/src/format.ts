@@ -82,6 +82,14 @@ export function stepFor(rangeSeconds: number): string {
   return `${Math.max(15, Math.ceil(rangeSeconds / 240))}s`;
 }
 
+/** shortTag abbreviates an image tag that ends in a full git commit hash
+ * ("gh-ccd5f45863edfb003c4dd876fabfcb...") to its first 7 characters, the
+ * way git itself does; any other tag is returned unchanged. */
+export function shortTag(tag: string): string {
+  const match = /^(.*?)([0-9a-f]{40})$/.exec(tag);
+  return match ? `${match[1]}${match[2].slice(0, 7)}` : tag;
+}
+
 /** targetNameOf is the k6 `target` tag a deployment's own metrics carry -
  * mirrors internal/api's compareTargetsForTestID: spec.targetName, falling
  * back to the object name. */

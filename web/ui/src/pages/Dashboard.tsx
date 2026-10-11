@@ -36,6 +36,7 @@ export function DashboardPage() {
   const testCases = useResource(() => api.testCases(), [], 15000);
   const runs = useResource(() => api.testRuns(), [], 10000);
   const clusters = useResource(() => api.clusters(), [], 30000);
+  const alerts = useResource(() => api.alerts(), [], 30000);
 
   const burnTests = (testCases.data ?? [])
     .filter(tc => tc.spec.profile === 'Burn')
@@ -70,6 +71,13 @@ export function DashboardPage() {
   const targets = groups.flatMap(g => g.rows);
   const notReadyTargets = targets.filter(r => r.ready === false).length;
   const sustained = targets.reduce((sum, r) => sum + (r.values.iterations ?? 0), 0);
+  const worst = (key: string) =>
+    targets
+      .filter(r => r.values[key] !== undefined)
+      .reduce<(typeof targets)[number] | undefined>((w, r) => (!w || r.values[key] > w.values[key] ? r : w), undefined);
+  const slowest = worst('iteration_duration_p95');
+  const mostFailing = worst('http_req_failed');
+  const firing = (alerts.data ?? []).filter(a => a.state === 'active');
 
   const quickRuns = [...(runs.data ?? [])].sort((a, b) =>
     (b.metadata.creationTimestamp ?? '').localeCompare(a.metadata.creationTimestamp ?? '')
@@ -99,6 +107,21 @@ export function DashboardPage() {
           value={live.data ? formatMetricValue(sustained, 'tx/s') : '-'}
           label="Logins/s under burn"
           hint={`${burnTests.length} burn tests · ${targets.length} targets`}
+        />
+        <Stat
+          value={formatMetricValue(slowest?.values.iteration_duration_p95, 's')}
+          label="Slowest login p95"
+          hint={slowest?.deploymentName}
+        />
+        <Stat
+          value={formatMetricValue(mostFailing?.values.http_req_failed, 'ratio')}
+          label="Highest failure rate"
+          hint={mostFailing?.deploymentName}
+        />
+        <Stat
+          value={alerts.data ? <Link to="/alerts">{firing.length}</Link> : '-'}
+          label="Alerts firing"
+          hint={firing.length ? [...new Set(firing.map(a => a.cluster))].join(', ') : undefined}
         />
         <Stat
           value={deployments.data?.length ?? '-'}

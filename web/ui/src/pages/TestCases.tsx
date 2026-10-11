@@ -23,7 +23,7 @@ import { ObjectYaml } from '../components/ObjectYaml';
 import { Badge, ConditionList, StatusBadge } from '../components/Status';
 import { buildTargetRows, burningFor, TargetTable } from '../components/Targets';
 import { Alert, confirmAndRun, Empty, errorMessage, Field, formatTimestamp, Page, Segmented, Table } from '../components/ui';
-import { metricsAnchorFromRuns } from '../format';
+import { metricsAnchorFromRuns, shortTag } from '../format';
 import { shellLinkForCluster } from '../shell/links';
 import { TestCase, TestCaseSpec, TestProfile, testCaseDeployments, testRunDeployment } from '../types';
 import { useResource } from '../useResource';
@@ -207,7 +207,7 @@ function TestCaseForm({ existing }: { existing?: TestCase }) {
             <Field label="Name" help="Also the k6 testid every metric is split on">
               <input required value={name} disabled={Boolean(existing)} onChange={e => setName(e.target.value)} />
             </Field>
-            <div className="field">
+            <div className="field wide">
               <span id="targets-label">Target deployments</span>
               <div className="checklist" role="group" aria-labelledby="targets-label">
                 {(deployments.data ?? []).map(d => (
@@ -217,8 +217,12 @@ function TestCaseForm({ existing }: { existing?: TestCase }) {
                       checked={selectedDeployments.includes(d.metadata.name)}
                       onChange={() => toggleDeployment(d.metadata.name)}
                     />
-                    <span className="mono">{d.metadata.name}</span>
-                    <span className="meta">{d.spec.authentik?.tag ?? 'chart default'}</span>
+                    <span className="mono" title={d.metadata.name}>
+                      {d.metadata.name}
+                    </span>
+                    <span className="meta" title={d.spec.authentik?.tag}>
+                      {d.spec.authentik?.tag ? shortTag(d.spec.authentik.tag) : 'chart default'}
+                    </span>
                   </label>
                 ))}
                 {deployments.data?.length === 0 && <span className="muted">No deployments yet.</span>}

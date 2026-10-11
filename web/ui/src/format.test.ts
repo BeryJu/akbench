@@ -21,6 +21,7 @@ import {
   formatMetricValue,
   metricsAnchorFromRuns,
   relativeDelta,
+  shortTag,
   stepFor,
   targetNameOf,
 } from './format';
@@ -153,5 +154,16 @@ describe('targetNameOf', () => {
   it('prefers spec.targetName and falls back to the object name', () => {
     expect(targetNameOf({ metadata: { name: 'ak-a' }, spec: { targetName: 'a' } })).toBe('a');
     expect(targetNameOf({ metadata: { name: 'ak-a' }, spec: {} })).toBe('ak-a');
+  });
+});
+
+describe('shortTag', () => {
+  it('abbreviates a trailing full commit hash', () => {
+    expect(shortTag('gh-ccd5f45863edfb003c4dd876fabfcb0123456789')).toBe('gh-ccd5f45');
+  });
+
+  it('leaves other tags alone', () => {
+    expect(shortTag('2026.8.2')).toBe('2026.8.2');
+    expect(shortTag('gh-main')).toBe('gh-main');
   });
 });
