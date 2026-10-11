@@ -121,17 +121,17 @@ entries:
 // exist yet). It self-heals once the Job completes and Kubernetes retries
 // the pod - not worth reordering to block Deployment creation on Job
 // completion given how quickly it resolves on its own in practice.
-func (r *TestCaseReconciler) ensureOAuthClient(ctx context.Context, rc client.Client, remote bool, tc *benchv1alpha1.TestCase, topo *benchv1alpha1.AuthentikDeployment, host string, port int32) (string, int32, error) {
-	id := "oauth-test-" + tc.Name
+func (r *TestCaseReconciler) ensureOAuthClient(ctx context.Context, rc client.Client, remote bool, tc *benchv1alpha1.TestCase, deploymentName string, topo *benchv1alpha1.AuthentikDeployment, host string, port int32) (string, int32, error) {
+	id := "oauth-test-" + tc.Name + "-" + deploymentName
 
 	clientSecret, err := ensureRandomSecret(ctx, rc,
-		types.NamespacedName{Name: render.OIDCTestClientName(tc) + "-secret", Namespace: tc.Namespace},
+		types.NamespacedName{Name: render.OIDCTestClientName(tc, deploymentName) + "-secret", Namespace: tc.Namespace},
 		"client-secret", 32)
 	if err != nil {
 		return "", 0, fmt.Errorf("ensure oauth client secret: %w", err)
 	}
 
-	rootURL := render.OIDCTestClientRootURL(tc, tc.Namespace)
+	rootURL := render.OIDCTestClientRootURL(tc, deploymentName, tc.Namespace)
 	redirectURI := rootURL + "/auth/callback"
 	// authentik's own OAuth2/OIDC issuer for an Application - not
 	// independently verified against a live instance in this change (unlike
@@ -139,8 +139,8 @@ func (r *TestCaseReconciler) ensureOAuthClient(ctx context.Context, rc client.Cl
 	// authentik's source), but a stable, documented part of its public API.
 	issuerURL := fmt.Sprintf("http://%s:%d/application/o/%s/", host, port, id)
 
-	dep := render.OIDCTestClientDeployment(tc, tc.Namespace, issuerURL, id, clientSecret)
-	svc := render.OIDCTestClientService(tc, tc.Namespace)
+	dep := render.OIDCTestClientDeployment(tc, deploymentName, tc.Namespace, issuerURL, id, clientSecret)
+	svc := render.OIDCTestClientService(tc, deploymentName, tc.Namespace)
 	if !remote {
 		if err := controllerutil.SetControllerReference(tc, dep, r.Scheme); err != nil {
 			return "", 0, err
@@ -187,7 +187,7 @@ func (r *TestCaseReconciler) ensureOAuthClient(ctx context.Context, rc client.Cl
 	}
 
 	content := string(oauthProviderBlueprint(id, id, clientSecret, redirectURI))
-	blueprintCMName := "oauth-blueprint-" + tc.Name
+	blueprintCMName := "oauth-blueprint-" + tc.Name + "-" + deploymentName
 	var existingCM corev1.ConfigMap
 	switch err := deploymentClient.Get(ctx, types.NamespacedName{Name: blueprintCMName, Namespace: topo.Spec.Namespace}, &existingCM); {
 	case apierrors.IsNotFound(err):
@@ -212,7 +212,7 @@ func (r *TestCaseReconciler) ensureOAuthClient(ctx context.Context, rc client.Cl
 	// motivated moving the fixtures blueprint off the server Deployment
 	// entirely applies here too, since both share the exact same
 	// BlueprintPVC/BlueprintMountPath.
-	jobName := render.BlueprintJobName(topo, "oauth-"+tc.Name, content)
+	jobName := render.BlueprintJobName(topo, "oauth-"+tc.Name+"-"+deploymentName, content)
 	var job batchv1.Job
 	switch err := deploymentClient.Get(ctx, types.NamespacedName{Name: jobName, Namespace: topo.Spec.Namespace}, &job); {
 	case apierrors.IsNotFound(err):
@@ -229,7 +229,7 @@ func (r *TestCaseReconciler) ensureOAuthClient(ctx context.Context, rc client.Cl
 			return "", 0, fmt.Errorf("oauth2 provider blueprint import job %q failed: %s", jobName, c.Message)
 		}
 		if c.Type == batchv1.JobComplete && c.Status == corev1.ConditionTrue {
-			host, port := oidcTestClientHostPort(tc)
+			host, port := oidcTestClientHostPort(tc, deploymentName)
 			return host, port, nil
 		}
 	}
@@ -237,13 +237,13 @@ func (r *TestCaseReconciler) ensureOAuthClient(ctx context.Context, rc client.Cl
 }
 
 // oidcTestClientHostPort is oidc-test-client's own in-cluster address for a
-// given TestCase - a pure function of the TestCase's name/namespace, safe to
-// call from any reconciler once the TestCase itself reports Ready (which
-// TestCaseReconciler's own Reconcile only does once ensureOAuthClient above
-// has actually finished provisioning it), without re-running the
+// given TestCase/deployment pair - a pure function of their names/namespace,
+// safe to call from any reconciler once the TestCase itself reports Ready
+// (which TestCaseReconciler's own Reconcile only does once ensureOAuthClient
+// above has actually finished provisioning it), without re-running the
 // Deployment/Service/blueprint-Job ensure logic a second time.
-func oidcTestClientHostPort(tc *benchv1alpha1.TestCase) (string, int32) {
-	return render.OIDCTestClientName(tc) + "." + tc.Namespace + ".svc.cluster.local", render.OIDCTestClientPort
+func oidcTestClientHostPort(tc *benchv1alpha1.TestCase, deploymentName string) (string, int32) {
+	return render.OIDCTestClientName(tc, deploymentName) + "." + tc.Namespace + ".svc.cluster.local", render.OIDCTestClientPort
 }
 
 // oauthBlueprintKey is the data key oauthProviderBlueprint's content is

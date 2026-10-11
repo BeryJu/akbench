@@ -41,36 +41,39 @@ const (
 	OIDCTestClientPort  = 9009
 )
 
-// OIDCTestClientName is deterministic from the TestCase name - one
-// oidc-test-client per oauth-oidc TestCase, owned by it (not the
-// AuthentikDeployment it targets), the same scoping the k6 workload itself
-// already uses (see TestCaseTemplateSpec.RequiresOAuthClient's own doc
-// comment for why: keeps "what's being tested" out of the deployment).
-func OIDCTestClientName(tc *benchv1alpha1.TestCase) string {
-	return "oidc-test-client-" + tc.Name
+// OIDCTestClientName is deterministic from the TestCase name plus the
+// specific AuthentikDeployment it targets - a TestCase driving more than
+// one deployment needs one independent oidc-test-client per target, since
+// each instance has exactly one issuer baked into its own env at creation
+// time (OIDC_PROVIDER). Owned by the TestCase (not the AuthentikDeployment),
+// the same scoping the k6 workload itself already uses (see
+// TestCaseTemplateSpec.RequiresOAuthClient's own doc comment for why: keeps
+// "what's being tested" out of the deployment).
+func OIDCTestClientName(tc *benchv1alpha1.TestCase, deploymentName string) string {
+	return "oidc-test-client-" + tc.Name + "-" + deploymentName
 }
 
-// OIDCTestClientRootURL is this TestCase's own oidc-test-client's
-// cluster-relative address - what OIDC_ROOT_URL is set to, and what the
-// OAuth2Provider blueprint's own redirect_uri must point at
+// OIDCTestClientRootURL is this TestCase/deployment pair's own
+// oidc-test-client's cluster-relative address - what OIDC_ROOT_URL is set
+// to, and what the OAuth2Provider blueprint's own redirect_uri must point at
 // (<rootURL>/auth/callback).
-func OIDCTestClientRootURL(tc *benchv1alpha1.TestCase, namespace string) string {
-	return fmt.Sprintf("http://%s.%s.svc.cluster.local:%d", OIDCTestClientName(tc), namespace, OIDCTestClientPort)
+func OIDCTestClientRootURL(tc *benchv1alpha1.TestCase, deploymentName, namespace string) string {
+	return fmt.Sprintf("http://%s.%s.svc.cluster.local:%d", OIDCTestClientName(tc, deploymentName), namespace, OIDCTestClientPort)
 }
 
-func oidcTestClientLabels(tc *benchv1alpha1.TestCase) map[string]string {
-	return map[string]string{"app": OIDCTestClientName(tc)}
+func oidcTestClientLabels(tc *benchv1alpha1.TestCase, deploymentName string) map[string]string {
+	return map[string]string{"app": OIDCTestClientName(tc, deploymentName)}
 }
 
 // OIDCTestClientDeployment renders the oidc-test-client Deployment for one
-// oauth-oidc TestCase. issuerURL is the target AuthentikDeployment's own
-// OAuth2 issuer; clientID/clientSecret must match the OAuth2Provider
-// blueprint applied against that same deployment (see
+// oauth-oidc TestCase/deployment pair. issuerURL is that target
+// AuthentikDeployment's own OAuth2 issuer; clientID/clientSecret must match
+// the OAuth2Provider blueprint applied against that same deployment (see
 // internal/controller/oauthclient.go) - both sides are driven from the same
 // values so they can never drift.
-func OIDCTestClientDeployment(tc *benchv1alpha1.TestCase, namespace, issuerURL, clientID, clientSecret string) *appsv1.Deployment {
-	name := OIDCTestClientName(tc)
-	labels := oidcTestClientLabels(tc)
+func OIDCTestClientDeployment(tc *benchv1alpha1.TestCase, deploymentName, namespace, issuerURL, clientID, clientSecret string) *appsv1.Deployment {
+	name := OIDCTestClientName(tc, deploymentName)
+	labels := oidcTestClientLabels(tc, deploymentName)
 	return &appsv1.Deployment{
 		TypeMeta:   metav1.TypeMeta{Kind: "Deployment", APIVersion: "apps/v1"},
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace, Labels: labels},
@@ -87,7 +90,7 @@ func OIDCTestClientDeployment(tc *benchv1alpha1.TestCase, namespace, issuerURL, 
 							{Name: "OIDC_CLIENT_ID", Value: clientID},
 							{Name: "OIDC_CLIENT_SECRET", Value: clientSecret},
 							{Name: "OIDC_PROVIDER", Value: issuerURL},
-							{Name: "OIDC_ROOT_URL", Value: OIDCTestClientRootURL(tc, namespace)},
+							{Name: "OIDC_ROOT_URL", Value: OIDCTestClientRootURL(tc, deploymentName, namespace)},
 							{Name: "OIDC_BIND", Value: fmt.Sprintf("0.0.0.0:%d", OIDCTestClientPort)},
 						},
 						Ports: []corev1.ContainerPort{{Name: "http", ContainerPort: OIDCTestClientPort}},
@@ -105,13 +108,13 @@ func OIDCTestClientDeployment(tc *benchv1alpha1.TestCase, namespace, issuerURL, 
 
 // OIDCTestClientService is the ClusterIP Service OIDC_ROOT_URL and the k6
 // oauth-oidc script both reach oidc-test-client through.
-func OIDCTestClientService(tc *benchv1alpha1.TestCase, namespace string) *corev1.Service {
-	name := OIDCTestClientName(tc)
+func OIDCTestClientService(tc *benchv1alpha1.TestCase, deploymentName, namespace string) *corev1.Service {
+	name := OIDCTestClientName(tc, deploymentName)
 	return &corev1.Service{
 		TypeMeta:   metav1.TypeMeta{Kind: "Service", APIVersion: "v1"},
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
 		Spec: corev1.ServiceSpec{
-			Selector: oidcTestClientLabels(tc),
+			Selector: oidcTestClientLabels(tc, deploymentName),
 			Ports: []corev1.ServicePort{
 				{Name: "http", Port: OIDCTestClientPort, TargetPort: intstr.FromInt32(OIDCTestClientPort)},
 			},

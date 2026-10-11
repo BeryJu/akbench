@@ -49,6 +49,29 @@ spec:
           spec:
             description: TestRunSpec requests one bounded (Quick) execution of a TestCase.
             properties:
+              deploymentRef:
+                description: |-
+                  deploymentRef pins this run to one specific entry of the TestCase's
+                  own TestCase.Deployments() - needed once a TestCase can target more
+                  than one AuthentikDeployment, since one TestRun is still exactly one
+                  Job against exactly one deployment ("Run now" fans out into one
+                  TestRun per deployment rather than teaching TestRun to run several
+                  Jobs itself). Unset on every TestRun created before multi-deployment
+                  TestCases existed; TestRunReconciler falls back to the resolved
+                  TestCase's own Deployments()[0] in that case, which is always correct
+                  for those older, inherently single-deployment runs.
+                properties:
+                  name:
+                    default: ""
+                    description: |-
+                      Name of the referent.
+                      This field is effectively required, but due to backwards compatibility is
+                      allowed to be empty. Instances of this type with an empty value here are
+                      almost certainly wrong.
+                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                    type: string
+                type: object
+                x-kubernetes-map-type: atomic
               overrides:
                 description: |-
                   TestRunOverrides lets a single run adjust load shape without mutating the
@@ -186,8 +209,13 @@ spec:
                       by default.
                     type: string
                   deploymentRef:
-                    description: deploymentRef names the AuthentikDeployment this
-                      test drives.
+                    description: |-
+                      deploymentRef names the AuthentikDeployment this test drives.
+
+                      Deprecated: use deploymentRefs instead, which supports driving the
+                      same test against multiple deployments at once. Still read whenever
+                      deploymentRefs is empty (see TestCase.Deployments), so existing
+                      objects keep working unchanged.
                     properties:
                       name:
                         default: ""
@@ -200,6 +228,32 @@ spec:
                         type: string
                     type: object
                     x-kubernetes-map-type: atomic
+                  deploymentRefs:
+                    description: |-
+                      deploymentRefs names every AuthentikDeployment this test drives - the
+                      test runs independently against each one (same script/VUs/iterations),
+                      tagged with its own k6 `target` so dashboards/compare views can tell
+                      them apart. At least one of deploymentRef/deploymentRefs must resolve
+                      to something (see TestCase.Deployments); the controller reports a
+                      clear condition if neither does, rather than the CRD enforcing a
+                      oneof at the schema level.
+                    items:
+                      description: |-
+                        LocalObjectReference contains enough information to let you locate the
+                        referenced object inside the same namespace.
+                      properties:
+                        name:
+                          default: ""
+                          description: |-
+                            Name of the referent.
+                            This field is effectively required, but due to backwards compatibility is
+                            allowed to be empty. Instances of this type with an empty value here are
+                            almost certainly wrong.
+                            More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                          type: string
+                      type: object
+                      x-kubernetes-map-type: atomic
+                    type: array
                   extraTags:
                     additionalProperties:
                       type: string
@@ -290,7 +344,6 @@ spec:
                     minimum: 1
                     type: integer
                 required:
-                - deploymentRef
                 - profile
                 type: object
               startTime:

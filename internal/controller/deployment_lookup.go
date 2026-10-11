@@ -81,6 +81,28 @@ func resolveRunnerClient(ctx context.Context, tracker *multicluster.Tracker, loc
 	return rc, true, err
 }
 
+// resolvedRunDeploymentRef picks which of a TestCase's Deployments() a
+// particular TestRun targets: runSpec.DeploymentRef if set (every TestRun
+// created once a TestCase could drive more than one deployment - see
+// internal/api/runs.go's createRun, which always sets it explicitly), else
+// the first entry of tcSpec's own resolved deployments (every TestRun
+// created before that, back when a TestCase only ever had one). Takes a
+// bare *TestCaseSpec rather than a full TestCase so it works equally from a
+// live TestCase (tc.Spec) and a TestRun's own audit snapshot
+// (run.Status.ResolvedSpec, which has no surrounding TestCase object).
+func resolvedRunDeploymentRef(runSpec *benchv1alpha1.TestRunSpec, tcSpec *benchv1alpha1.TestCaseSpec) (corev1.LocalObjectReference, error) {
+	if runSpec.DeploymentRef != nil && runSpec.DeploymentRef.Name != "" {
+		return *runSpec.DeploymentRef, nil
+	}
+	if len(tcSpec.DeploymentRefs) > 0 {
+		return tcSpec.DeploymentRefs[0], nil
+	}
+	if tcSpec.DeploymentRef.Name != "" {
+		return tcSpec.DeploymentRef, nil
+	}
+	return corev1.LocalObjectReference{}, fmt.Errorf("TestCase has no deployment set")
+}
+
 // resolveTemplate fetches the TestCaseTemplate a TestCase's spec.template
 // names, defaulting an empty name to DefaultTemplateName (in case this is
 // reached before CRD admission defaulting - e.g. a TestCase built by hand in

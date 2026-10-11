@@ -11,7 +11,7 @@ import (
 
 // TestPodTemplateNeverSharesNodeWithItsDeployment guards the k6 runner's own
 // required anti-affinity: it must never land on the same node as the
-// deployment it's driving (deploymentRef.name, not TargetName, which is only a
+// deployment it's driving (DeploymentName, not TargetName, which is only a
 // metric label and can differ), so the load generator never competes with
 // the system under test for the same node's CPU.
 func TestPodTemplateNeverSharesNodeWithItsDeployment(t *testing.T) {
@@ -19,11 +19,12 @@ func TestPodTemplateNeverSharesNodeWithItsDeployment(t *testing.T) {
 		TestCase: &benchv1alpha1.TestCase{
 			ObjectMeta: metav1.ObjectMeta{Name: "login-a"},
 			Spec: benchv1alpha1.TestCaseSpec{
-				DeploymentRef: corev1.LocalObjectReference{Name: "topo-a"},
-				Profile:       benchv1alpha1.ProfileBurn,
+				DeploymentRefs: []corev1.LocalObjectReference{{Name: "topo-a"}},
+				Profile:        benchv1alpha1.ProfileBurn,
 			},
 		},
-		TargetName: "some-other-display-name",
+		DeploymentName: "topo-a",
+		TargetName:     "some-other-display-name",
 	}
 	tmpl := p.PodTemplate()
 
@@ -43,4 +44,47 @@ func TestPodTemplateNeverSharesNodeWithItsDeployment(t *testing.T) {
 	if terms[0].TopologyKey != "kubernetes.io/hostname" {
 		t.Errorf("required term topologyKey = %q, want kubernetes.io/hostname", terms[0].TopologyKey)
 	}
+}
+
+// TestBurnDeploymentSelectorIsUniquePerDeployment guards a real bug: a
+// TestCase driving more than one deployment renders one BurnDeployment per
+// target, all sharing the same TestCase name - a selector keyed only on
+// LabelTestCase would make every one of those Deployments identical and
+// have them fight over each other's pods, which Kubernetes forbids anyway
+// (two Deployments can't have equal selectors). LabelDeployment must be in
+// the selector too, disambiguating one target from another.
+func TestBurnDeploymentSelectorIsUniquePerDeployment(t *testing.T) {
+	tc := &benchv1alpha1.TestCase{
+		ObjectMeta: metav1.ObjectMeta{Name: "login-multi"},
+		Spec: benchv1alpha1.TestCaseSpec{
+			DeploymentRefs: []corev1.LocalObjectReference{{Name: "topo-a"}, {Name: "topo-b"}},
+			Profile:        benchv1alpha1.ProfileBurn,
+		},
+	}
+	depA := BurnDeployment("k6-login-multi-a", "default", K6WorkloadParams{TestCase: tc, DeploymentName: "topo-a", TargetName: "a"})
+	depB := BurnDeployment("k6-login-multi-b", "default", K6WorkloadParams{TestCase: tc, DeploymentName: "topo-b", TargetName: "b"})
+
+	if depA.Spec.Selector.MatchLabels[benchv1alpha1.LabelDeployment] != "topo-a" {
+		t.Errorf("deployment A selector = %v, missing LabelDeployment=topo-a", depA.Spec.Selector.MatchLabels)
+	}
+	if depB.Spec.Selector.MatchLabels[benchv1alpha1.LabelDeployment] != "topo-b" {
+		t.Errorf("deployment B selector = %v, missing LabelDeployment=topo-b", depB.Spec.Selector.MatchLabels)
+	}
+	selA, _ := metav1.LabelSelectorAsMap(depA.Spec.Selector)
+	selB, _ := metav1.LabelSelectorAsMap(depB.Spec.Selector)
+	if labelsEqual(selA, selB) {
+		t.Fatalf("deployment A and B have equal selectors, they would fight over each other's pods: %v vs %v", selA, selB)
+	}
+}
+
+func labelsEqual(a, b map[string]string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		if b[k] != v {
+			return false
+		}
+	}
+	return true
 }

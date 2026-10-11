@@ -71,7 +71,8 @@ var _ = Describe("TestCase Controller", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			var dep appsv1.Deployment
-			depKey := types.NamespacedName{Name: "k6-" + resourceName, Namespace: "default"}
+			depName := "k6-" + resourceName + "-" + topo.Name
+			depKey := types.NamespacedName{Name: depName, Namespace: "default"}
 			Expect(k8sClient.Get(context.Background(), depKey, &dep)).To(Succeed())
 
 			args := dep.Spec.Template.Spec.Containers[0].Args
@@ -87,8 +88,11 @@ var _ = Describe("TestCase Controller", func() {
 
 			var tc benchv1alpha1.TestCase
 			Expect(k8sClient.Get(context.Background(), typeNamespacedName, &tc)).To(Succeed())
-			Expect(tc.Status.BurnWorkloadRef).NotTo(BeNil())
-			Expect(tc.Status.BurnWorkloadRef.Name).To(Equal("k6-" + resourceName))
+			depStatus := findDeploymentStatus(tc.Status.Deployments, topo.Name)
+			Expect(depStatus).NotTo(BeNil())
+			Expect(depStatus.Ready).To(BeTrue())
+			Expect(depStatus.BurnWorkloadRef).NotTo(BeNil())
+			Expect(depStatus.BurnWorkloadRef.Name).To(Equal(depName))
 			ready := meta.FindStatusCondition(tc.Status.Conditions, benchv1alpha1.ConditionReady)
 			Expect(ready).NotTo(BeNil())
 			Expect(ready.Status).To(Equal(metav1.ConditionTrue))
@@ -218,4 +222,13 @@ func envMap(vars []corev1.EnvVar) map[string]string {
 		m[v.Name] = v.Value
 	}
 	return m
+}
+
+func findDeploymentStatus(deployments []benchv1alpha1.TestCaseDeploymentStatus, name string) *benchv1alpha1.TestCaseDeploymentStatus {
+	for i := range deployments {
+		if deployments[i].Name == name {
+			return &deployments[i]
+		}
+	}
+	return nil
 }
