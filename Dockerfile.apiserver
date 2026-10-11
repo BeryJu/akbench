@@ -3,7 +3,7 @@
 # in-browser kubectl shell (internal/api/shell.go). The shell is why this is
 # not distroless: it needs a real shell, kubectl and an init process.
 
-FROM node:24-alpine AS ui
+FROM node:25-alpine AS ui
 WORKDIR /ui
 COPY web/ui/package.json web/ui/package-lock.json ./
 RUN npm ci
