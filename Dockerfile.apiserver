@@ -26,7 +26,7 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o ap
 # kubectl from the official release, checksum-verified. Kept within one
 # minor version of the clusters it talks to (kubectl's supported skew) -
 # bump alongside the Kubernetes versions ClusterForm offers.
-FROM alpine:3.22 AS kubectl
+FROM alpine:3.24 AS kubectl
 ARG TARGETARCH
 ARG KUBECTL_VERSION=v1.36.5
 RUN apk add --no-cache curl \
@@ -41,7 +41,7 @@ RUN apk add --no-cache curl \
 # cluster/namespace is the common case here (the merged kubeconfig already
 # has every registered cluster as its own context), and typing a full
 # --context/-n flag every time is exactly the friction these exist to remove.
-FROM alpine:3.22 AS kubectx
+FROM alpine:3.24 AS kubectx
 ARG TARGETARCH
 ARG KUBECTX_VERSION=v0.11.0
 RUN apk add --no-cache curl tar \
@@ -61,7 +61,7 @@ RUN apk add --no-cache curl tar \
          mv "$name" "/usr/local/bin/$name"; \
        done
 
-FROM alpine:3.22
+FROM alpine:3.24
 # bash + completion for the shell itself; jq/less/curl because a kubectl
 # session without them is miserable; ncurses-terminfo-base for
 # TERM=xterm-256color. busybox vi serves `kubectl edit`.
