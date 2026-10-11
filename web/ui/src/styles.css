@@ -126,6 +126,9 @@ legend { font-weight: 700; font-size: 15px; margin: 18px 0 8px; padding: 0; }
 .delta.better { color: var(--ok); }
 .delta.worse { color: var(--err); }
 .sparkline { display: block; }
+.share-bar { display: inline-block; width: 120px; height: 8px; border-radius: 4px; background: var(--code-bg); border: 1px solid var(--border); overflow: hidden; flex: none; }
+.share-bar > span { display: block; height: 100%; background: var(--info); }
+.table td.statement { max-width: 640px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .seg { display: inline-flex; gap: 2px; padding: 3px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg); }
 .seg button { border: none; background: transparent; padding: 3px 10px; color: var(--muted); }
 .seg button.on { background: var(--panel); color: var(--text); box-shadow: 0 1px 2px rgba(0,0,0,.12); }

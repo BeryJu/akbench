@@ -319,6 +319,29 @@ export interface RangeResponse {
   series: RangeSeries[];
 }
 
+// TraceBreakdown mirrors internal/api/traces.go: a sample of each target's
+// most recent traces from its workload cluster's Tempo. Durations are seconds.
+export interface TraceBreakdown {
+  testid: string;
+  window: string;
+  generatedAt: string;
+  targets: TraceTarget[];
+}
+
+export interface TraceTarget {
+  target: string;
+  traces: number;
+  requests: number;
+  requestP50: number;
+  requestP95: number;
+  queriesPerRequest: number;
+  dbTimePerRequest: number;
+  dbShare: number;
+  stages: { name: string; count: number; p50: number; p95: number }[];
+  topQueries: { statement: string; count: number; perRequest: number; total: number; mean: number }[];
+  error?: string;
+}
+
 /** readyCondition is the one condition every list view renders. */
 export function readyCondition(conditions?: Condition[]): Condition | undefined {
   return conditions?.find(c => c.type === 'Ready');

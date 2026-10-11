@@ -12,7 +12,7 @@ import (
 
 func TestGrafanaProxyPathPrefix(t *testing.T) {
 	wc := &benchv1alpha1.WorkloadCluster{ObjectMeta: metav1.ObjectMeta{Name: "default-dev-vm-incus"}}
-	got := grafanaProxyPathPrefix(wc)
+	got := GrafanaProxyPathPrefix(wc)
 	want := "/grafana-proxy/default-dev-vm-incus/"
 	if got != want {
 		t.Errorf("grafanaProxyPathPrefix = %q, want %q", got, want)

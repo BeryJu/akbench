@@ -30,6 +30,7 @@ import {
   TestCaseTemplate,
   TestCaseTemplateSpec,
   TestRun,
+  TraceBreakdown,
   WorkloadCluster,
   WorkloadClusterSpec,
 } from './types';
@@ -204,6 +205,11 @@ export const api = {
   // proxy itself authenticates with, since its <iframe> can't send a bearer
   // token.
   grafanaSession: () => request<{ expiresAt: string }>('/api/v1/grafana/session', json('POST', {})),
+
+  // -- Traces (internal/api/traces.go): a cached sample of recent traces per
+  // target, from each target's own workload cluster Tempo.
+  traceBreakdown: (testid: string, window: string) =>
+    request<TraceBreakdown>(`/api/v1/traces/breakdown?testid=${seg(testid)}&window=${seg(window)}`),
 
   // -- Alerts (internal/api/alerts.go) - aggregated across every workload
   // cluster's own Alertmanager, there is no central instance.

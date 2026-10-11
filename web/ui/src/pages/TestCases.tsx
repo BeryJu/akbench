@@ -22,6 +22,7 @@ import { MetricsGrid, ResourceCharts } from '../components/MetricsChart';
 import { ObjectYaml } from '../components/ObjectYaml';
 import { Badge, ConditionList, StatusBadge } from '../components/Status';
 import { buildTargetRows, burningFor, TargetTable } from '../components/Targets';
+import { TraceBreakdownSection } from '../components/TraceBreakdown';
 import { Alert, confirmAndRun, Empty, errorMessage, Field, formatTimestamp, Page, Segmented, Table } from '../components/ui';
 import { metricsAnchorFromRuns, shortTag } from '../format';
 import { shellLinkForCluster } from '../shell/links';
@@ -575,6 +576,8 @@ export function TestCaseViewPage() {
         endSeconds={anchor?.endSeconds}
         rangeSeconds={profile === 'Quick' ? anchor?.rangeSeconds : timelineRange}
       />
+      {tc && <TraceBreakdownSection testid={name} rows={rows} baseline={baseline} />}
+
       <h2>Resource usage</h2>
       <ResourceCharts
         testids={[name]}

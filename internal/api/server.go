@@ -81,6 +81,7 @@ type Server struct {
 	shell  *shellState
 	// grafanaKey signs the Grafana proxy's session cookies (grafana_session.go).
 	grafanaKey []byte
+	traces     *traceBreakdownCache
 }
 
 // New builds a Server. The client must be backed by the management cluster
@@ -93,7 +94,8 @@ func New(c client.Client, cfg Config) *Server {
 	if httpClient == nil {
 		httpClient = &http.Client{Timeout: 30 * time.Second}
 	}
-	return &Server{client: c, cfg: cfg, http: httpClient, shell: newShellState(), grafanaKey: newGrafanaSessionKey()}
+	return &Server{client: c, cfg: cfg, http: httpClient, shell: newShellState(), grafanaKey: newGrafanaSessionKey(),
+		traces: &traceBreakdownCache{entries: map[string]TraceBreakdown{}}}
 }
 
 // probeStatusField is the JSON key /healthz and /readyz answer under -
@@ -130,6 +132,7 @@ func (s *Server) Router() http.Handler {
 			r.Use(s.requireToken)
 
 			r.Post("/grafana/session", s.createGrafanaSession)
+			r.Get("/traces/breakdown", s.traceBreakdown)
 			r.Get("/clusters", s.listClusters)
 			r.Post("/clusters", s.registerCluster)
 			r.Get("/clusters/{name}", s.getCluster)
