@@ -170,6 +170,45 @@ func TestMissingResourceIs404(t *testing.T) {
 	requireStatus(t, rec, http.StatusNotFound)
 }
 
+// TestKickResourceSetsAnnotation guards the one thing kickResource actually
+// does - every controller in this repo reconciles on any Update to its
+// watched object regardless of what changed, so setting a fresh annotation
+// is the entire mechanism; there's nothing controller-side to also assert.
+func TestKickResourceSetsAnnotation(t *testing.T) {
+	s, c := newServer(t, Config{}, sampleDeployment("kick-me"))
+
+	rec := do(t, s, http.MethodPost, "/api/v1/deployments/kick-me/reconcile", nil)
+	requireStatus(t, rec, http.StatusOK)
+
+	var updated benchv1alpha1.AuthentikDeployment
+	key := types.NamespacedName{Name: "kick-me", Namespace: testNamespace}
+	if err := c.Get(context.Background(), key, &updated); err != nil {
+		t.Fatalf("get after kick: %v", err)
+	}
+	first := updated.Annotations[kickedAtAnnotation]
+	if first == "" {
+		t.Fatalf("annotation %q was not set", kickedAtAnnotation)
+	}
+
+	// A second kick must change the value, not just be a no-op Update - a
+	// repeat with an identical value wouldn't reliably be observed as a new
+	// event by a watcher.
+	rec = do(t, s, http.MethodPost, "/api/v1/deployments/kick-me/reconcile", nil)
+	requireStatus(t, rec, http.StatusOK)
+	if err := c.Get(context.Background(), key, &updated); err != nil {
+		t.Fatalf("get after second kick: %v", err)
+	}
+	if updated.Annotations[kickedAtAnnotation] == first {
+		t.Fatalf("second kick did not change %q", kickedAtAnnotation)
+	}
+}
+
+func TestKickResourceMissingIs404(t *testing.T) {
+	s, _ := newServer(t, Config{})
+	rec := do(t, s, http.MethodPost, "/api/v1/deployments/nope/reconcile", nil)
+	requireStatus(t, rec, http.StatusNotFound)
+}
+
 func TestListRespectsLabelSelector(t *testing.T) {
 	run := &benchv1alpha1.TestRun{}
 	run.Name = "login-a-abcde"

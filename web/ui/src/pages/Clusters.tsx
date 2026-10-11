@@ -57,6 +57,13 @@ export function ClustersPage() {
                 </Link>
                 {!c.management && (
                   <>
+                    <button
+                      className="small"
+                      title="Nudge the operator into reconciling this cluster right now, instead of waiting for its next naturally-triggered update."
+                      onClick={() => void api.kickWorkloadCluster(c.name).catch(err => window.alert(errorMessage(err)))}
+                    >
+                      Kick
+                    </button>
                     <Link className="button small" to={`/clusters/${c.name}/edit`}>
                       Edit
                     </Link>
@@ -356,6 +363,19 @@ export function ClusterViewPage() {
   const shellTarget = isManagement ? undefined : name;
   const status = wc.data?.status;
   const pools = wc.data?.spec.workerPools ?? [];
+  const [kicking, setKicking] = useState(false);
+
+  const kick = async () => {
+    setKicking(true);
+    try {
+      await api.kickWorkloadCluster(name);
+      wc.reload();
+    } catch (err) {
+      window.alert(errorMessage(err));
+    } finally {
+      setKicking(false);
+    }
+  };
 
   return (
     <Page
@@ -367,9 +387,19 @@ export function ClusterViewPage() {
             Open shell
           </Link>
           {!isManagement && (
-            <Link className="button" to={`/clusters/${name}/edit`}>
-              Edit
-            </Link>
+            <>
+              <button
+                className="button"
+                disabled={kicking}
+                title="Nudge the operator into reconciling this cluster right now, instead of waiting for its next naturally-triggered update."
+                onClick={() => void kick()}
+              >
+                {kicking ? 'Kicking…' : 'Kick'}
+              </button>
+              <Link className="button" to={`/clusters/${name}/edit`}>
+                Edit
+              </Link>
+            </>
           )}
         </>
       }

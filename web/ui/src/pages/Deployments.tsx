@@ -68,6 +68,15 @@ export function DeploymentsPage() {
             className: 'actions',
             render: d => (
               <span className="row" style={{ justifyContent: 'flex-end' }}>
+                <button
+                  className="small"
+                  title="Nudge the operator into reconciling this deployment right now, instead of waiting for its next naturally-triggered update."
+                  onClick={() =>
+                    void api.kickDeployment(d.metadata.name).catch(err => window.alert(errorMessage(err)))
+                  }
+                >
+                  Kick
+                </button>
                 <Link className="button small" to={`/deployments/${d.metadata.name}/edit`}>
                   Edit
                 </Link>
@@ -517,19 +526,42 @@ export function DeploymentViewPage() {
   const deployment = useResource(() => api.deployment(name), [name], 10000);
   const testCases = useResource(() => api.testCases(), [], 15000);
   const testids = (testCases.data ?? []).filter(tc => tc.spec.deploymentRef.name === name).map(tc => tc.metadata.name);
+  const [kicking, setKicking] = useState(false);
 
   const d = deployment.data;
   const cluster = d?.spec.clusterRef?.name;
   const ns = d?.spec.namespace;
+
+  const kick = async () => {
+    setKicking(true);
+    try {
+      await api.kickDeployment(name);
+      deployment.reload();
+    } catch (err) {
+      window.alert(errorMessage(err));
+    } finally {
+      setKicking(false);
+    }
+  };
 
   return (
     <Page
       title={name}
       subtitle={d && `AuthentikDeployment on ${cluster ?? 'the management cluster'}, namespace ${ns}`}
       actions={
-        <Link className="button" to={`/deployments/${name}/edit`}>
-          Edit
-        </Link>
+        <>
+          <button
+            className="button"
+            disabled={kicking}
+            title="Nudge the operator into reconciling this deployment right now, instead of waiting for its next naturally-triggered update."
+            onClick={() => void kick()}
+          >
+            {kicking ? 'Kicking…' : 'Kick'}
+          </button>
+          <Link className="button" to={`/deployments/${name}/edit`}>
+            Edit
+          </Link>
+        </>
       }
     >
       <Alert>{deployment.error}</Alert>

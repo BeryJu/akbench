@@ -19,6 +19,7 @@
 // same-origin and the credential is a plain Authorization: Bearer header -
 // either the static API token or an OIDC access token, see auth.tsx.
 import {
+  Alert,
   AuthentikDeployment,
   AuthentikDeploymentSpec,
   Cluster,
@@ -126,6 +127,8 @@ export const api = {
   workloadCluster: (name: string) => request<WorkloadCluster>(`/api/v1/workloadclusters/${seg(name)}`),
   updateWorkloadCluster: (name: string, obj: { spec: WorkloadClusterSpec }) =>
     request<WorkloadCluster>(`/api/v1/workloadclusters/${seg(name)}`, json('PUT', obj)),
+  kickWorkloadCluster: (name: string) =>
+    request<WorkloadCluster>(`/api/v1/workloadclusters/${seg(name)}/reconcile`, json('POST', {})),
 
   // -- Deployments
   deployments: () => request<List<AuthentikDeployment>>('/api/v1/deployments').then(r => r.items ?? []),
@@ -135,6 +138,8 @@ export const api = {
   updateDeployment: (name: string, obj: { spec: AuthentikDeploymentSpec }) =>
     request<AuthentikDeployment>(`/api/v1/deployments/${seg(name)}`, json('PUT', obj)),
   deleteDeployment: (name: string) => request<void>(`/api/v1/deployments/${seg(name)}`, { method: 'DELETE' }),
+  kickDeployment: (name: string) =>
+    request<AuthentikDeployment>(`/api/v1/deployments/${seg(name)}/reconcile`, json('POST', {})),
   getExtraValues: (name: string) =>
     request<{ valuesYAML: string }>(`/api/v1/deployments/${seg(name)}/extra-values`),
   setExtraValues: (name: string, valuesYAML: string) =>
@@ -183,6 +188,10 @@ export const api = {
       `/api/v1/metrics/range?testids=${seg(testids.join(','))}` +
         `&metric=${seg(metric)}&start=${startSeconds}&end=${endSeconds}&step=${seg(step)}`
     ),
+
+  // -- Alerts (internal/api/alerts.go) - aggregated across every workload
+  // cluster's own Alertmanager, there is no central instance.
+  alerts: () => request<List<Alert>>('/api/v1/alerts').then(r => r.items ?? []),
 
   // -- Shell (internal/api/shell.go)
   shellContexts: () => request<List<ShellContext>>('/api/v1/shell/contexts').then(r => r.items ?? []),

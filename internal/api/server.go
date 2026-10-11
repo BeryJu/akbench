@@ -138,6 +138,7 @@ func (s *Server) Router() http.Handler {
 				r.Put("/"+path+"/{name}", s.replaceResource(kind))
 				r.Delete("/"+path+"/{name}", s.deleteResource(kind))
 				r.Get("/"+path+"/{name}/status", s.getResourceStatus(kind))
+				r.Post("/"+path+"/{name}/reconcile", s.kickResource(kind))
 			}
 
 			r.Get("/deployments/{name}/extra-values", s.getExtraValues)
