@@ -94,8 +94,10 @@ func New(c client.Client, cfg Config) *Server {
 	if httpClient == nil {
 		httpClient = &http.Client{Timeout: 30 * time.Second}
 	}
-	return &Server{client: c, cfg: cfg, http: httpClient, shell: newShellState(), grafanaKey: newGrafanaSessionKey(),
-		traces: &traceBreakdownCache{entries: map[string]TraceBreakdown{}}}
+	return &Server{
+		client: c, cfg: cfg, http: httpClient, shell: newShellState(), grafanaKey: newGrafanaSessionKey(),
+		traces: &traceBreakdownCache{entries: map[string]TraceBreakdown{}},
+	}
 }
 
 // probeStatusField is the JSON key /healthz and /readyz answer under -

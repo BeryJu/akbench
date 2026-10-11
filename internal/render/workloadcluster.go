@@ -65,6 +65,7 @@ func infrastructureMachineTemplateKind(wc *benchv1alpha1.WorkloadCluster) string
 // (a Cluster named "x" pairs with a KubeadmControlPlane "x-control-plane" and
 // a worker MachineDeployment per pool, "x-<pool>").
 func ControlPlaneName(wc *benchv1alpha1.WorkloadCluster) string { return wc.Name + "-control-plane" }
+
 func MachineDeploymentName(wc *benchv1alpha1.WorkloadCluster, pool benchv1alpha1.WorkerPoolSpec) string {
 	return wc.Name + "-" + pool.Name
 }

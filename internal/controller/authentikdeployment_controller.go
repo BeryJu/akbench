@@ -237,7 +237,8 @@ func (r *AuthentikDeploymentReconciler) helmReleaseReadiness(ctx context.Context
 // deployment with no blueprint configured reports Ready with nothing done, so
 // it never blocks the overall Ready condition.
 func (r *AuthentikDeploymentReconciler) reconcileBlueprint(ctx context.Context, rc client.Client, topo *benchv1alpha1.AuthentikDeployment,
-	hasBlueprint bool, helmReleaseReady metav1.ConditionStatus, content string) (metav1.ConditionStatus, string, bool) {
+	hasBlueprint bool, helmReleaseReady metav1.ConditionStatus, content string,
+) (metav1.ConditionStatus, string, bool) {
 	switch {
 	case !hasBlueprint:
 		return metav1.ConditionTrue, "no fixtures blueprint configured", false

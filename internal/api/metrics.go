@@ -81,22 +81,38 @@ const (
 // `sum by (...)` argument kept, so target survives through the quantile
 // metrics too.
 var compareMetrics = []CompareMetric{
-	{Key: metricKeyHTTPReqs, Label: "HTTP requests/s", Unit: "req/s", Better: betterHigher,
-		Query: `sum by (target) (rate(k6_http_reqs_total{%s}[%s]))`},
-	{Key: metricKeyIterations, Label: "Transactions/s", Unit: "tx/s", Better: betterHigher,
-		Query: `sum by (target) (rate(k6_iterations_total{%s}[%s]))`},
-	{Key: "http_req_duration_p95", Label: "Request duration p95", Unit: "s", Better: betterLower,
-		Query: `histogram_quantile(0.95, sum by (target) (rate(k6_http_req_duration_seconds{%s}[%s])))`},
-	{Key: "http_req_duration_p99", Label: "Request duration p99", Unit: "s", Better: betterLower,
-		Query: `histogram_quantile(0.99, sum by (target) (rate(k6_http_req_duration_seconds{%s}[%s])))`},
-	{Key: "iteration_duration_p95", Label: "Transaction duration p95", Unit: "s", Better: betterLower,
-		Query: `histogram_quantile(0.95, sum by (target) (rate(k6_iteration_duration_seconds{%s}[%s])))`},
-	{Key: "http_req_failed", Label: "Failed requests", Unit: "ratio", Better: betterLower,
-		Query: `avg by (target) (k6_http_req_failed_rate{%s})`},
-	{Key: "checks", Label: "Passing checks", Unit: "ratio", Better: betterHigher,
-		Query: `avg by (target) (k6_checks_rate{%s})`},
-	{Key: metricKeyVUs, Label: "Peak VUs", Unit: metricKeyVUs, Better: betterHigher,
-		Query: `max by (target) (k6_vus{%s})`},
+	{
+		Key: metricKeyHTTPReqs, Label: "HTTP requests/s", Unit: "req/s", Better: betterHigher,
+		Query: `sum by (target) (rate(k6_http_reqs_total{%s}[%s]))`,
+	},
+	{
+		Key: metricKeyIterations, Label: "Transactions/s", Unit: "tx/s", Better: betterHigher,
+		Query: `sum by (target) (rate(k6_iterations_total{%s}[%s]))`,
+	},
+	{
+		Key: "http_req_duration_p95", Label: "Request duration p95", Unit: "s", Better: betterLower,
+		Query: `histogram_quantile(0.95, sum by (target) (rate(k6_http_req_duration_seconds{%s}[%s])))`,
+	},
+	{
+		Key: "http_req_duration_p99", Label: "Request duration p99", Unit: "s", Better: betterLower,
+		Query: `histogram_quantile(0.99, sum by (target) (rate(k6_http_req_duration_seconds{%s}[%s])))`,
+	},
+	{
+		Key: "iteration_duration_p95", Label: "Transaction duration p95", Unit: "s", Better: betterLower,
+		Query: `histogram_quantile(0.95, sum by (target) (rate(k6_iteration_duration_seconds{%s}[%s])))`,
+	},
+	{
+		Key: "http_req_failed", Label: "Failed requests", Unit: "ratio", Better: betterLower,
+		Query: `avg by (target) (k6_http_req_failed_rate{%s})`,
+	},
+	{
+		Key: "checks", Label: "Passing checks", Unit: "ratio", Better: betterHigher,
+		Query: `avg by (target) (k6_checks_rate{%s})`,
+	},
+	{
+		Key: metricKeyVUs, Label: "Peak VUs", Unit: metricKeyVUs, Better: betterHigher,
+		Query: `max by (target) (k6_vus{%s})`,
+	},
 }
 
 // safeLabelValue matches the Kubernetes object names that become testid
