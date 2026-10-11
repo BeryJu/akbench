@@ -242,13 +242,13 @@ func main() {
 		setupLog.Error(err, "Failed to create controller", "controller", "workloadcluster")
 		os.Exit(1)
 	}
-	if err := (&controller.HeadlampKubeconfigReconciler{
+	if err := (&controller.ShellKubeconfigReconciler{
 		Client:     mgr.GetClient(),
 		Scheme:     mgr.GetScheme(),
-		Namespace:  envOr("BENCH_HEADLAMP_NAMESPACE", "headlamp"),
-		SecretName: envOr("BENCH_HEADLAMP_KUBECONFIG_SECRET", "headlamp-kubeconfig"),
+		Namespace:  envOr("BENCH_SHELL_KUBECONFIG_NAMESPACE", "authentik-bench"),
+		SecretName: envOr("BENCH_SHELL_KUBECONFIG_SECRET_NAME", "shell-kubeconfig"),
 	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "Failed to create controller", "controller", "headlampkubeconfig")
+		setupLog.Error(err, "Failed to create controller", "controller", "shellkubeconfig")
 		os.Exit(1)
 	}
 	// +kubebuilder:scaffold:builder

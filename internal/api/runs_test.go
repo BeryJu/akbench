@@ -21,6 +21,7 @@ import (
 	"net/http"
 	"testing"
 
+	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
@@ -52,6 +53,45 @@ func TestCreateRun(t *testing.T) {
 	}
 	if run.GenerateName != "login-quick-" {
 		t.Fatalf("run generateName is %q", run.GenerateName)
+	}
+	if run.Spec.DeploymentRef == nil || run.Spec.DeploymentRef.Name != "single-node" {
+		t.Fatalf("run deploymentRef = %+v, want single-node", run.Spec.DeploymentRef)
+	}
+}
+
+// A TestCase driving more than one deployment fans "Run now" out into one
+// TestRun per target, each pinned to its own deployment - the metrics-facing
+// motivation for multi-deployment TestCases in the first place (one request,
+// N independently inspectable runs instead of N near-identical TestCases).
+func TestCreateRunFansOutAcrossMultipleDeployments(t *testing.T) {
+	tc := sampleTestCase("login-quick", "single-node", benchv1alpha1.ProfileQuick)
+	tc.Spec.DeploymentRefs = []corev1.LocalObjectReference{{Name: "single-node"}, {Name: "multi-node"}}
+
+	s, c := newServer(t, Config{},
+		sampleDeployment("single-node"),
+		sampleDeployment("multi-node"),
+		tc,
+	)
+
+	rec := do(t, s, http.MethodPost, "/api/v1/testcases/login-quick/runs", nil)
+	requireStatus(t, rec, http.StatusCreated)
+
+	var runs benchv1alpha1.TestRunList
+	if err := c.List(context.Background(), &runs, client.InNamespace(testNamespace)); err != nil {
+		t.Fatalf("list runs: %v", err)
+	}
+	if len(runs.Items) != 2 {
+		t.Fatalf("got %d TestRuns, want 2 (one per deployment)", len(runs.Items))
+	}
+	targets := map[string]bool{}
+	for _, run := range runs.Items {
+		if run.Spec.DeploymentRef == nil {
+			t.Fatalf("run %s has no deploymentRef", run.Name)
+		}
+		targets[run.Spec.DeploymentRef.Name] = true
+	}
+	if !targets["single-node"] || !targets["multi-node"] {
+		t.Fatalf("runs target %v, want both single-node and multi-node", targets)
 	}
 }
 

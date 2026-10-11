@@ -3,7 +3,7 @@
 A Kubernetes-native replacement for the Ansible/docker-compose authentik
 benchmark harness at
 [BeryJu/authentik-benchmark](https://github.com/BeryJu/authentik-benchmark):
-an operator plus a [Headlamp](https://headlamp.dev)-based web UI for defining
+an operator plus a web UI (with an in-browser `kubectl` shell) for defining
 k6 load-test cases against different authentik deployment topologies -
 replica counts, node placement (dedicated vs. shared nodes), and Postgres
 backend (embedded subchart, CloudNativePG HA, or external) - with
@@ -38,8 +38,8 @@ Implemented so far:
   metrics-server, csi-incus (the cluster's only `StorageClass`, backed by a
   real Incus storage pool), and - in the `bench-system` namespace -
   kube-prometheus-stack (Prometheus with the remote-write receiver k6 pushes
-  to, node-exporter, kube-state-metrics), Grafana (anonymous-admin, embedded
-  in Headlamp via `cmd/apiserver`'s own reverse proxy - see below), Pyroscope,
+  to, node-exporter, kube-state-metrics), Grafana (anonymous-admin, reachable
+  through `cmd/apiserver`'s own reverse proxy - see below), Pyroscope,
   and Tempo.
 - **`clusterRef`/`runnerClusterRef`**: `AuthentikDeploymentReconciler`,
   `TestCaseReconciler`, and `TestRunReconciler` all resolve these to a live
@@ -77,37 +77,41 @@ Implemented so far:
   `testid`/`target`/`profile` tag scheme and env var contract
   (`TEST_ID`/`TARGET`/`BENCH_HOST`/... ), guarded by `test/contract`.
 - **Fixtures**: `fixtures/gen-blueprint.py` ported unchanged.
-- **Test-case templates**: `TestCaseTemplate` is a real, Headlamp-editable
+- **Test-case templates**: `TestCaseTemplate` is a real, UI-editable
   CRD (list/create/edit/delete, Monaco editor for the script) - the operator
   seeds two built-in ones at startup (`login`, `oauth-oidc`, the latter
   driving a real OAuth2/OIDC authorization-code round trip through
   [BeryJu/oidc-test-client](https://github.com/BeryJu/oidc-test-client)),
   sourced from the exact same embedded `k6/scripts/*.ts` files the operator
-  binary carries (create-only, so editing one via Headlamp is never
+  binary carries (create-only, so editing one in the UI is never
   clobbered by a later restart). A SAML template slot is reserved but not
   implemented yet.
-- **Web UI**: `internal/api` is a REST/JSON backend (chi router, bearer-token
-  auth) that CRUDs every CRD as unstructured objects (the CRD schema stays
-  the single source of truth), proxies PromQL for the compare view (resolved
-  per-testid against whichever cluster's own Prometheus actually has that
-  data - see `prometheusURLForTestID`), and reverse-proxies a workload
-  cluster's own Grafana for embedding (`/grafana-proxy/<cluster>/...`,
-  `internal/api/grafana_proxy.go`) - deployed in-cluster
-  (`make deploy-apiserver`, `hack/dev-apiserver.yaml`). The UI itself is
-  [Headlamp](https://headlamp.dev) (`make headlamp`,
-  `hack/dev-headlamp-values.yaml`) plus `web/headlamp-plugin`, a custom
-  plugin (guided create/edit forms for every CRD, a Compare page, a Grafana
-  tab, a TestRuns history page, and metrics charting) for what Headlamp has
-  no native concept of, reached through Headlamp's own `ApiProxy` (a
-  Kubernetes API Service-proxy call, not a browser-direct one).
-  `make headlamp-plugin` copies a fresh build straight into the running pod
-  for fast dev-loop iteration (wiped on a Headlamp pod restart);
-  `make deploy-headlamp-plugin` bakes it into an image installed as a
-  Headlamp initContainer instead, so it survives one. Everything else
-  (listing/creating/editing every CRD as raw YAML, pod logs, events,
-  multi-cluster switching across every CAPI-provisioned `WorkloadCluster`) is
-  Headlamp's own generic Kubernetes UI - see `HeadlampKubeconfigReconciler`
-  for how every `WorkloadCluster` becomes a switchable cluster automatically.
+- **Web UI**: `internal/api` is a REST/JSON backend (chi router) that CRUDs
+  every CRD as unstructured objects (the CRD schema stays the single source
+  of truth), proxies PromQL for the compare view (resolved per-testid
+  against whichever cluster's own Prometheus actually has that data - see
+  `prometheusURLsForTestID`), and reverse-proxies a workload cluster's own
+  Grafana (`/grafana-proxy/<cluster>/...`). The same `cmd/apiserver`
+  process serves the UI itself, `web/ui` - a Vite + React SPA (no SSR) with
+  guided forms for every CRD, native metrics charts and a Compare view - so
+  the whole UI is one Deployment (`make deploy-apiserver`,
+  `hack/dev-apiserver.yaml`; `make ui-dev` for a live-reloading dev server).
+  - **`kubectl` shell**: the UI's centerpiece - real shells on a PTY
+    (`internal/api/shell.go`) bridged to xterm.js over a WebSocket, with
+    `KUBECONFIG` pointed at a per-session copy of the merged kubeconfig
+    `ShellKubeconfigReconciler` maintains, so every context (the
+    management cluster plus each Ready `WorkloadCluster`) is one tab away.
+    It replaces generic resource browsing: pages link into it with the
+    relevant command typed at the prompt (never run until you press Enter).
+    The WebSocket authenticates with a single-use, 10-second ticket minted by
+    a normal authenticated request, and closing a tab kills that shell's
+    whole process session.
+  - **Auth**: OIDC (authorization code + PKCE, the SPA as a public client;
+    `cmd/apiserver` verifies the JWT against the issuer's JWKS, optionally
+    requiring a group - `BENCH_OIDC_ISSUER`/`BENCH_OIDC_CLIENT_ID`/
+    `BENCH_OIDC_REQUIRED_GROUP`) and/or a static bearer token
+    (`BENCH_API_TOKEN`/`--token-secret`). Register `<origin>/auth/callback`
+    and `<origin>/auth/silent` as redirect URIs on the provider.
 
 The original plan's central, mTLS-secured metrics receiver was superseded by
 the per-workload-cluster observability stack described above once it became

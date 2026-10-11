@@ -42,7 +42,23 @@ const (
 // object's name is the k6 `testid` tag every dashboard splits on.
 type TestCaseSpec struct {
 	// deploymentRef names the AuthentikDeployment this test drives.
-	DeploymentRef corev1.LocalObjectReference `json:"deploymentRef"`
+	//
+	// Deprecated: use deploymentRefs instead, which supports driving the
+	// same test against multiple deployments at once. Still read whenever
+	// deploymentRefs is empty (see TestCase.Deployments), so existing
+	// objects keep working unchanged.
+	// +optional
+	DeploymentRef corev1.LocalObjectReference `json:"deploymentRef,omitzero"`
+
+	// deploymentRefs names every AuthentikDeployment this test drives - the
+	// test runs independently against each one (same script/VUs/iterations),
+	// tagged with its own k6 `target` so dashboards/compare views can tell
+	// them apart. At least one of deploymentRef/deploymentRefs must resolve
+	// to something (see TestCase.Deployments); the controller reports a
+	// clear condition if neither does, rather than the CRD enforcing a
+	// oneof at the schema level.
+	// +optional
+	DeploymentRefs []corev1.LocalObjectReference `json:"deploymentRefs,omitempty"`
 
 	// runnerClusterRef names the cluster.x-k8s.io/v1beta1 Cluster the k6
 	// workload itself runs on. Defaults to the deployment's clusterRef.
@@ -109,6 +125,22 @@ type TestCaseSpec struct {
 	ExtraTags map[string]string `json:"extraTags,omitempty"`
 }
 
+// TestCaseDeploymentStatus is one targeted deployment's own status within a
+// (possibly multi-deployment) TestCase.
+type TestCaseDeploymentStatus struct {
+	// name is the AuthentikDeployment object name (one of TestCase.Deployments()).
+	Name string `json:"name"`
+
+	// ready mirrors whether this specific deployment's own k6 workload
+	// (Burn Deployment, or readiness to accept a Quick TestRun) is set up.
+	Ready bool `json:"ready"`
+
+	// burnWorkloadRef names the owned Deployment driving this target when
+	// profile is Burn.
+	// +optional
+	BurnWorkloadRef *corev1.LocalObjectReference `json:"burnWorkloadRef,omitempty"`
+}
+
 // TestCaseStatus defines the observed state of TestCase.
 type TestCaseStatus struct {
 	// conditions report Ready, DeploymentReady and ScriptReady.
@@ -122,9 +154,12 @@ type TestCaseStatus struct {
 	// +optional
 	Phase ReconcilePhase `json:"phase,omitempty"`
 
-	// burnWorkloadRef names the owned Deployment when profile is Burn.
+	// deployments is one entry per TestCase.Deployments() target - replaces
+	// the single burnWorkloadRef an earlier, single-deployment-only version
+	// of this status had (status is always recomputed fresh every
+	// reconcile, so there was nothing to preserve across that change).
 	// +optional
-	BurnWorkloadRef *corev1.LocalObjectReference `json:"burnWorkloadRef,omitempty"`
+	Deployments []TestCaseDeploymentStatus `json:"deployments,omitempty"`
 
 	// +optional
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
@@ -132,7 +167,7 @@ type TestCaseStatus struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:printcolumn:name="Deployment",type=string,JSONPath=`.spec.deploymentRef.name`
+// +kubebuilder:printcolumn:name="Deployment",type=string,JSONPath=`.spec.deploymentRefs[*].name`
 // +kubebuilder:printcolumn:name="Profile",type=string,JSONPath=`.spec.profile`
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
 // +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=="Ready")].status`
@@ -149,6 +184,42 @@ type TestCase struct {
 
 	// +optional
 	Status TestCaseStatus `json:"status,omitzero"`
+}
+
+// Deployments returns every deployment this TestCase drives, preferring
+// spec.deploymentRefs when set and falling back to the single, deprecated
+// spec.deploymentRef otherwise. This is the only supported way to read
+// which deployments a TestCase targets - every controller/API call site
+// goes through this rather than either field directly, so a pre-migration
+// TestCase (deploymentRef only) keeps working identically forever. Returns
+// nil if neither field is set (the controller reports a clear condition
+// for that case rather than this method guessing).
+func (tc *TestCase) Deployments() []corev1.LocalObjectReference {
+	return tc.Spec.Deployments()
+}
+
+// Deployments is TestCase.Deployments on a bare spec, for callers that only
+// hold one (e.g. a TestRun's status.resolvedSpec snapshot).
+func (s *TestCaseSpec) Deployments() []corev1.LocalObjectReference {
+	if len(s.DeploymentRefs) > 0 {
+		return s.DeploymentRefs
+	}
+	if s.DeploymentRef.Name != "" {
+		return []corev1.LocalObjectReference{s.DeploymentRef}
+	}
+	return nil
+}
+
+// MigrateDeploymentRef moves a deprecated singular spec.deploymentRef into
+// spec.deploymentRefs, returning whether anything changed. Lossless:
+// Deployments() resolves to the same list before and after.
+func (s *TestCaseSpec) MigrateDeploymentRef() bool {
+	if len(s.DeploymentRefs) > 0 || s.DeploymentRef.Name == "" {
+		return false
+	}
+	s.DeploymentRefs = []corev1.LocalObjectReference{s.DeploymentRef}
+	s.DeploymentRef = corev1.LocalObjectReference{}
+	return true
 }
 
 // +kubebuilder:object:root=true

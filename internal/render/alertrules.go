@@ -63,10 +63,22 @@ const (
 //     scrape-level alert above - it means postgres_exporter itself reached
 //     Postgres and got told the server isn't accepting connections, not
 //     just that the exporter's own /metrics endpoint is unreachable.
-//   - AuthentikBenchHighRequestFailureRate: k6_http_req_failed_rate is the
-//     same metric gitops/dashboards/k6.json's "Failed requests" panel
-//     already graphs - a benchmark run itself failing heavily is worth
-//     surfacing as an alert, not just a dashboard line.
+//   - AuthentikBenchHighRequestFailureRate: a request-volume-weighted ratio
+//     of k6_http_reqs_total{expected_response="false"} over all
+//     k6_http_reqs_total, grouped by testid/target/profile - NOT a bare
+//     k6_http_req_failed_rate threshold (that was this rule's first version,
+//     and it was wrong: k6 tags every metric with the full request context,
+//     including its own status code, so k6_http_req_failed_rate emits one
+//     series per distinct (method,status,url,...) combination, and every
+//     series belonging to a non-2xx/3xx status is pinned at exactly 1 by
+//     definition - averaging across these series is not the same as the
+//     true proportion of failed requests, and can read as "25% failed" (1
+//     failing series out of 4 distinct ones) when the real, volume-weighted
+//     failure rate is 0.05%. Confirmed live against a real burn test: 105
+//     failed requests out of ~196,150 total. gitops/dashboards/k6.json's own
+//     "Failed requests" panel had the same flaw (an unweighted
+//     `avg by (testid) (k6_http_req_failed_rate{...})`) and was fixed
+//     alongside this rule - see that file's own history.
 //   - AuthentikBenchWorkerTaskErrors: authentik_tasks_errors_total counts
 //     authentik's own background task failures (blueprint apply, outpost
 //     sync, etc.) - a real signal no generic k8s-level rule could derive.
@@ -102,14 +114,15 @@ func DefaultAlertRules() *unstructured.Unstructured {
 		},
 		map[string]any{
 			"alert": "AuthentikBenchHighRequestFailureRate",
-			"expr":  `k6_http_req_failed_rate > 0.05`,
-			"for":   "5m",
+			"expr": `sum by (testid, target, profile) (rate(k6_http_reqs_total{expected_response="false"}[5m]))` +
+				` / sum by (testid, target, profile) (rate(k6_http_reqs_total[5m])) > 0.05`,
+			"for": "5m",
 			"labels": map[string]any{
 				"severity": "warning",
 			},
 			"annotations": map[string]any{
 				"summary":     "test {{ $labels.testid }} against {{ $labels.target }} has a >5% HTTP failure rate",
-				"description": "k6_http_req_failed_rate has been above 0.05 for 5m on testid={{ $labels.testid }} target={{ $labels.target }} profile={{ $labels.profile }}.",
+				"description": "More than 5% of requests failed over the last 5m on testid={{ $labels.testid }} target={{ $labels.target }} profile={{ $labels.profile }}, weighted by actual request volume (not an average across k6's own per-status series).",
 			},
 		},
 		map[string]any{

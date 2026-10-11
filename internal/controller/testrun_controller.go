@@ -152,7 +152,15 @@ func (r *TestRunReconciler) start(ctx context.Context, run *benchv1alpha1.TestRu
 	resolvedTC := tc.DeepCopy()
 	resolvedTC.Spec = *resolved
 
-	topo, targetName, host, port, err := resolveReadyDeployment(ctx, r.Client, tc.Namespace, tc.Spec.DeploymentRef.Name)
+	deploymentRef, err := resolvedRunDeploymentRef(&run.Spec, &tc.Spec)
+	if err != nil {
+		setCondition(r.Recorder, run, &run.Status.Conditions, run.Generation, benchv1alpha1.ConditionReady, metav1.ConditionFalse,
+			benchv1alpha1.ReasonReconcileError, err.Error())
+		run.Status.Phase = benchv1alpha1.TestRunFailed
+		return ctrl.Result{}, r.Status().Update(ctx, run)
+	}
+
+	topo, targetName, host, port, err := resolveReadyDeployment(ctx, r.Client, tc.Namespace, deploymentRef.Name)
 	if err != nil {
 		if errors.Is(err, errDeploymentNotReady) {
 			setCondition(r.Recorder, run, &run.Status.Conditions, run.Generation, benchv1alpha1.ConditionReady, metav1.ConditionFalse,
@@ -193,12 +201,13 @@ func (r *TestRunReconciler) start(ctx context.Context, run *benchv1alpha1.TestRu
 			return ctrl.Result{RequeueAfter: 5 * time.Second}, r.Status().Update(ctx, run)
 		}
 		if tmpl.Spec.RequiresOAuthClient {
-			oauthHost, oauthPort = oidcTestClientHostPort(&tc)
+			oauthHost, oauthPort = oidcTestClientHostPort(&tc, deploymentRef.Name)
 		}
 	}
 
 	params := render.K6WorkloadParams{
 		TestCase:            resolvedTC,
+		DeploymentName:      deploymentRef.Name,
 		TargetName:          targetName,
 		BenchHost:           host,
 		BenchPort:           port,
@@ -230,7 +239,7 @@ func (r *TestRunReconciler) start(ctx context.Context, run *benchv1alpha1.TestRu
 	setCondition(r.Recorder, run, &run.Status.Conditions, run.Generation, benchv1alpha1.ConditionReady, metav1.ConditionFalse,
 		benchv1alpha1.ReasonReconciling, "quick job started")
 
-	gc := r.resolveGrafanaClient(ctx, run.Namespace, tc.Spec.DeploymentRef.Name)
+	gc := r.resolveGrafanaClient(ctx, run.Namespace, deploymentRef.Name)
 	if gc.Enabled() {
 		text := fmt.Sprintf("quick test %s against %s: %d VUs x %d iterations", tc.Name, targetName, resolved.VUs, resolved.Iterations)
 		id, err := gc.Annotate(ctx, now.Time, time.Time{}, []string{"k6", "quick", "test:" + tc.Name, "target:" + targetName}, text)
@@ -254,8 +263,10 @@ func (r *TestRunReconciler) resolveRunRunnerClient(ctx context.Context, run *ben
 	}
 	var topo benchv1alpha1.AuthentikDeployment
 	var topoClusterRef corev1.LocalObjectReference
-	if err := r.Get(ctx, types.NamespacedName{Name: run.Status.ResolvedSpec.DeploymentRef.Name, Namespace: run.Namespace}, &topo); err == nil {
-		topoClusterRef = topo.Spec.ClusterRef
+	if deploymentRef, derr := resolvedRunDeploymentRef(&run.Spec, run.Status.ResolvedSpec); derr == nil {
+		if err := r.Get(ctx, types.NamespacedName{Name: deploymentRef.Name, Namespace: run.Namespace}, &topo); err == nil {
+			topoClusterRef = topo.Spec.ClusterRef
+		}
 	}
 	rc, _, err := resolveRunnerClient(ctx, r.Tracker, r.Client, run.Namespace, run.Status.ResolvedSpec.RunnerClusterRef, topoClusterRef)
 	return rc, err
@@ -298,13 +309,15 @@ func (r *TestRunReconciler) finish(ctx context.Context, run *benchv1alpha1.TestR
 	setCondition(r.Recorder, run, &run.Status.Conditions, run.Generation, benchv1alpha1.ConditionReady, ready, benchv1alpha1.ReasonReady, message)
 
 	if run.Status.StartTime != nil && run.Status.ResolvedSpec != nil {
-		targetName := run.Status.ResolvedSpec.DeploymentRef.Name
-		testName := run.Spec.TestCaseRef.Name
-		gc := r.resolveGrafanaClient(ctx, run.Namespace, targetName)
-		if gc.Enabled() {
-			if _, err := gc.Annotate(ctx, run.Status.StartTime.Time, now.Time,
-				[]string{"k6", "quick", "test:" + testName, "target:" + targetName}, message); err != nil {
-				logf.FromContext(ctx).Error(err, "failed to post Grafana completion annotation")
+		if deploymentRef, err := resolvedRunDeploymentRef(&run.Spec, run.Status.ResolvedSpec); err == nil {
+			targetName := deploymentRef.Name
+			testName := run.Spec.TestCaseRef.Name
+			gc := r.resolveGrafanaClient(ctx, run.Namespace, targetName)
+			if gc.Enabled() {
+				if _, err := gc.Annotate(ctx, run.Status.StartTime.Time, now.Time,
+					[]string{"k6", "quick", "test:" + testName, "target:" + targetName}, message); err != nil {
+					logf.FromContext(ctx).Error(err, "failed to post Grafana completion annotation")
+				}
 			}
 		}
 	}

@@ -26,10 +26,10 @@ import (
 
 func TestOIDCTestClientObjects(t *testing.T) {
 	tc := &benchv1alpha1.TestCase{ObjectMeta: metav1.ObjectMeta{Name: "oauth-test", Namespace: "default"}}
-	dep := OIDCTestClientDeployment(tc, "default", "http://authentik.example/application/o/oauth-test/", "client-id-123", "sekrit")
-	svc := OIDCTestClientService(tc, "default")
+	dep := OIDCTestClientDeployment(tc, "topo-a", "default", "http://authentik.example/application/o/oauth-test/", "client-id-123", "sekrit")
+	svc := OIDCTestClientService(tc, "topo-a", "default")
 
-	wantName := "oidc-test-client-oauth-test"
+	wantName := "oidc-test-client-oauth-test-topo-a"
 	if dep.Name != wantName {
 		t.Errorf("Deployment name = %q, want %q", dep.Name, wantName)
 	}
@@ -53,11 +53,11 @@ func TestOIDCTestClientObjects(t *testing.T) {
 	if env["OIDC_PROVIDER"] != "http://authentik.example/application/o/oauth-test/" {
 		t.Errorf("OIDC_PROVIDER = %q, want the issuer URL", env["OIDC_PROVIDER"])
 	}
-	wantRootURL := "http://oidc-test-client-oauth-test.default.svc.cluster.local:9009"
+	wantRootURL := "http://oidc-test-client-oauth-test-topo-a.default.svc.cluster.local:9009"
 	if env["OIDC_ROOT_URL"] != wantRootURL {
 		t.Errorf("OIDC_ROOT_URL = %q, want %q", env["OIDC_ROOT_URL"], wantRootURL)
 	}
-	if got := OIDCTestClientRootURL(tc, "default"); got != wantRootURL {
+	if got := OIDCTestClientRootURL(tc, "topo-a", "default"); got != wantRootURL {
 		t.Errorf("OIDCTestClientRootURL = %q, want %q", got, wantRootURL)
 	}
 

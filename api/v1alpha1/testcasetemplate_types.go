@@ -25,12 +25,12 @@ import (
 // via spec.template (by this object's name) - the editable, cluster-native
 // replacement for what used to be a fixed, code-compiled catalog
 // (internal/testtemplate's own Registry, now removed). Editing a template
-// here - through Headlamp, or plain kubectl - takes effect the next time a
+// here - through the web UI, or plain kubectl - takes effect the next time a
 // TestCase referencing it reconciles; nothing needs rebuilding or
 // redeploying.
 type TestCaseTemplateSpec struct {
 	// description documents what this template exercises, shown in the
-	// Headlamp plugin's template picker.
+	// web UI's template picker.
 	// +optional
 	Description string `json:"description,omitempty"`
 
@@ -57,7 +57,7 @@ type TestCaseTemplateStatus struct {
 	// conditions report Ready - True once spec.script is non-empty. A
 	// template has no remote/owned resources of its own to reconcile; this
 	// only exists so a broken template (e.g. accidentally emptied via
-	// Headlamp) is visible the same way every other CRD's status already is.
+	// kubectl edit) is visible the same way every other CRD's status already is.
 	// +listType=map
 	// +listMapKey=type
 	// +optional

@@ -123,31 +123,34 @@ run: manifests generate fmt vet ## Run a controller from your host.
 	go run ./cmd/main.go
 
 .PHONY: run-apiserver
-run-apiserver: fmt vet ## Run the web UI backend against the current kubeconfig context.
-	BENCH_API_TOKEN=$${BENCH_API_TOKEN:-dev-token} go run ./cmd/apiserver
+run-apiserver: fmt vet ## Run the web UI backend against the current kubeconfig context (serves web/ui/dist if built; shell only with BENCH_SHELL_KUBECONFIG set).
+	BENCH_API_TOKEN=$${BENCH_API_TOKEN:-dev-token} \
+	BENCH_UI_DIR=$${BENCH_UI_DIR:-$$([ -f web/ui/dist/index.html ] && echo web/ui/dist)} \
+	BENCH_SHELL=$${BENCH_SHELL:-$$(command -v bash || echo /bin/sh)} \
+	go run ./cmd/apiserver
+
+.PHONY: ui
+ui: ## Build the web UI (web/ui) into web/ui/dist, which run-apiserver then serves.
+	cd web/ui && npm ci && npm run build
+
+.PHONY: ui-dev
+ui-dev: ## Run the web UI's Vite dev server on :5173, proxying the API to BENCH_API_URL (default http://localhost:8080).
+	cd web/ui && npm install && npm run dev
+
+.PHONY: ui-test
+ui-test: ## Typecheck and unit-test the web UI.
+	cd web/ui && npm run typecheck && npm test
 
 .PHONY: dev
-dev: ## Start the operator and web API against the current kubeconfig context (see also make headlamp).
+dev: ## Start the operator and web API against the current kubeconfig context (see also make ui-dev).
 	./hack/dev.sh
 
 .PHONY: dev-metrics
 dev-metrics: ## Install a minimal single-cluster Prometheus (remote-write receiver) for local testing.
 	kubectl apply -f hack/dev-prometheus.yaml
 
-.PHONY: headlamp
-headlamp: ## Install/upgrade Headlamp (the Kubernetes UI replacing web/frontend) on the current kubeconfig context.
-	./hack/install-headlamp.sh
-
-.PHONY: headlamp-plugin
-headlamp-plugin: ## Build web/headlamp-plugin and copy it into the running Headlamp pod (fast dev loop; wiped on pod restart).
-	./hack/build-headlamp-plugin.sh
-
-.PHONY: deploy-headlamp-plugin
-deploy-headlamp-plugin: ## Bake web/headlamp-plugin into an image and install it as a Headlamp initContainer (survives pod restarts).
-	./hack/deploy-headlamp-plugin.sh
-
 .PHONY: deploy-apiserver
-deploy-apiserver: ## Build and deploy cmd/apiserver in-cluster, for the Headlamp plugin to reach.
+deploy-apiserver: ## Build and deploy cmd/apiserver (API, web UI and kubectl shell) in-cluster.
 	./hack/deploy-apiserver.sh
 
 .PHONY: fixtures

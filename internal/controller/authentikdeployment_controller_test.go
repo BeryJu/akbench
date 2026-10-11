@@ -23,6 +23,8 @@ import (
 	helmv2 "github.com/fluxcd/helm-controller/api/v2"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	appsv1 "k8s.io/api/apps/v1"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -85,6 +87,58 @@ var _ = Describe("AuthentikDeployment Controller", func() {
 			helmReleaseReady := meta.FindStatusCondition(topo.Status.Conditions, benchv1alpha1.ConditionHelmReleaseReady)
 			Expect(helmReleaseReady).NotTo(BeNil())
 			Expect(helmReleaseReady.Status).To(Equal(metav1.ConditionFalse))
+		})
+
+		// Regression test for a real bug: the postgres role-fix Job used to
+		// be gated on the *whole* HelmRelease's Ready condition, which - as
+		// the test above documents - never becomes True under envtest (no
+		// real helm-controller runs here) and, live, never becomes True for
+		// a deployment whose server/worker pods are crash-looping for
+		// reasons that have nothing to do with postgres (confirmed: exactly
+		// this happened to a real deployment, leaving pg_up stuck at 0
+		// forever even though postgres itself was healthy the whole time).
+		// The Job must appear once the postgres StatefulSet itself is
+		// ready, independent of the rest of the release.
+		It("creates the postgres role-fix Job once the postgres StatefulSet is ready, even if the HelmRelease overall isn't", func() {
+			r := &AuthentikDeploymentReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Recorder: record.NewFakeRecorder(100)}
+			_, err := r.Reconcile(context.Background(), reconcile.Request{NamespacedName: typeNamespacedName})
+			Expect(err).NotTo(HaveOccurred())
+
+			var topo benchv1alpha1.AuthentikDeployment
+			Expect(k8sClient.Get(context.Background(), typeNamespacedName, &topo)).To(Succeed())
+
+			sts := &appsv1.StatefulSet{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      render.EmbeddedPostgresStatefulSetName(&topo),
+					Namespace: topo.Spec.Namespace,
+				},
+				Spec: appsv1.StatefulSetSpec{
+					Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "postgresql"}},
+					Template: corev1.PodTemplateSpec{
+						ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "postgresql"}},
+						Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "postgresql", Image: "postgres:17"}}},
+					},
+					ServiceName: render.EmbeddedPostgresStatefulSetName(&topo),
+				},
+			}
+			Expect(k8sClient.Create(ctx, sts)).To(Succeed())
+			sts.Status.Replicas = 1
+			sts.Status.ReadyReplicas = 1
+			Expect(k8sClient.Status().Update(ctx, sts)).To(Succeed())
+			DeferCleanup(func() { forceDelete(ctx, sts) })
+
+			_, err = r.Reconcile(context.Background(), reconcile.Request{NamespacedName: typeNamespacedName})
+			Expect(err).NotTo(HaveOccurred())
+
+			// HelmReleaseReady still False (no real helm-controller here) -
+			// the Job must exist anyway.
+			Expect(k8sClient.Get(context.Background(), typeNamespacedName, &topo)).To(Succeed())
+			helmReleaseReady := meta.FindStatusCondition(topo.Status.Conditions, benchv1alpha1.ConditionHelmReleaseReady)
+			Expect(helmReleaseReady.Status).To(Equal(metav1.ConditionFalse))
+
+			var job batchv1.Job
+			jobKey := types.NamespacedName{Name: render.PostgresRoleFixJobName(&topo), Namespace: topo.Spec.Namespace}
+			Expect(k8sClient.Get(context.Background(), jobKey, &job)).To(Succeed())
 		})
 	})
 

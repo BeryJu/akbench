@@ -1,9 +1,15 @@
-# Build the web API binary - mirrors Dockerfile (the operator manager's own
-# image) except for which package it builds. Deployed in-cluster so the new
-# Headlamp plugin can reach it through Headlamp's own ApiProxy -> the
-# standard Kubernetes Service-proxy subresource (see
-# web/headlamp-plugin/src), replacing the old web/frontend Next.js server's
-# direct-to-browser proxy route.
+# cmd/apiserver: the web UI's backend, the web UI itself (web/ui's build
+# output, served by the same process - internal/api/static.go) and the
+# in-browser kubectl shell (internal/api/shell.go). The shell is why this is
+# not distroless: it needs a real shell, kubectl and an init process.
+
+FROM node:22-alpine AS ui
+WORKDIR /ui
+COPY web/ui/package.json web/ui/package-lock.json ./
+RUN npm ci
+COPY web/ui/ ./
+RUN npm run build
+
 FROM golang:1.26 AS builder
 ARG TARGETOS
 ARG TARGETARCH
@@ -17,9 +23,58 @@ COPY . .
 
 RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o apiserver ./cmd/apiserver
 
-FROM gcr.io/distroless/static:nonroot
-WORKDIR /
-COPY --from=builder /workspace/apiserver .
+# kubectl from the official release, checksum-verified. Kept within one
+# minor version of the clusters it talks to (kubectl's supported skew) -
+# bump alongside the Kubernetes versions ClusterForm offers.
+FROM alpine:3.22 AS kubectl
+ARG TARGETARCH
+ARG KUBECTL_VERSION=v1.36.5
+RUN apk add --no-cache curl \
+    && base="https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/${TARGETARCH:-amd64}" \
+    && curl -fsSLo /kubectl "${base}/kubectl" \
+    && echo "$(curl -fsSL "${base}/kubectl.sha256")  /kubectl" | sha256sum -c - \
+    && chmod 0755 /kubectl
+
+# kubectx/kubens from the official release, checksum-verified against the
+# release's own published checksums.txt the same way kubectl's own .sha256
+# sibling file is used above - a shell session reaching for more than one
+# cluster/namespace is the common case here (the merged kubeconfig already
+# has every registered cluster as its own context), and typing a full
+# --context/-n flag every time is exactly the friction these exist to remove.
+FROM alpine:3.22 AS kubectx
+ARG TARGETARCH
+ARG KUBECTX_VERSION=v0.11.0
+RUN apk add --no-cache curl tar \
+    && case "${TARGETARCH:-amd64}" in \
+         amd64) arch=x86_64 ;; \
+         arm64) arch=arm64 ;; \
+         *) echo "unsupported arch ${TARGETARCH}" >&2; exit 1 ;; \
+       esac \
+    && base="https://github.com/ahmetb/kubectx/releases/download/${KUBECTX_VERSION}" \
+    && curl -fsSLo checksums.txt "${base}/checksums.txt" \
+    && for name in kubectx kubens; do \
+         file="${name}_${KUBECTX_VERSION}_linux_${arch}.tar.gz"; \
+         curl -fsSLo "$file" "${base}/${file}"; \
+         grep -F "  ${file}" checksums.txt | sha256sum -c -; \
+         tar xzf "$file" "$name"; \
+         chmod 0755 "$name"; \
+         mv "$name" "/usr/local/bin/$name"; \
+       done
+
+FROM alpine:3.22
+# bash + completion for the shell itself; jq/less/curl because a kubectl
+# session without them is miserable; ncurses-terminfo-base for
+# TERM=xterm-256color. busybox vi serves `kubectl edit`.
+RUN apk add --no-cache bash bash-completion ca-certificates curl jq less ncurses-terminfo-base tini
+COPY --from=kubectl /kubectl /usr/local/bin/kubectl
+COPY --from=kubectx /usr/local/bin/kubectx /usr/local/bin/kubectx
+COPY --from=kubectx /usr/local/bin/kubens /usr/local/bin/kubens
+COPY --from=builder /workspace/apiserver /apiserver
+COPY --from=ui /ui/dist /ui
+ENV BENCH_UI_DIR=/ui \
+    BENCH_SHELL=/bin/bash
 USER 65532:65532
 
-ENTRYPOINT ["/apiserver"]
+# tini as PID 1: anything a shell session orphans is reparented to PID 1,
+# and the apiserver binary itself never reaps processes it didn't start.
+ENTRYPOINT ["/sbin/tini", "--", "/apiserver"]

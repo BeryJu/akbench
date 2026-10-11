@@ -31,19 +31,13 @@ import (
 )
 
 // Grafana is installed per workload cluster (same as Prometheus/Pyroscope/
-// Tempo), reached from Headlamp's own Grafana tab through cmd/apiserver's
+// Tempo), reached from the web UI's Grafana page through cmd/apiserver's
 // own reverse proxy (internal/api/grafana_proxy.go), not the k8s API
-// server's service-proxy subresource directly - that first design was
-// tried and confirmed broken live: the k8s apiserver's own /proxy
-// subresource content-rewrites absolute paths in text/html responses,
-// unconditionally prepending its own mount prefix, which has no awareness
-// of Headlamp's own outer /clusters/<name>/ layer sitting in front of it -
-// any already-correct two-layer absolute path gets a third, wrong prefix
-// stacked on top (verified by curling the exact iframe URL three ways:
-// direct to Grafana, via the raw k8s proxy subresource, and via Headlamp
-// itself - only the direct one came back correct). cmd/apiserver's own
-// reverse proxy is a single hop the browser reaches directly via a
-// NodePort (GrafanaNodePort below), sidestepping that entirely. Not the
+// server's service-proxy subresource - that subresource content-rewrites
+// absolute paths in text/html responses, unconditionally prepending its
+// own mount prefix, which breaks Grafana's own already-prefixed absolute
+// paths (confirmed live). cmd/apiserver's reverse proxy is a single hop to
+// Grafana's NodePort (GrafanaNodePort below), sidestepping that entirely. Not the
 // separate, unrelated BENCH_GRAFANA_URL mechanism (internal/grafana/annotate.go,
 // used only for posting TestRun annotations), which assumes one central,
 // directly browser-reachable Grafana and is left alone. The embed-URL
@@ -70,16 +64,22 @@ func grafanaLabels() map[string]string {
 	return map[string]string{"app": GrafanaServiceName}
 }
 
-// grafanaProxyPathPrefix is cmd/apiserver's own fixed mount for this
+// GrafanaProxyPathPrefix is cmd/apiserver's own fixed mount for this
 // workload cluster's Grafana (internal/api/grafana_proxy.go's
 // /grafana-proxy/{cluster}/ route) - deterministic from wc.Name alone, so
 // the operator can bake it into Grafana's own GF_SERVER_ROOT_URL at render
 // time without any out-of-band coordination. A single proxy hop, unlike
 // the abandoned k8s-API-proxy design this replaced - see this file's own
 // package-level doc comment for why that mattered.
-func grafanaProxyPathPrefix(wc *benchv1alpha1.WorkloadCluster) string {
+func GrafanaProxyPathPrefix(wc *benchv1alpha1.WorkloadCluster) string {
 	return fmt.Sprintf("/grafana-proxy/%s/", wc.Name)
 }
+
+// TempoDatasourceUID is the Tempo datasource's fixed uid in
+// grafanaDatasources below - cmd/apiserver queries Tempo through Grafana's
+// own datasource proxy (/api/datasources/proxy/uid/<uid>/...), since Tempo
+// itself is only a ClusterIP Service inside the workload cluster.
+const TempoDatasourceUID = "tempo"
 
 // grafanaDatasources is adapted directly from the reference harness's own
 // provisioning YAML (goauthentik/benchmark@dev:roles/metrics/files/grafana/datasources,
@@ -175,7 +175,7 @@ var grafanaDashboardNodes []byte
 // break once loaded.
 func GrafanaObjects(wc *benchv1alpha1.WorkloadCluster) []client.Object {
 	labels := grafanaLabels()
-	rootURL := grafanaProxyPathPrefix(wc)
+	rootURL := GrafanaProxyPathPrefix(wc)
 	return []client.Object{
 		&corev1.Namespace{
 			TypeMeta:   metav1.TypeMeta{Kind: "Namespace", APIVersion: "v1"},

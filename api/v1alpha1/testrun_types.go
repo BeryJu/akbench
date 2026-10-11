@@ -48,6 +48,18 @@ type TestRunOverrides struct {
 type TestRunSpec struct {
 	TestCaseRef corev1.LocalObjectReference `json:"testCaseRef"`
 
+	// deploymentRef pins this run to one specific entry of the TestCase's
+	// own TestCase.Deployments() - needed once a TestCase can target more
+	// than one AuthentikDeployment, since one TestRun is still exactly one
+	// Job against exactly one deployment ("Run now" fans out into one
+	// TestRun per deployment rather than teaching TestRun to run several
+	// Jobs itself). Unset on every TestRun created before multi-deployment
+	// TestCases existed; TestRunReconciler falls back to the resolved
+	// TestCase's own Deployments()[0] in that case, which is always correct
+	// for those older, inherently single-deployment runs.
+	// +optional
+	DeploymentRef *corev1.LocalObjectReference `json:"deploymentRef,omitempty"`
+
 	// +optional
 	Overrides *TestRunOverrides `json:"overrides,omitempty"`
 }

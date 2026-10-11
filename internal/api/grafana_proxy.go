@@ -32,18 +32,15 @@ import (
 // WorkloadClusterReconciler's ensureGrafana - see render.GrafanaObjects'
 // own doc comment for the full story of why this exists at all: the k8s
 // API server's own service-proxy subresource content-rewrites absolute
-// HTML paths in a way that's fundamentally incompatible with Headlamp's
-// outer /clusters/<name>/ routing layer, so the browser has to reach this
-// route directly instead of through that mechanism).
+// HTML paths in a way that breaks Grafana's own, so the browser has to
+// reach this route directly instead of through that mechanism).
 //
-// Deliberately registered outside the /api/v1 route group (see Router,
-// alongside /healthz and /readyz): an <iframe src=> can't attach the
-// X-Bench-Api-Token header s.requireToken demands, so this route carries
-// no auth at all. That's consistent with, not a regression from, this
-// project's existing dev-scale security posture - Grafana itself already
-// runs with anonymous Admin auth, and every other per-workload-cluster
-// addon (Prometheus/Pyroscope/Tempo NodePorts) is already reachable
-// without credentials by anyone who can reach the node network.
+// Registered outside the /api/v1 route group (see Router): an <iframe
+// src=> can't attach the Authorization header s.requireToken demands, so
+// this route accepts a session cookie minted by an authenticated request
+// instead (grafana_session.go). Grafana itself runs with anonymous Admin
+// auth, so this check is the only thing between a browser and it on this
+// path.
 //
 // The Director deliberately does NOT strip the "/grafana-proxy/<cluster>"
 // prefix from the forwarded request path - the one deliberate difference
@@ -52,6 +49,10 @@ import (
 // expects exactly that: a reverse proxy in front of it that preserves the
 // sub-path rather than stripping it.
 func (s *Server) grafanaProxy(w http.ResponseWriter, r *http.Request) {
+	if !s.grafanaAuthorized(r) {
+		writeError(w, r, http.StatusUnauthorized, "sign in to the API server to open Grafana")
+		return
+	}
 	clusterName := chi.URLParam(r, "cluster")
 
 	var wc benchv1alpha1.WorkloadCluster
@@ -76,6 +77,7 @@ func (s *Server) grafanaProxy(w http.ResponseWriter, r *http.Request) {
 			req.URL.Scheme = target.Scheme
 			req.URL.Host = target.Host
 			req.Host = target.Host
+			stripProxyCredentials(req)
 			// req.URL.Path is left as-is (not stripped of its
 			// "/grafana-proxy/<cluster>" prefix) - see doc comment above.
 		},

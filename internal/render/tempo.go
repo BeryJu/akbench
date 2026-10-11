@@ -17,6 +17,9 @@ limitations under the License.
 package render
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -47,6 +50,11 @@ const (
 	tempoConfigMapName = TempoServiceName + "-config"
 )
 
+func tempoConfigChecksum() string {
+	sum := sha256.Sum256([]byte(tempoConfig))
+	return hex.EncodeToString(sum[:])
+}
+
 func tempoLabels() map[string]string {
 	return map[string]string{"app": TempoServiceName}
 }
@@ -57,6 +65,13 @@ func tempoLabels() map[string]string {
 // no-HA posture elsewhere) rather than object storage, since there's no S3/
 // GCS-alike available on an Incus-provisioned workload cluster and nothing
 // yet needs traces to survive a pod restart.
+//
+// The metrics-generator runs only its local-blocks processor: that's what
+// TraceQL metrics queries (/api/metrics/query_range - quantile_over_time,
+// rate, ... grouped by any span attribute) read from. Without it every such
+// query fails with "empty ring", leaving only search and single-trace fetch.
+// No span-metrics/service-graphs processors and no remote write - nothing
+// here consumes generated Prometheus series.
 const tempoConfig = `server:
   http_listen_port: 3200
 distributor:
@@ -72,6 +87,19 @@ storage:
       path: /var/tempo/traces
     wal:
       path: /var/tempo/wal
+metrics_generator:
+  storage:
+    path: /var/tempo/generator/wal
+  traces_storage:
+    path: /var/tempo/generator/traces
+  processor:
+    local_blocks:
+      filter_server_spans: false
+      flush_to_storage: true
+overrides:
+  defaults:
+    metrics_generator:
+      processors: [local-blocks]
 `
 
 // TempoObjects returns the single-replica, no-HA Grafana Tempo
@@ -98,7 +126,12 @@ func TempoObjects() []client.Object {
 				Replicas: ptr.To(int32(1)),
 				Selector: &metav1.LabelSelector{MatchLabels: labels},
 				Template: corev1.PodTemplateSpec{
-					ObjectMeta: metav1.ObjectMeta{Labels: labels},
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: labels,
+						// Tempo only reads its config at startup - a changed
+						// ConfigMap must roll the pod to take effect.
+						Annotations: map[string]string{"checksum/config": tempoConfigChecksum()},
+					},
 					Spec: corev1.PodSpec{
 						Containers: []corev1.Container{
 							{

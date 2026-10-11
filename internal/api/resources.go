@@ -19,6 +19,7 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -186,6 +187,44 @@ func (s *Server) deleteResource(k resourceKind) http.HandlerFunc {
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+// kickedAtAnnotation is the one this handler sets - a fresh RFC3339Nano
+// timestamp every call, so the Update always has new content even if the
+// object's own reconcile loop is otherwise fully settled (an Update with an
+// unchanged object wouldn't necessarily generate a new resourceVersion/event
+// on every apiserver, but a changing value always will).
+const kickedAtAnnotation = "bench.goauthentik.io/kicked-at"
+
+// kickResource nudges the operator into reconciling this object right now,
+// instead of waiting for its next naturally-triggered Update (a dependency
+// becoming ready, a periodic resync, etc.) - the same thing this project's
+// own session notes describe doing by hand via
+// `kubectl annotate ... bench.goauthentik.io/kicked-at=$(date ...)`. No
+// controller in internal/controller filters reconcile-triggering Update
+// events by generation (confirmed: none of them import controller-runtime's
+// predicate package), so any annotation change already causes an immediate
+// Reconcile() - there is nothing to wire up controller-side, this only needs
+// to perform the same Update a human would.
+func (s *Server) kickResource(k resourceKind) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		obj, err := s.fetch(r, k)
+		if err != nil {
+			writeAPIError(w, r, err)
+			return
+		}
+		annotations := obj.GetAnnotations()
+		if annotations == nil {
+			annotations = map[string]string{}
+		}
+		annotations[kickedAtAnnotation] = time.Now().UTC().Format(time.RFC3339Nano)
+		obj.SetAnnotations(annotations)
+		if err := s.client.Update(r.Context(), obj); err != nil {
+			writeAPIError(w, r, err)
+			return
+		}
+		writeJSON(w, r, http.StatusOK, obj)
 	}
 }
 

@@ -23,6 +23,7 @@ import (
 	"time"
 
 	helmv2 "github.com/fluxcd/helm-controller/api/v2"
+	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
@@ -270,17 +271,36 @@ func (r *AuthentikDeploymentReconciler) reconcileBlueprint(ctx context.Context, 
 }
 
 // reconcilePostgresRoleFix creates render.PostgresRoleFixJob once the
-// bundled embedded-postgres StatefulSet exists (helmReleaseReady) - see
-// that function's own doc comment for the real, permanent gap this works
-// around (the authentik chart's own bundled postgresql subchart uses the
-// plain, official postgres image, whose entrypoint never creates the
-// "postgres" role postgres_exporter is hardcoded to authenticate as).
-// Best-effort and non-blocking, unlike reconcileBlueprint: this only
-// affects observability (empty postgres.json Grafana panels), never the
-// deployment's own actual readiness, so a failure here is logged/eventer'd
-// but never holds up the overall Ready condition.
-func (r *AuthentikDeploymentReconciler) reconcilePostgresRoleFix(ctx context.Context, rc client.Client, topo *benchv1alpha1.AuthentikDeployment, helmReleaseReady metav1.ConditionStatus) {
-	if topo.Spec.Postgres.Mode != benchv1alpha1.PostgresEmbedded || helmReleaseReady != metav1.ConditionTrue {
+// bundled embedded-postgres StatefulSet itself is ready - see that
+// function's own doc comment for the real, permanent gap this works around
+// (the authentik chart's own bundled postgresql subchart uses the plain,
+// official postgres image, whose entrypoint never creates the "postgres"
+// role postgres_exporter is hardcoded to authenticate as).
+//
+// Deliberately checks the postgres StatefulSet directly rather than the
+// overall helmReleaseReady condition this file's other reconcile steps use:
+// a HelmRelease's own Ready condition is an aggregate across every resource
+// the chart renders (server, worker, and postgres together), so a broken
+// server/worker image (crash-looping for reasons that have nothing to do
+// with postgres) permanently blocks it from ever becoming True - which, with
+// the old helmReleaseReady-gated check, meant this fix-up Job would never
+// run at all for such a deployment, leaving pg_up stuck at 0 forever even
+// though postgres itself was healthy the whole time. Confirmed live: exactly
+// this happened to a deployment whose server/worker pods crash-loop on an
+// unrelated experimental Python version mismatch.
+//
+// Best-effort and non-blocking, unlike reconcileBlueprint: this only affects
+// observability (empty postgres.json Grafana panels, a permanently-firing
+// AuthentikBenchPostgresDown alert), never the deployment's own actual
+// readiness, so a failure here is logged/eventer'd but never holds up the
+// overall Ready condition.
+func (r *AuthentikDeploymentReconciler) reconcilePostgresRoleFix(ctx context.Context, rc client.Client, topo *benchv1alpha1.AuthentikDeployment) {
+	if topo.Spec.Postgres.Mode != benchv1alpha1.PostgresEmbedded {
+		return
+	}
+	var sts appsv1.StatefulSet
+	key := types.NamespacedName{Name: render.EmbeddedPostgresStatefulSetName(topo), Namespace: topo.Spec.Namespace}
+	if err := rc.Get(ctx, key, &sts); err != nil || sts.Status.ReadyReplicas < 1 {
 		return
 	}
 	job := render.PostgresRoleFixJob(topo)
@@ -415,7 +435,7 @@ func (r *AuthentikDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.
 	setCondition(r.Recorder, &topo, &topo.Status.Conditions, topo.Generation, benchv1alpha1.ConditionBlueprintApplied, blueprintReady,
 		benchv1alpha1.ReasonReady, blueprintMessage)
 
-	r.reconcilePostgresRoleFix(ctx, rc, &topo, helmReleaseReady)
+	r.reconcilePostgresRoleFix(ctx, rc, &topo)
 
 	ready := helmReleaseReady == metav1.ConditionTrue && blueprintReady == metav1.ConditionTrue
 	if ready {

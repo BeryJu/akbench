@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
 # Starts the operator manager and the web API backend against the current
 # kubeconfig context, in one foreground command. Ctrl+C stops both. The web
-# UI itself is Headlamp (see `make headlamp`/`make headlamp-plugin`), not
-# started here - it's a separate, longer-lived deployment, not a per-session
-# dev process.
+# UI (web/ui) is served by the web API itself once built (`make ui`); for
+# live-reloading UI work run `make ui-dev` alongside this instead.
 #
 # Usage: make dev
 set -euo pipefail
@@ -62,6 +61,14 @@ pids+=($!)
 wait_for "http://127.0.0.1:8081/healthz" "operator manager"
 
 echo "==> Starting the web API backend"
+if [[ -z "${BENCH_UI_DIR:-}" && -f "${root}/web/ui/dist/index.html" ]]; then
+  export BENCH_UI_DIR="${root}/web/ui/dist"
+fi
+# The kubectl shell is opt-in here: set BENCH_SHELL_KUBECONFIG to a
+# kubeconfig holding only the clusters you mean to expose. Defaulting to
+# your own ~/.kube/config would hand every context in it to anyone with the
+# (well-known) dev token who can reach :8080.
+export BENCH_SHELL="${BENCH_SHELL:-$(command -v bash || echo /bin/sh)}"
 (cd "${root}" && go run ./cmd/apiserver) &
 pids+=($!)
 wait_for "http://127.0.0.1:8080/healthz" "web API"
@@ -69,12 +76,11 @@ wait_for "http://127.0.0.1:8080/healthz" "web API"
 cat <<EOF
 
 authentik-bench dev environment is up:
-  API backend       http://localhost:8080  (token: ${BENCH_API_TOKEN:-dev-token})
+  API backend + UI  http://localhost:8080  (token: ${BENCH_API_TOKEN:-dev-token})
   operator manager  health probe on :8081
 
-Web UI: run \`make headlamp\` once (deploys Headlamp in-cluster) and
-\`make headlamp-plugin\` after any plugin change, then port-forward it:
-  kubectl port-forward -n headlamp svc/headlamp 8087:80
+The UI is served from web/ui/dist (run \`make ui\` to build it); for
+live-reloading UI work run \`make ui-dev\` and open http://localhost:5173.
 
 Press Ctrl+C to stop everything.
 EOF

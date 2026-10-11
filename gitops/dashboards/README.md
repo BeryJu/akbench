@@ -5,8 +5,8 @@ Five Grafana dashboards, embedded verbatim into
 outside its own package tree, so this is a byte-identical vendored copy, not
 a symlink) and provisioned into every workload cluster's own Grafana by
 `internal/render/grafana.go`. The two copies are kept in sync by
-`TestDashboardsMatchRenderEmbeds` (`internal/api/dashboards_test.go`). The
-Headlamp plugin's Grafana tab embeds them by UID through `cmd/apiserver`'s
+`TestDashboardsMatchRenderEmbeds` (`internal/api/dashboards_test.go`). The web
+UI's Grafana page embeds them by UID through `cmd/apiserver`'s
 `/grafana-proxy/{cluster}/...` reverse proxy (`internal/api/grafana_proxy.go`) -
 not the older, since-deleted `internal/api` embed-URL allowlist this doc used
 to reference, from before Grafana moved to a per-workload-cluster install.
@@ -56,6 +56,19 @@ Kubernetes:
   (`k6/scripts/login.ts`/`oauth.ts`) uses `per-vu-iterations` instead -
   confirmed live that the metric doesn't exist in Prometheus at all for this
   project, not just that it's currently zero.
+- **"Failed requests" also doesn't average `k6_http_req_failed_rate`
+  directly.** An earlier version did (`avg by (testid) (k6_http_req_failed_rate{...})`),
+  and the same mistake was copied into `internal/render/alertrules.go`'s
+  `AuthentikBenchHighRequestFailureRate` rule. k6 tags this metric with the
+  full request context (status, method, url...), so it emits one series per
+  distinct tag combination, and every series belonging to a non-2xx/3xx
+  status is pinned at exactly 1 by definition - averaging across these series
+  is not the real, request-volume-weighted failure proportion. Confirmed live
+  against a real burn test: this read as "25%" (1 failing series out of 4
+  distinct ones) when the true rate, computed from
+  `k6_http_reqs_total{expected_response="false"}` over all `k6_http_reqs_total`,
+  was 0.05% (105 failed of ~196,150 total requests). Both the panel and the
+  alert rule now use that volume-weighted ratio instead.
 - **`authentik.json`'s "CPU throttling" panel queries
   `container_pressure_cpu_waiting_seconds_total`, not
   `container_cpu_cfs_throttled_seconds_total`.** The latter is a cgroup v1

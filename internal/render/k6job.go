@@ -45,8 +45,16 @@ const (
 // functions below stay call-site readable instead of chains of positional
 // strings.
 type K6WorkloadParams struct {
-	TestCase   *benchv1alpha1.TestCase
-	TargetName string
+	TestCase *benchv1alpha1.TestCase
+	// DeploymentName is the real AuthentikDeployment object name this
+	// specific workload drives - one of TestCase.Deployments(), resolved by
+	// the caller per-target. Distinct from TargetName (the k6 `target`
+	// metric/tag label, which can be overridden to something else): the
+	// deployment's own pods are labeled by object name
+	// (render.LabelDeployment), so PodTemplate's anti-affinity has to match
+	// on this value, not TargetName, to find them.
+	DeploymentName string
+	TargetName     string
 	// BenchHost/BenchPort are the AuthentikDeployment's in-cluster service
 	// endpoint this run drives.
 	BenchHost string
@@ -169,16 +177,10 @@ func (p K6WorkloadParams) volumes() ([]corev1.Volume, []corev1.VolumeMount) {
 // Burn Deployment.
 func (p K6WorkloadParams) PodTemplate() corev1.PodTemplateSpec {
 	volumes, mounts := p.volumes()
-	// The real AuthentikDeployment object name (spec.deploymentRef.name), not
-	// TargetName - TargetName is only the target/metric label and can be
-	// overridden to something else, but the deployment's own pods are labeled
-	// by object name (DeploymentLabels), so the runner's anti-affinity below
-	// has to match on that same value to find them.
-	deploymentName := p.TestCase.Spec.DeploymentRef.Name
 	labels := map[string]string{
 		benchv1alpha1.LabelTestCase:   p.TestCase.Name,
 		benchv1alpha1.LabelProfile:    k6ProfileValue(p.TestCase.Spec.Profile),
-		benchv1alpha1.LabelDeployment: deploymentName,
+		benchv1alpha1.LabelDeployment: p.DeploymentName,
 	}
 	return corev1.PodTemplateSpec{
 		ObjectMeta: metav1.ObjectMeta{Labels: labels},
@@ -203,12 +205,28 @@ func (p K6WorkloadParams) PodTemplate() corev1.PodTemplateSpec {
 			Affinity: &corev1.Affinity{
 				PodAntiAffinity: &corev1.PodAntiAffinity{
 					RequiredDuringSchedulingIgnoredDuringExecution: []corev1.PodAffinityTerm{
-						sameDeploymentAntiAffinityTerm(deploymentName),
+						sameDeploymentAntiAffinityTerm(p.DeploymentName),
 					},
 				},
 			},
 		},
 	}
+}
+
+// BurnDeploymentName is the one place this name is computed, shared by the
+// controller (to create/find/clean up) and anything else that needs to
+// reproduce it. deploymentName is the AuthentikDeployment *object* name
+// (TestCase.Deployments() entry), not the k6 TargetName metric label -
+// object names are guaranteed unique/DNS-safe within the namespace, the
+// metric label isn't. Always included, even when a TestCase drives only one
+// deployment: a fixed, never-suffixed alternative would need permanent
+// special-casing throughout the controller for no real benefit - Burn
+// Deployments are stateless traffic generators, so the one visible side
+// effect of this naming (an already-running single-deployment Burn
+// TestCase's load generator gets recreated under its new name the first
+// time this ships) costs nothing but a brief restart.
+func BurnDeploymentName(testCaseName, deploymentName string) string {
+	return "k6-" + testCaseName + "-" + deploymentName
 }
 
 // QuickJob builds the immutable, individually-inspectable Job a TestRun owns
@@ -233,17 +251,32 @@ func QuickJob(name, namespace string, p K6WorkloadParams) *batchv1.Job {
 // `restart: unless-stopped`. Recreate strategy guarantees the old pod is
 // fully gone before a config change starts a new one, so a target is never
 // hit by two overlapping burn pods.
+//
+// Selector includes LabelDeployment alongside LabelTestCase: a TestCase
+// driving more than one deployment renders one BurnDeployment per target,
+// all sharing the same LabelTestCase value - without LabelDeployment too,
+// every one of those Deployments would have an identical selector and fight
+// over each other's pods (Kubernetes requires disjoint selectors across
+// Deployments). Both labels are already on the pod template (PodTemplate);
+// this just mirrors them onto the selector that has to agree with it.
 func BurnDeployment(name, namespace string, p K6WorkloadParams) *appsv1.Deployment {
 	replicas := int32(1)
 	tmpl := p.PodTemplate()
 	tmpl.Spec.RestartPolicy = corev1.RestartPolicyAlways
 	selector := &metav1.LabelSelector{MatchLabels: map[string]string{
-		benchv1alpha1.LabelTestCase: p.TestCase.Name,
+		benchv1alpha1.LabelTestCase:   p.TestCase.Name,
+		benchv1alpha1.LabelDeployment: p.DeploymentName,
 	}}
 	return &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: namespace,
+			// Object-level labels (distinct from the pod template's own,
+			// above) so the controller can List every Burn Deployment
+			// belonging to a TestCase - needed to clean up a target that's
+			// been removed from DeploymentRefs, since there's no single
+			// fixed name to Delete by once a TestCase can have more than one.
+			Labels: selector.MatchLabels,
 		},
 		Spec: appsv1.DeploymentSpec{
 			Replicas: &replicas,

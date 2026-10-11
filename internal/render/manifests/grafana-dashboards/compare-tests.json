@@ -143,8 +143,8 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by (testid) (rate(k6_iterations_total{testid=~\"$testid\", target=~\"$target\", profile=~\"$profile\"}[$__rate_interval]))",
-          "legendFormat": "{{testid}}",
+          "expr": "sum by (testid, target) (rate(k6_iterations_total{testid=~\"$testid\", target=~\"$target\", profile=~\"$profile\"}[$__rate_interval]))",
+          "legendFormat": "{{testid}} / {{target}}",
           "refId": "A",
           "editorMode": "code",
           "range": true
@@ -190,8 +190,8 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "histogram_quantile(0.95, sum by (testid) (rate(k6_iteration_duration_seconds{testid=~\"$testid\", target=~\"$target\", profile=~\"$profile\"}[$__rate_interval])))",
-          "legendFormat": "{{testid}}",
+          "expr": "histogram_quantile(0.95, sum by (testid, target) (rate(k6_iteration_duration_seconds{testid=~\"$testid\", target=~\"$target\", profile=~\"$profile\"}[$__rate_interval])))",
+          "legendFormat": "{{testid}} / {{target}}",
           "refId": "A",
           "editorMode": "code",
           "range": true
@@ -237,8 +237,8 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "avg by (testid) (k6_http_req_failed_rate{testid=~\"$testid\", target=~\"$target\", profile=~\"$profile\"})",
-          "legendFormat": "{{testid}}",
+          "expr": "avg by (testid, target) (k6_http_req_failed_rate{testid=~\"$testid\", target=~\"$target\", profile=~\"$profile\"})",
+          "legendFormat": "{{testid}} / {{target}}",
           "refId": "A",
           "editorMode": "code",
           "range": true
@@ -284,8 +284,8 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by (testid) (rate(k6_http_reqs_total{testid=~\"$testid\", target=~\"$target\", profile=~\"$profile\"}[$__rate_interval]))",
-          "legendFormat": "{{testid}}",
+          "expr": "sum by (testid, target) (rate(k6_http_reqs_total{testid=~\"$testid\", target=~\"$target\", profile=~\"$profile\"}[$__rate_interval]))",
+          "legendFormat": "{{testid}} / {{target}}",
           "refId": "A",
           "editorMode": "code",
           "range": true
@@ -338,8 +338,8 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "histogram_quantile(0.95, sum by (testid) (rate(k6_http_req_duration_seconds{testid=~\"$testid\", target=~\"$target\", profile=~\"$profile\"}[$__rate_interval])))",
-          "legendFormat": "{{testid}} p95",
+          "expr": "histogram_quantile(0.95, sum by (testid, target) (rate(k6_http_req_duration_seconds{testid=~\"$testid\", target=~\"$target\", profile=~\"$profile\"}[$__rate_interval])))",
+          "legendFormat": "{{testid}} / {{target}} p95",
           "refId": "A",
           "editorMode": "code",
           "range": true
@@ -349,8 +349,8 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "histogram_quantile(0.99, sum by (testid) (rate(k6_http_req_duration_seconds{testid=~\"$testid\", target=~\"$target\", profile=~\"$profile\"}[$__rate_interval])))",
-          "legendFormat": "{{testid}} p99",
+          "expr": "histogram_quantile(0.99, sum by (testid, target) (rate(k6_http_req_duration_seconds{testid=~\"$testid\", target=~\"$target\", profile=~\"$profile\"}[$__rate_interval])))",
+          "legendFormat": "{{testid}} / {{target}} p99",
           "refId": "B",
           "editorMode": "code",
           "range": true
@@ -403,8 +403,8 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by (testid) (k6_vus{testid=~\"$testid\", target=~\"$target\", profile=~\"$profile\"})",
-          "legendFormat": "{{testid}}",
+          "expr": "sum by (testid, target) (k6_vus{testid=~\"$testid\", target=~\"$target\", profile=~\"$profile\"})",
+          "legendFormat": "{{testid}} / {{target}}",
           "refId": "A",
           "editorMode": "code",
           "range": true
@@ -457,8 +457,8 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "avg by (testid) (k6_checks_rate{testid=~\"$testid\", target=~\"$target\", profile=~\"$profile\"})",
-          "legendFormat": "{{testid}}",
+          "expr": "avg by (testid, target) (k6_checks_rate{testid=~\"$testid\", target=~\"$target\", profile=~\"$profile\"})",
+          "legendFormat": "{{testid}} / {{target}}",
           "refId": "A",
           "editorMode": "code",
           "range": true

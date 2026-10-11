@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Builds cmd/apiserver's image and deploys it in-cluster (hack/dev-apiserver.yaml)
-# so the Headlamp plugin can reach it through Headlamp's own ApiProxy. Local
+# Builds cmd/apiserver's image (API + web UI + kubectl shell) and deploys it
+# in-cluster (hack/dev-apiserver.yaml). Local
 # dev only: builds with plain docker and loads straight into minikube,
 # rather than pushing to a registry.
 #
