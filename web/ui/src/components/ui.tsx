@@ -16,6 +16,7 @@
 
 // The handful of layout/feedback primitives every page shares.
 import { ReactNode } from 'react';
+import { toast } from './Toast';
 
 export function Page({
   title,
@@ -153,16 +154,30 @@ export function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-/** confirmAndRun asks first, then runs action, alerting on failure. */
-export async function confirmAndRun(question: string, action: () => Promise<unknown>, after?: () => void) {
+/**
+ * confirmAndRun asks first, then runs action, toasting the outcome: a
+ * success message if given (most actions here are a delete/kick with
+ * nothing more interesting to say than "done", which the row vanishing or
+ * refreshing already shows - pass one only when it adds information), and
+ * always the error on failure.
+ */
+export async function confirmAndRun(
+  question: string,
+  action: () => Promise<unknown>,
+  after?: () => void,
+  successMessage?: string
+) {
   if (!window.confirm(question)) {
     return;
   }
   try {
     await action();
     after?.();
+    if (successMessage) {
+      toast.success(successMessage);
+    }
   } catch (err) {
-    window.alert(errorMessage(err));
+    toast.error(errorMessage(err));
   }
 }
 

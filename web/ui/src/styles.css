@@ -154,6 +154,11 @@ legend { font-weight: 700; font-size: 15px; margin: 18px 0 8px; padding: 0; }
 .alert.error { color: var(--err); border-color: var(--err); }
 .alert.info { color: var(--info-text); border-color: var(--info); }
 .alert.success { color: var(--ok); border-color: var(--ok); }
+.toast-host { position: fixed; z-index: 50; top: 16px; right: 16px; display: flex; flex-direction: column; gap: 8px; max-width: 360px; }
+.toast { padding: 10px 14px; border-radius: var(--radius); border: 1px solid var(--border); background: var(--panel); box-shadow: 0 6px 24px rgba(0,0,0,.18); cursor: pointer; font-size: 13px; }
+.toast.success { border-color: var(--ok); }
+.toast.error { border-color: var(--err); }
+.toast.info { border-color: var(--info); }
 .badge { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; border: 1px solid currentColor; white-space: nowrap; }
 .badge.ok { color: var(--ok); }
 .badge.err { color: var(--err); }

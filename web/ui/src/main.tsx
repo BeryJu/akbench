@@ -18,6 +18,8 @@ import { lazy, StrictMode, Suspense } from 'react';
 import { createRoot } from 'react-dom/client';
 import { createBrowserRouter, Link, RouterProvider } from 'react-router';
 import { AuthProvider, CALLBACK_PATH, SILENT_PATH } from './auth';
+import { ToastHost } from './components/Toast';
+import { EventsProvider } from './events';
 import { Layout } from './Layout';
 import { AuthGate, OIDCCallback, OIDCSilent } from './Login';
 import './styles.css';
@@ -105,7 +107,10 @@ const router = createBrowserRouter([
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <AuthProvider>
-      <RouterProvider router={router} />
+      <EventsProvider>
+        <RouterProvider router={router} />
+      </EventsProvider>
     </AuthProvider>
+    <ToastHost />
   </StrictMode>
 );

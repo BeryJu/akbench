@@ -15,17 +15,25 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useResourceEvents } from './events';
 
 /**
  * useResource polls a fetcher on an interval. Everything here reflects
  * cluster state a controller changes behind the user's back, so a page that
  * fetched once would be wrong within seconds of any action. Polling pauses
  * while the tab is hidden and catches up as soon as it's visible again.
+ *
+ * watchKind additionally reloads the instant a matching live-update event
+ * arrives (events.ts/internal/api/events.go) - e.g. 'TestCase' reloads as
+ * soon as any TestCase changes, not just on the next poll tick. Polling
+ * keeps running regardless, as a fallback for when the WebSocket feed is
+ * reconnecting.
  */
 export function useResource<T>(
   fetcher: () => Promise<T>,
   deps: unknown[] = [],
-  intervalMs = 5000
+  intervalMs = 5000,
+  watchKind = ''
 ): { data: T | undefined; error: string | undefined; reload: () => void; loading: boolean } {
   const [data, setData] = useState<T>();
   const [error, setError] = useState<string>();
@@ -75,6 +83,8 @@ export function useResource<T>(
       document.removeEventListener('visibilitychange', onVisible);
     };
   }, [load, intervalMs]);
+
+  useResourceEvents(watchKind, () => void load());
 
   return { data, error, loading, reload: () => void load() };
 }

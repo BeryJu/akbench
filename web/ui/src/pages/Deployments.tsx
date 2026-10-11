@@ -22,12 +22,13 @@ import { MetricsGrid } from '../components/MetricsChart';
 import { ObjectYaml } from '../components/ObjectYaml';
 import { ConditionList, StatusBadge } from '../components/Status';
 import { Alert, confirmAndRun, Empty, errorMessage, Field, Page, Table } from '../components/ui';
+import { toast } from '../components/Toast';
 import { shellLinkForCluster } from '../shell/links';
 import { AuthentikDeployment, AuthentikDeploymentSpec, PlacementMode, PostgresMode, testCaseDeployments } from '../types';
 import { useResource } from '../useResource';
 
 export function DeploymentsPage() {
-  const deployments = useResource(() => api.deployments());
+  const deployments = useResource(() => api.deployments(), [], 5000, 'AuthentikDeployment');
 
   return (
     <Page
@@ -72,7 +73,10 @@ export function DeploymentsPage() {
                   className="small"
                   title="Nudge the operator into reconciling this deployment right now, instead of waiting for its next naturally-triggered update."
                   onClick={() =>
-                    void api.kickDeployment(d.metadata.name).catch(err => window.alert(errorMessage(err)))
+                    void api
+                      .kickDeployment(d.metadata.name)
+                      .then(() => toast.success(`Kicked ${d.metadata.name}`))
+                      .catch(err => toast.error(errorMessage(err)))
                   }
                 >
                   Kick
@@ -86,7 +90,8 @@ export function DeploymentsPage() {
                     void confirmAndRun(
                       `Delete deployment "${d.metadata.name}"? This tears down its Helm release.`,
                       () => api.deleteDeployment(d.metadata.name),
-                      deployments.reload
+                      deployments.reload,
+                      `Deleted ${d.metadata.name}`
                     )
                   }
                 >
@@ -164,8 +169,10 @@ function DeploymentForm({ existing }: { existing?: AuthentikDeployment }) {
       const savedName = existing?.metadata.name ?? name;
       if (existing) {
         await api.updateDeployment(savedName, { spec });
+        toast.success(`Saved ${savedName}`);
       } else {
         await api.createDeployment({ metadata: { name }, spec });
+        toast.success(`Created ${savedName}`);
       }
       await api.setExtraValues(savedName, extraValuesYAML);
       navigate(`/deployments/${savedName}`);
@@ -522,8 +529,8 @@ export function DeploymentEditPage() {
  */
 export function DeploymentViewPage() {
   const { name = '' } = useParams();
-  const deployment = useResource(() => api.deployment(name), [name], 10000);
-  const testCases = useResource(() => api.testCases(), [], 15000);
+  const deployment = useResource(() => api.deployment(name), [name], 10000, 'AuthentikDeployment');
+  const testCases = useResource(() => api.testCases(), [], 15000, 'TestCase');
   const testids = (testCases.data ?? [])
     .filter(tc => testCaseDeployments(tc.spec).some(ref => ref.name === name))
     .map(tc => tc.metadata.name);
@@ -538,8 +545,9 @@ export function DeploymentViewPage() {
     try {
       await api.kickDeployment(name);
       deployment.reload();
+      toast.success(`Kicked ${name}`);
     } catch (err) {
-      window.alert(errorMessage(err));
+      toast.error(errorMessage(err));
     } finally {
       setKicking(false);
     }

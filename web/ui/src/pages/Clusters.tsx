@@ -20,12 +20,13 @@ import { api, MANAGEMENT_CLUSTER } from '../api';
 import { ObjectYaml } from '../components/ObjectYaml';
 import { Badge, ConditionList, StatusBadge } from '../components/Status';
 import { Alert, confirmAndRun, errorMessage, Field, Page, Table } from '../components/ui';
+import { toast } from '../components/Toast';
 import { shellLinkForCluster } from '../shell/links';
 import { WorkerPoolSpec, WorkloadCluster, WorkloadClusterSpec } from '../types';
 import { useResource } from '../useResource';
 
 export function ClustersPage() {
-  const clusters = useResource(() => api.clusters());
+  const clusters = useResource(() => api.clusters(), [], 5000, 'WorkloadCluster');
   return (
     <Page
       title="Clusters"
@@ -60,7 +61,12 @@ export function ClustersPage() {
                     <button
                       className="small"
                       title="Nudge the operator into reconciling this cluster right now, instead of waiting for its next naturally-triggered update."
-                      onClick={() => void api.kickWorkloadCluster(c.name).catch(err => window.alert(errorMessage(err)))}
+                      onClick={() =>
+                        void api
+                          .kickWorkloadCluster(c.name)
+                          .then(() => toast.success(`Kicked ${c.name}`))
+                          .catch(err => toast.error(errorMessage(err)))
+                      }
                     >
                       Kick
                     </button>
@@ -73,7 +79,8 @@ export function ClustersPage() {
                         void confirmAndRun(
                           `Deprovision cluster "${c.name}"? This tears down every machine Cluster API created for it.`,
                           () => api.deprovisionCluster(c.name),
-                          clusters.reload
+                          clusters.reload,
+                          `Deprovisioning ${c.name}`
                         )
                       }
                     >
@@ -152,8 +159,10 @@ function ClusterForm({ existing }: { existing?: WorkloadCluster }) {
       const savedName = existing?.metadata.name ?? name;
       if (existing) {
         await api.updateWorkloadCluster(savedName, { spec });
+        toast.success(`Saved ${savedName}`);
       } else {
         await api.registerCluster({ metadata: { name }, spec });
+        toast.success(`Registered ${savedName}`);
       }
       navigate(`/clusters/${savedName}`);
     } catch (err) {
@@ -358,7 +367,8 @@ export function ClusterViewPage() {
   const wc = useResource(
     () => (isManagement ? Promise.resolve(undefined) : api.workloadCluster(name)),
     [name, isManagement],
-    10000
+    10000,
+    'WorkloadCluster'
   );
   const shellTarget = isManagement ? undefined : name;
   const status = wc.data?.status;
@@ -370,8 +380,9 @@ export function ClusterViewPage() {
     try {
       await api.kickWorkloadCluster(name);
       wc.reload();
+      toast.success(`Kicked ${name}`);
     } catch (err) {
-      window.alert(errorMessage(err));
+      toast.error(errorMessage(err));
     } finally {
       setKicking(false);
     }

@@ -28,7 +28,7 @@ import { testCaseDeployments, testRunDeployment } from '../types';
 import { useResource } from '../useResource';
 
 export function TestRunsPage() {
-  const runs = useResource(() => api.testRuns());
+  const runs = useResource(() => api.testRuns(), [], 5000, 'TestRun');
   const sorted = runs.data && [...runs.data].sort((a, b) =>
     (b.metadata.creationTimestamp ?? '').localeCompare(a.metadata.creationTimestamp ?? '')
   );
@@ -62,7 +62,8 @@ export function TestRunsPage() {
                   void confirmAndRun(
                     `Delete test run "${r.metadata.name}"?`,
                     () => api.deleteTestRun(r.metadata.name),
-                    runs.reload
+                    runs.reload,
+                    `Deleted ${r.metadata.name}`
                   )
                 }
               >
@@ -80,12 +81,13 @@ const SIBLING_WINDOW_MS = 10000;
 
 export function TestRunViewPage() {
   const { name = '' } = useParams();
-  const run = useResource(() => api.testRun(name), [name], 5000);
+  const run = useResource(() => api.testRun(name), [name], 5000, 'TestRun');
   const testCaseName = run.data?.spec.testCaseRef.name;
   const testCase = useResource(
     () => (testCaseName ? api.testCase(testCaseName) : Promise.resolve(undefined)),
     [testCaseName],
-    0
+    0,
+    'TestCase'
   );
   // The run's own record of its target (testRunDeployment), falling back to
   // the live TestCase's first deployment for a run that hasn't started yet.
@@ -95,7 +97,8 @@ export function TestRunViewPage() {
   const deployment = useResource(
     () => (deploymentName ? api.deployment(deploymentName) : Promise.resolve(undefined)),
     [deploymentName],
-    0
+    0,
+    'AuthentikDeployment'
   );
   const cluster = testCase.data?.spec.runnerClusterRef?.name ?? deployment.data?.spec.clusterRef?.name;
   const namespace = testCase.data?.metadata.namespace;
@@ -109,7 +112,8 @@ export function TestRunViewPage() {
   const testCaseRuns = useResource(
     () => (testCaseName ? api.testRuns(testCaseName) : Promise.resolve([])),
     [testCaseName],
-    10000
+    10000,
+    'TestRun'
   );
   const created = Date.parse(run.data?.metadata.creationTimestamp ?? '');
   const batch = (testCaseRuns.data ?? [])

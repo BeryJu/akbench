@@ -21,11 +21,12 @@ import { CodeEditor } from '../components/CodeEditor';
 import { ObjectYaml } from '../components/ObjectYaml';
 import { StatusBadge } from '../components/Status';
 import { Alert, confirmAndRun, Empty, errorMessage, Field, Page, Table } from '../components/ui';
+import { toast } from '../components/Toast';
 import { TestCaseTemplate, TestCaseTemplateSpec } from '../types';
 import { useResource } from '../useResource';
 
 export function TestCaseTemplatesPage() {
-  const templates = useResource(() => api.testCaseTemplates());
+  const templates = useResource(() => api.testCaseTemplates(), [], 5000, 'TestCaseTemplate');
   return (
     <Page
       title="Test case templates"
@@ -71,7 +72,8 @@ export function TestCaseTemplatesPage() {
                     void confirmAndRun(
                       `Delete template "${t.metadata.name}"? Any test case still using it stops reconciling.`,
                       () => api.deleteTestCaseTemplate(t.metadata.name),
-                      templates.reload
+                      templates.reload,
+                      `Deleted ${t.metadata.name}`
                     )
                   }
                 >
@@ -104,8 +106,10 @@ function TestCaseTemplateForm({ existing }: { existing?: TestCaseTemplate }) {
       const savedName = existing?.metadata.name ?? name;
       if (existing) {
         await api.updateTestCaseTemplate(savedName, { spec });
+        toast.success(`Saved ${savedName}`);
       } else {
         await api.createTestCaseTemplate({ metadata: { name }, spec });
+        toast.success(`Created ${savedName}`);
       }
       navigate(`/testcasetemplates/${savedName}`);
     } catch (err) {
@@ -168,8 +172,8 @@ export function TestCaseTemplateEditPage() {
 
 export function TestCaseTemplateViewPage() {
   const { name = '' } = useParams();
-  const template = useResource(() => api.testCaseTemplate(name), [name], 15000);
-  const testCases = useResource(() => api.testCases(), [], 15000);
+  const template = useResource(() => api.testCaseTemplate(name), [name], 15000, 'TestCaseTemplate');
+  const testCases = useResource(() => api.testCases(), [], 15000, 'TestCase');
   // The one cross-reference the object itself can't show: a TestCase names
   // its template, not the other way round.
   const users = (testCases.data ?? []).filter(tc => tc.spec.template === name);

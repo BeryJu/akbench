@@ -24,25 +24,25 @@ import { Badge, ConditionList, StatusBadge } from '../components/Status';
 import { buildTargetRows, burningFor, TargetTable } from '../components/Targets';
 import { TraceBreakdownSection } from '../components/TraceBreakdown';
 import { Alert, confirmAndRun, Empty, errorMessage, Field, formatTimestamp, Page, Segmented, Table } from '../components/ui';
+import { toast } from '../components/Toast';
 import { metricsAnchorFromRuns, shortTag } from '../format';
 import { shellLinkForCluster } from '../shell/links';
 import { TestCase, TestCaseSpec, TestProfile, testCaseDeployments, testRunDeployment } from '../types';
 import { useResource } from '../useResource';
 
 export function TestCasesPage() {
-  const testCases = useResource(() => api.testCases());
-  const [notice, setNotice] = useState<string>();
+  const testCases = useResource(() => api.testCases(), [], 5000, 'TestCase');
 
   async function runNow(name: string) {
     try {
       const runs = await api.runTestCase(name);
-      setNotice(
+      toast.success(
         runs.length > 1
           ? `Started ${runs.length} test runs (one per deployment)`
           : `Started test run ${runs[0]?.metadata.name ?? ''}`
       );
     } catch (err) {
-      window.alert(errorMessage(err));
+      toast.error(errorMessage(err));
     }
   }
 
@@ -57,7 +57,6 @@ export function TestCasesPage() {
       }
     >
       <Alert>{testCases.error}</Alert>
-      <Alert kind="success">{notice}</Alert>
       <Table
         rows={testCases.data}
         rowKey={tc => tc.metadata.name}
@@ -105,7 +104,8 @@ export function TestCasesPage() {
                     void confirmAndRun(
                       `Delete test case "${tc.metadata.name}"?`,
                       () => api.deleteTestCase(tc.metadata.name),
-                      testCases.reload
+                      testCases.reload,
+                      `Deleted ${tc.metadata.name}`
                     )
                   }
                 >
@@ -188,8 +188,10 @@ function TestCaseForm({ existing }: { existing?: TestCase }) {
       const savedName = existing?.metadata.name ?? name;
       if (existing) {
         await api.updateTestCase(savedName, { spec });
+        toast.success(`Saved ${savedName}`);
       } else {
         await api.createTestCase({ metadata: { name }, spec });
+        toast.success(`Created ${savedName}`);
       }
       navigate(`/testcases/${savedName}`);
     } catch (err) {
@@ -392,9 +394,9 @@ const DEFAULT_TIMELINE_RANGE = 21600;
 
 export function TestCaseViewPage() {
   const { name = '' } = useParams();
-  const testCase = useResource(() => api.testCase(name), [name], 10000);
-  const deployments = useResource(() => api.deployments(), [], 30000);
-  const runs = useResource(() => api.testRuns(name), [name], 10000);
+  const testCase = useResource(() => api.testCase(name), [name], 10000, 'TestCase');
+  const deployments = useResource(() => api.deployments(), [], 30000, 'AuthentikDeployment');
+  const runs = useResource(() => api.testRuns(name), [name], 10000, 'TestRun');
   const tc = testCase.data;
   const profile = tc?.spec.profile;
 
@@ -435,14 +437,13 @@ export function TestCaseViewPage() {
 
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string>();
-  const [notice, setNotice] = useState<string>();
 
   async function runNow() {
     setBusy(true);
     setActionError(undefined);
     try {
       const started = await api.runTestCase(name);
-      setNotice(started.length > 1 ? `Started ${started.length} test runs, one per target` : 'Started test run');
+      toast.success(started.length > 1 ? `Started ${started.length} test runs, one per target` : 'Started test run');
       runs.reload();
     } catch (err) {
       setActionError(errorMessage(err));
@@ -458,7 +459,8 @@ export function TestCaseViewPage() {
     void confirmAndRun(
       `Stop the burn on all ${rows.length} target(s) by switching "${name}" to Quick?`,
       () => api.updateTestCase(name, { spec: { ...tc.spec, profile: 'Quick' } }),
-      testCase.reload
+      testCase.reload,
+      `Switched ${name} to Quick`
     );
   }
 
@@ -496,7 +498,6 @@ export function TestCaseViewPage() {
       }
     >
       <Alert>{testCase.error ?? actionError ?? summary.error}</Alert>
-      <Alert kind="success">{notice}</Alert>
 
       <div className="section-head">
         <div>
