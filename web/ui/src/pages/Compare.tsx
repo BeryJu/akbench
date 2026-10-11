@@ -17,7 +17,7 @@
 // Side-by-side comparison of test cases: an instant-query summary table
 // (/metrics/compare) and one chart per metric over time (/metrics/range).
 // The metric list comes from the backend's response, never a local copy.
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { useSearchParams } from 'react-router';
 import { api } from '../api';
 import { MetricsChart, PodMetricsGrid } from '../components/MetricsChart';
@@ -27,12 +27,14 @@ import { CompareResponse } from '../types';
 import { useResource } from '../useResource';
 
 const SUMMARY_WINDOWS = ['1m', '5m', '15m', '1h'];
+const DEFAULT_SUMMARY_WINDOW = '5m';
 const CHART_RANGES = [
   { label: 'Last 15 minutes', seconds: 900 },
   { label: 'Last 1 hour', seconds: 3600 },
   { label: 'Last 6 hours', seconds: 21600 },
   { label: 'Last 24 hours', seconds: 86400 },
 ];
+const DEFAULT_RANGE_SECONDS = CHART_RANGES[0].seconds;
 
 /** best picks the winning test per metric, honouring its direction. */
 function best(response: CompareResponse, key: string, better: string): string | undefined {
@@ -48,11 +50,31 @@ function best(response: CompareResponse, key: string, better: string): string | 
 export function ComparePage() {
   const testCases = useResource(() => api.testCases(), [], 0);
   const testRuns = useResource(() => api.testRuns(), [], 15000);
-  // The selection lives in the URL, so a comparison can be shared/bookmarked.
+  // The whole comparison - which tests, the summary window, the chart range -
+  // lives in the URL, so it can be shared/bookmarked exactly as configured
+  // rather than just the test selection.
   const [params, setParams] = useSearchParams();
   const selected = useMemo(() => (params.get('tests') ?? '').split(',').filter(Boolean), [params]);
-  const [summaryWindow, setSummaryWindow] = useState('5m');
-  const [rangeSeconds, setRangeSeconds] = useState(CHART_RANGES[0].seconds);
+  const summaryWindowParam = params.get('window');
+  const summaryWindow = summaryWindowParam && SUMMARY_WINDOWS.includes(summaryWindowParam) ? summaryWindowParam : DEFAULT_SUMMARY_WINDOW;
+  const rangeSecondsParam = Number(params.get('range'));
+  const rangeSeconds = CHART_RANGES.some(r => r.seconds === rangeSecondsParam) ? rangeSecondsParam : DEFAULT_RANGE_SECONDS;
+
+  /** updateParams patches only the given keys, preserving the rest of the
+   * query string - setSearchParams itself replaces the whole thing, so
+   * toggling a test must not silently reset the window/range a user already
+   * picked (and vice versa). */
+  function updateParams(patch: Record<string, string | undefined>) {
+    const next = new URLSearchParams(params);
+    for (const [key, value] of Object.entries(patch)) {
+      if (value === undefined) {
+        next.delete(key);
+      } else {
+        next.set(key, value);
+      }
+    }
+    setParams(next, { replace: true });
+  }
 
   const allQuick =
     selected.length > 0 &&
@@ -74,7 +96,7 @@ export function ComparePage() {
 
   function toggle(name: string) {
     const next = selected.includes(name) ? selected.filter(id => id !== name) : [...selected, name];
-    setParams(next.length ? { tests: next.join(',') } : {}, { replace: true });
+    updateParams({ tests: next.length ? next.join(',') : undefined });
   }
 
   return (
@@ -107,14 +129,20 @@ export function ComparePage() {
         </div>
         <div className="fields" style={{ marginTop: 12 }}>
           <Field label="Summary window">
-            <select value={summaryWindow} onChange={e => setSummaryWindow(e.target.value)}>
+            <select
+              value={summaryWindow}
+              onChange={e => updateParams({ window: e.target.value === DEFAULT_SUMMARY_WINDOW ? undefined : e.target.value })}
+            >
               {SUMMARY_WINDOWS.map(w => (
                 <option key={w}>{w}</option>
               ))}
             </select>
           </Field>
           <Field label="Chart range">
-            <select value={rangeSeconds} onChange={e => setRangeSeconds(Number(e.target.value))}>
+            <select
+              value={rangeSeconds}
+              onChange={e => updateParams({ range: Number(e.target.value) === DEFAULT_RANGE_SECONDS ? undefined : e.target.value })}
+            >
               {CHART_RANGES.map(r => (
                 <option key={r.seconds} value={r.seconds}>
                   {r.label}
