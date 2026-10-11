@@ -73,6 +73,18 @@ func TestKubePrometheusStackHelmValues(t *testing.T) {
 		t.Errorf("alertmanager.config.route missing: %v", alertmanager["config"])
 	}
 
+	// Disabled: kubeadm binds scheduler/controller-manager/kube-proxy's
+	// metrics ports to 127.0.0.1 by default and this project never
+	// overrides that, and every WorkloadCluster has a single-node control
+	// plane by design, so etcd's own HA-oriented alerts can never pass
+	// either - monitoring components that can never actually be reached or
+	// satisfied is the misconfiguration this guards against reintroducing.
+	for _, component := range []string{"kubeScheduler", "kubeControllerManager", "kubeProxy", "kubeEtcd"} {
+		if enabled, _ := values[component].(map[string]any)["enabled"].(bool); enabled {
+			t.Errorf("%s.enabled = true, want false (unreachable/unsatisfiable on this project's workload clusters)", component)
+		}
+	}
+
 	// DefaultAlertRules is deliberately NOT among these - see its own doc
 	// comment (and KubePrometheusStackHelmValues') for why a PrometheusRule
 	// containing "{{ $labels... }}" can't survive this chart's own

@@ -38,6 +38,17 @@ func embeddedPostgresSecretName(t *benchv1alpha1.AuthentikDeployment) string {
 	return t.Name + "-postgresql"
 }
 
+// EmbeddedPostgresStatefulSetName is the bundled subchart's StatefulSet -
+// same fullname convention as the Service/Secret above (confirmed live,
+// `kubectl get statefulset`), exported so AuthentikDeploymentReconciler can
+// check the postgres StatefulSet's own readiness directly rather than
+// waiting on the whole HelmRelease (server+worker+postgres together) to
+// settle - see reconcilePostgresRoleFix's own doc comment for why those two
+// are not the same thing.
+func EmbeddedPostgresStatefulSetName(t *benchv1alpha1.AuthentikDeployment) string {
+	return t.Name + "-postgresql"
+}
+
 // postgresRoleFixImage runs a one-shot psql command - pinned to match the
 // authentik chart's own current default postgresql.image
 // (docker.io/library/postgres:17.11-bookworm, confirmed against the chart's

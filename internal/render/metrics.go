@@ -237,7 +237,36 @@ func KubePrometheusStackHelmValues() (*apiextensionsv1.JSON, error) {
 				"ruleSelectorNilUsesHelmValues":           false,
 			},
 		},
-		"extraManifests": extraManifests,
+		// kubeScheduler/kubeControllerManager/kubeProxy disabled: confirmed
+		// live (Alertmanager's own KubeSchedulerInstanceUnreachable/
+		// KubeControllerManagerInstanceUnreachable/KubeProxyInstanceUnreachable/
+		// TargetDown alerts, permanently firing on every workload cluster this
+		// operator has ever provisioned) that kubeadm binds these components'
+		// metrics ports to 127.0.0.1 by default (scheduler :10259,
+		// controller-manager :10257, kube-proxy :10249) - this project's own
+		// WorkloadClusterReconciler/render.LXCCluster never configures a
+		// --bind-address override for any of them, so the chart's own default
+		// ServiceMonitors for these three can never succeed on a workload
+		// cluster this project creates. kubeEtcd disabled for a second,
+		// independent reason on top of the same bind-address issue (etcd's
+		// own :2381 metrics port is also loopback-only by default): every
+		// WorkloadCluster this project renders has a single-node control
+		// plane by design (dev-scale, no HA - see this package's own "no HA"
+		// posture elsewhere), so even a reachable etcd would permanently fail
+		// the chart's own etcdInsufficientMembers/etcdMembersDown alerts,
+		// which assume a multi-member quorum. Monitoring components that
+		// structurally can never be reached, or that always violate an
+		// HA-oriented threshold for a deliberately non-HA topology, is the
+		// actual misconfiguration here - disabling it is the fix, not a
+		// workaround. kubeApiServer/coreDns/kubelet are untouched: all three
+		// are reachable through their normal in-cluster Service/mTLS
+		// endpoints regardless of node-local bind addresses, so their own
+		// ServiceMonitors already work.
+		"kubeScheduler":         map[string]any{"enabled": false},
+		"kubeControllerManager": map[string]any{"enabled": false},
+		"kubeProxy":             map[string]any{"enabled": false},
+		"kubeEtcd":              map[string]any{"enabled": false},
+		"extraManifests":        extraManifests,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("marshal kube-prometheus-stack helm values: %w", err)
