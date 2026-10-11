@@ -78,37 +78,57 @@ var resourceMetrics = map[string]resourceMetric{
 	},
 }
 
-// deploymentTargetForTestID resolves where a testid's own AuthentikDeployment
-// actually runs - its namespace and the Prometheus that scrapes it -
-// deliberately NOT the same resolution prometheusURLForTestID uses: that one
-// prefers the k6 *runner's* cluster (TestCase.Spec.RunnerClusterRef), which
-// can legitimately differ from the deployment's own cluster, but the
-// deployment's server/worker/postgres pods (what this endpoint reports on)
-// always live on the deployment's own clusterRef/namespace regardless of
-// where the runner executes. Returns ok=false if any part of that chain
-// can't be resolved (deleted TestCase/Deployment, or a WorkloadCluster that
-// hasn't reconciled a PrometheusURL yet) - the caller skips that testid
-// rather than failing the whole request, the same "one bad testid shouldn't
+// deploymentTarget is one AuthentikDeployment a testid's TestCase drives,
+// resolved for the cAdvisor-based resource-usage query: where its
+// server/worker/postgres pods actually run (namespace + the Prometheus that
+// scrapes that cluster) and its own display Target (the k6 `target` tag),
+// so a multi-deployment TestCase's resource charts can tell its targets
+// apart the same way its k6-metric charts already do.
+type deploymentTarget struct {
+	PrometheusURL string
+	Namespace     string
+	Target        string
+}
+
+// deploymentTargetsForTestID resolves every AuthentikDeployment a testid's
+// own TestCase drives (one per TestCase.Deployments() entry) - deliberately
+// NOT the same resolution prometheusURLForTestID uses: that one prefers the
+// k6 *runner's* cluster (TestCase.Spec.RunnerClusterRef), which can
+// legitimately differ from a deployment's own cluster, but the deployment's
+// server/worker/postgres pods (what this endpoint reports on) always live on
+// that deployment's own clusterRef/namespace regardless of where the runner
+// executes. A target that can't be resolved (deleted AuthentikDeployment, or
+// a WorkloadCluster that hasn't reconciled a PrometheusURL yet) is skipped
+// rather than failing the whole testid, the same "one bad entry shouldn't
 // blank the rest" reasoning listAlerts already uses.
-func (s *Server) deploymentTargetForTestID(ctx context.Context, testid string) (prometheusURL, namespace string, ok bool) {
+func (s *Server) deploymentTargetsForTestID(ctx context.Context, testid string) []deploymentTarget {
 	var tc benchv1alpha1.TestCase
 	if err := s.client.Get(ctx, types.NamespacedName{Name: testid, Namespace: s.cfg.Namespace}, &tc); err != nil {
-		return "", "", false
+		return nil
 	}
-	var topo benchv1alpha1.AuthentikDeployment
-	key := types.NamespacedName{Name: tc.Spec.DeploymentRef.Name, Namespace: s.cfg.Namespace}
-	if err := s.client.Get(ctx, key, &topo); err != nil {
-		return "", "", false
+	var targets []deploymentTarget
+	for _, ref := range tc.Deployments() {
+		var topo benchv1alpha1.AuthentikDeployment
+		key := types.NamespacedName{Name: ref.Name, Namespace: s.cfg.Namespace}
+		if err := s.client.Get(ctx, key, &topo); err != nil {
+			continue
+		}
+		targetName := topo.Spec.TargetName
+		if targetName == "" {
+			targetName = topo.Name
+		}
+		if topo.Spec.ClusterRef.Name == "" {
+			targets = append(targets, deploymentTarget{PrometheusURL: s.cfg.PrometheusURL, Namespace: topo.Spec.Namespace, Target: targetName})
+			continue
+		}
+		var wc benchv1alpha1.WorkloadCluster
+		wcKey := types.NamespacedName{Name: topo.Spec.ClusterRef.Name, Namespace: s.cfg.Namespace}
+		if err := s.client.Get(ctx, wcKey, &wc); err != nil || wc.Status.PrometheusURL == "" {
+			continue
+		}
+		targets = append(targets, deploymentTarget{PrometheusURL: wc.Status.PrometheusURL, Namespace: topo.Spec.Namespace, Target: targetName})
 	}
-	if topo.Spec.ClusterRef.Name == "" {
-		return s.cfg.PrometheusURL, topo.Spec.Namespace, true
-	}
-	var wc benchv1alpha1.WorkloadCluster
-	wcKey := types.NamespacedName{Name: topo.Spec.ClusterRef.Name, Namespace: s.cfg.Namespace}
-	if err := s.client.Get(ctx, wcKey, &wc); err != nil || wc.Status.PrometheusURL == "" {
-		return "", "", false
-	}
-	return wc.Status.PrometheusURL, topo.Spec.Namespace, true
+	return targets
 }
 
 // listResourceMetrics answers GET
@@ -173,22 +193,20 @@ func (s *Server) listResourceMetrics(w http.ResponseWriter, r *http.Request) {
 
 	resp := rangeResponse{Metric: CompareMetric{Key: q.Get("resource"), Label: metric.Label, Unit: metric.Unit}}
 	for _, id := range testids {
-		baseURL, namespace, ok := s.deploymentTargetForTestID(r.Context(), id)
-		if !ok {
-			continue
+		for _, target := range s.deploymentTargetsForTestID(r.Context(), id) {
+			var query string
+			if metric.NeedsWindow {
+				query = fmt.Sprintf(metric.Query, target.Namespace, window)
+			} else {
+				query = fmt.Sprintf(metric.Query, target.Namespace)
+			}
+			points, err := s.promRange(r.Context(), target.PrometheusURL, query, start, end, step)
+			if err != nil {
+				writeError(w, r, http.StatusBadGateway, err.Error())
+				return
+			}
+			resp.Series = append(resp.Series, RangeSeries{TestID: id, Target: target.Target, Points: points})
 		}
-		var query string
-		if metric.NeedsWindow {
-			query = fmt.Sprintf(metric.Query, namespace, window)
-		} else {
-			query = fmt.Sprintf(metric.Query, namespace)
-		}
-		points, err := s.promRange(r.Context(), baseURL, query, start, end, step)
-		if err != nil {
-			writeError(w, r, http.StatusBadGateway, err.Error())
-			return
-		}
-		resp.Series = append(resp.Series, RangeSeries{TestID: id, Points: points})
 	}
 	writeJSON(w, r, http.StatusOK, resp)
 }

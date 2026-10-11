@@ -145,11 +145,14 @@ func sampleTestCase(name, deployment string, profile benchv1alpha1.TestProfile) 
 }
 
 // fakePrometheus serves the instant-query shape the compare endpoint parses,
-// answering every query with the value the test hands it.
-func fakePrometheus(t *testing.T, handler func(query string) (string, bool)) *httptest.Server {
+// answering every query with the value the test hands it, tagged with the
+// `target` label the handler returns - compareMetrics' queries now group
+// `by (target)`, so a test asserting cross-target behavior needs to control
+// it; most tests don't care and can return "".
+func fakePrometheus(t *testing.T, handler func(query string) (value, target string, ok bool)) *httptest.Server {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		value, ok := handler(r.URL.Query().Get("query"))
+		value, target, ok := handler(r.URL.Query().Get("query"))
 		w.Header().Set("Content-Type", "application/json")
 		if !ok {
 			_, _ = w.Write([]byte(`{"status":"success","data":{"resultType":"vector","result":[]}}`))
@@ -160,7 +163,7 @@ func fakePrometheus(t *testing.T, handler func(query string) (string, bool)) *ht
 			"data": map[string]any{
 				"resultType": "vector",
 				"result": []any{map[string]any{
-					"metric": map[string]string{},
+					"metric": map[string]string{"target": target},
 					"value":  []any{1700000000, value},
 				}},
 			},

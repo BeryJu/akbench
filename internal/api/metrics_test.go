@@ -17,6 +17,7 @@ limitations under the License.
 package api
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -85,17 +86,17 @@ func TestProxyQueryWithoutPrometheus(t *testing.T) {
 
 func TestCompare(t *testing.T) {
 	seen := map[string]bool{}
-	prom := fakePrometheus(t, func(query string) (string, bool) {
+	prom := fakePrometheus(t, func(query string) (string, string, bool) {
 		seen[query] = true
 		switch {
 		case strings.Contains(query, "k6_http_reqs_total") && strings.Contains(query, `testid="login-a"`):
-			return "120.5", true
+			return "120.5", "", true
 		case strings.Contains(query, "k6_http_reqs_total") && strings.Contains(query, `testid="login-b"`):
-			return "90", true
+			return "90", "", true
 		// Everything else reports no data, which must land as an absent key
 		// rather than a zero the UI would render as a real measurement.
 		default:
-			return "", false
+			return "", "", false
 		}
 	})
 
@@ -125,9 +126,63 @@ func TestCompare(t *testing.T) {
 	}
 	// The p95 query has to be the native-histogram form: k6 runs with
 	// TREND_AS_NATIVE_HISTOGRAM, so there is no le label to quantile over.
-	wantP95 := `histogram_quantile(0.95, sum(rate(k6_http_req_duration_seconds{testid="login-a"}[5m])))`
+	// It also has to group `by (target)`, so a testid with more than one
+	// deployment shows separate rows instead of one summed line.
+	wantP95 := `histogram_quantile(0.95, sum by (target) (rate(k6_http_req_duration_seconds{testid="login-a"}[5m])))`
 	if !seen[wantP95] {
 		t.Fatalf("p95 query was not %q; queries seen: %v", wantP95, seen)
+	}
+}
+
+// A TestCase driving more than one deployment must show one compare row per
+// target rather than collapsing them into a single summed number - the
+// entire reason compareMetrics' queries group `by (target)` in the first
+// place (see the package doc comment above compareMetrics itself).
+func TestCompareMultiDeploymentShowsOneRowPerTarget(t *testing.T) {
+	prom := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		query := r.URL.Query().Get("query")
+		if !strings.Contains(query, "k6_http_reqs_total") {
+			_, _ = w.Write([]byte(`{"status":"success","data":{"resultType":"vector","result":[]}}`))
+			return
+		}
+		body := map[string]any{
+			"status": "success",
+			"data": map[string]any{
+				"resultType": "vector",
+				"result": []any{
+					map[string]any{"metric": map[string]string{"target": "dep-a"}, "value": []any{1700000000, "10"}},
+					map[string]any{"metric": map[string]string{"target": "dep-b"}, "value": []any{1700000000, "20"}},
+				},
+			},
+		}
+		_ = json.NewEncoder(w).Encode(body)
+	}))
+	defer prom.Close()
+
+	tc := sampleTestCase("login-multi", "", benchv1alpha1.ProfileBurn)
+	tc.Spec.DeploymentRef = corev1.LocalObjectReference{}
+	tc.Spec.DeploymentRefs = []corev1.LocalObjectReference{{Name: "dep-a"}, {Name: "dep-b"}}
+
+	s, _ := newServer(t, Config{PrometheusURL: prom.URL}, sampleDeployment("dep-a"), sampleDeployment("dep-b"), tc)
+	rec := do(t, s, http.MethodGet, "/api/v1/metrics/compare?testids=login-multi", nil)
+	requireStatus(t, rec, http.StatusOK)
+
+	body := decodeBody[struct {
+		Results []CompareResult `json:"results"`
+	}](t, rec)
+	if len(body.Results) != 2 {
+		t.Fatalf("got %d results, want 2 (one per deployment): %+v", len(body.Results), body.Results)
+	}
+	values := map[string]float64{}
+	for _, row := range body.Results {
+		if row.TestID != "login-multi" {
+			t.Errorf("row testid = %q, want login-multi", row.TestID)
+		}
+		values[row.Target] = row.Values["http_reqs"]
+	}
+	if values["dep-a"] != 10 || values["dep-b"] != 20 {
+		t.Fatalf("values by target = %+v, want dep-a=10 dep-b=20", values)
 	}
 }
 
@@ -140,17 +195,21 @@ func TestCompare(t *testing.T) {
 // testid lands on the wrong server, the response reports no data for it and
 // the assertions below catch that.
 func TestMetricsResolvesPerClusterPrometheus(t *testing.T) {
-	mgmtProm := fakePrometheus(t, func(query string) (string, bool) {
+	// Target has to match what compareTargetsForTestID itself resolves
+	// (the deployment object's own name, since neither sets TargetName) -
+	// otherwise the pre-seeded known-target row and the sample-tagged row
+	// would land as two separate, unmerged rows instead of one.
+	mgmtProm := fakePrometheus(t, func(query string) (string, string, bool) {
 		if strings.Contains(query, `testid="login-mgmt"`) {
-			return "42", true
+			return "42", "topo-mgmt", true
 		}
-		return "", false
+		return "", "", false
 	})
-	wcProm := fakePrometheus(t, func(query string) (string, bool) {
+	wcProm := fakePrometheus(t, func(query string) (string, string, bool) {
 		if strings.Contains(query, `testid="login-wc"`) {
-			return "7", true
+			return "7", "topo-wc", true
 		}
-		return "", false
+		return "", "", false
 	})
 
 	wc := &benchv1alpha1.WorkloadCluster{
@@ -211,11 +270,11 @@ func TestCompareRejectsBadWindow(t *testing.T) {
 // NaN is what an empty native histogram quantiles to, and it cannot be
 // encoded as JSON - it has to be dropped, not returned.
 func TestCompareDropsNaN(t *testing.T) {
-	prom := fakePrometheus(t, func(query string) (string, bool) {
+	prom := fakePrometheus(t, func(query string) (string, string, bool) {
 		if strings.Contains(query, "histogram_quantile") {
-			return "NaN", true
+			return "NaN", "", true
 		}
-		return "1", true
+		return "1", "", true
 	})
 
 	s, _ := newServer(t, Config{PrometheusURL: prom.URL})
@@ -281,7 +340,7 @@ func TestMetricsRange(t *testing.T) {
 		t.Fatalf("login-b series = %+v", got)
 	}
 	// Default window (1m) has to reach the query, same as compare's default 5m.
-	wantQuery := `sum(rate(k6_http_reqs_total{testid="login-a"}[1m]))`
+	wantQuery := `sum by (target) (rate(k6_http_reqs_total{testid="login-a"}[1m]))`
 	if !seen[wantQuery] {
 		t.Fatalf("query was not %q; queries seen: %v", wantQuery, seen)
 	}

@@ -64,20 +64,36 @@ func (s *Server) createRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	run := &benchv1alpha1.TestRun{
-		ObjectMeta: metav1.ObjectMeta{
-			GenerateName: name + "-",
-			Namespace:    s.cfg.Namespace,
-			Labels:       map[string]string{benchv1alpha1.LabelTestCase: name},
-		},
-		Spec: benchv1alpha1.TestRunSpec{
-			TestCaseRef: corev1.LocalObjectReference{Name: name},
-			Overrides:   body.Overrides,
-		},
-	}
-	if err := s.client.Create(r.Context(), run); err != nil {
-		writeAPIError(w, r, err)
+	deployments := tc.Deployments()
+	if len(deployments) == 0 {
+		writeError(w, r, http.StatusBadRequest, "TestCase has no deployment set (neither deploymentRef nor deploymentRefs)")
 		return
 	}
-	writeJSON(w, r, http.StatusCreated, run)
+
+	// One TestRun per target deployment, each pinned via Spec.DeploymentRef -
+	// matches this project's "immutable, individually-inspectable record"
+	// TestRun philosophy (one TestRun = one Job = one target) rather than
+	// teaching a single TestRun to fan out N Jobs itself.
+	runs := make([]*benchv1alpha1.TestRun, 0, len(deployments))
+	for _, dep := range deployments {
+		dep := dep
+		run := &benchv1alpha1.TestRun{
+			ObjectMeta: metav1.ObjectMeta{
+				GenerateName: name + "-",
+				Namespace:    s.cfg.Namespace,
+				Labels:       map[string]string{benchv1alpha1.LabelTestCase: name},
+			},
+			Spec: benchv1alpha1.TestRunSpec{
+				TestCaseRef:   corev1.LocalObjectReference{Name: name},
+				DeploymentRef: &dep,
+				Overrides:     body.Overrides,
+			},
+		}
+		if err := s.client.Create(r.Context(), run); err != nil {
+			writeAPIError(w, r, err)
+			return
+		}
+		runs = append(runs, run)
+	}
+	writeJSON(w, r, http.StatusCreated, runs)
 }

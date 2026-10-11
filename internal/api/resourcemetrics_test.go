@@ -21,6 +21,8 @@ import (
 	"strings"
 	"testing"
 
+	corev1 "k8s.io/api/core/v1"
+
 	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
 )
 
@@ -113,6 +115,59 @@ func TestListResourceMetricsMemoryQueryHasNoWindow(t *testing.T) {
 	}
 	if !strings.Contains(gotQuery, `namespace="ak-topo2"`) {
 		t.Errorf("query doesn't scope to the deployment's own namespace: %q", gotQuery)
+	}
+}
+
+// A TestCase driving more than one deployment must report one resource
+// series per target, each scoped to that deployment's own namespace -
+// mirrors TestCompareMultiDeploymentShowsOneRowPerTarget's guard for the k6
+// metrics side.
+func TestListResourceMetricsMultiDeployment(t *testing.T) {
+	queriesByNamespace := map[string]string{}
+	prom := fakePrometheusRange(t, func(query string) [][2]any {
+		switch {
+		case strings.Contains(query, `namespace="ak-dep-a"`):
+			queriesByNamespace["ak-dep-a"] = query
+			return [][2]any{{1700000000, "1"}}
+		case strings.Contains(query, `namespace="ak-dep-b"`):
+			queriesByNamespace["ak-dep-b"] = query
+			return [][2]any{{1700000000, "2"}}
+		default:
+			return nil
+		}
+	})
+
+	depA := sampleDeployment("dep-a")
+	depA.Spec.Namespace = "ak-dep-a"
+	depB := sampleDeployment("dep-b")
+	depB.Spec.Namespace = "ak-dep-b"
+
+	tc := sampleTestCase("login-multi", "", benchv1alpha1.ProfileBurn)
+	tc.Spec.DeploymentRef = corev1.LocalObjectReference{}
+	tc.Spec.DeploymentRefs = []corev1.LocalObjectReference{{Name: "dep-a"}, {Name: "dep-b"}}
+
+	s, _ := newServer(t, Config{PrometheusURL: prom.URL}, depA, depB, tc)
+	rec := do(t, s, http.MethodGet, "/api/v1/metrics/resources?testids=login-multi&resource=cpu&start=1700000000&end=1700003600", nil)
+	requireStatus(t, rec, http.StatusOK)
+
+	body := decodeBody[struct {
+		Series []RangeSeries `json:"series"`
+	}](t, rec)
+	if len(body.Series) != 2 {
+		t.Fatalf("got %d series, want 2 (one per deployment): %+v", len(body.Series), body.Series)
+	}
+	targets := map[string]float64{}
+	for _, series := range body.Series {
+		if len(series.Points) != 1 {
+			t.Fatalf("series %+v has %d points, want 1", series, len(series.Points))
+		}
+		targets[series.Target] = series.Points[0].Value
+	}
+	if targets["dep-a"] != 1 || targets["dep-b"] != 2 {
+		t.Fatalf("series by target = %+v, want dep-a=1 dep-b=2", targets)
+	}
+	if queriesByNamespace["ak-dep-a"] == "" || queriesByNamespace["ak-dep-b"] == "" {
+		t.Fatalf("did not query both deployments' own namespaces: %+v", queriesByNamespace)
 	}
 }
 
