@@ -79,6 +79,8 @@ type Server struct {
 	cfg    Config
 	http   *http.Client
 	shell  *shellState
+	// grafanaKey signs the Grafana proxy's session cookies (grafana_session.go).
+	grafanaKey []byte
 }
 
 // New builds a Server. The client must be backed by the management cluster
@@ -91,7 +93,7 @@ func New(c client.Client, cfg Config) *Server {
 	if httpClient == nil {
 		httpClient = &http.Client{Timeout: 30 * time.Second}
 	}
-	return &Server{client: c, cfg: cfg, http: httpClient, shell: newShellState()}
+	return &Server{client: c, cfg: cfg, http: httpClient, shell: newShellState(), grafanaKey: newGrafanaSessionKey()}
 }
 
 // probeStatusField is the JSON key /healthz and /readyz answer under -
@@ -115,8 +117,9 @@ func (s *Server) Router() http.Handler {
 	r.Get("/healthz", probeOK)
 	r.Get("/readyz", probeOK)
 
-	// Unauthenticated by design - an <iframe src=> can't carry a bearer
-	// token. See grafana_proxy.go's own doc comment for the full rationale.
+	// Outside the /api/v1 group because an <iframe src=> can't carry a
+	// bearer token - it authenticates with a session cookie instead, see
+	// grafana_session.go.
 	r.HandleFunc("/grafana-proxy/{cluster}/*", s.grafanaProxy)
 
 	r.Route("/api/v1", func(r chi.Router) {
@@ -126,6 +129,7 @@ func (s *Server) Router() http.Handler {
 		r.Group(func(r chi.Router) {
 			r.Use(s.requireToken)
 
+			r.Post("/grafana/session", s.createGrafanaSession)
 			r.Get("/clusters", s.listClusters)
 			r.Post("/clusters", s.registerCluster)
 			r.Get("/clusters/{name}", s.getCluster)

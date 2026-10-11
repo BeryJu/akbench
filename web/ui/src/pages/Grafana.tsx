@@ -20,6 +20,10 @@
 // itself, so the proxy is same-origin: no NodePort and no extra port-forward.
 //
 // The whole Grafana UI is embedded as-is - no dashboard picker or kiosk mode.
+//
+// The proxy only answers a browser holding its session cookie, minted here
+// with this app's own API credential before the iframe loads and re-minted
+// while the page stays open.
 import { Link, useNavigate, useParams } from 'react-router';
 import { api } from '../api';
 import { Alert, Empty, Page } from '../components/ui';
@@ -31,10 +35,14 @@ function grafanaProxyURL(cluster: string): string {
   return `/grafana-proxy/${encodeURIComponent(cluster)}/`;
 }
 
+// The cookie lasts an hour (grafanaSessionTTL); renew well inside that.
+const SESSION_RENEW_MS = 20 * 60 * 1000;
+
 export function GrafanaPage() {
   const { cluster: clusterParam } = useParams();
   const navigate = useNavigate();
   const clusters = useResource(() => api.workloadClusters(), [], 0);
+  const session = useResource(() => api.grafanaSession(), [], SESSION_RENEW_MS);
 
   const withGrafana = (clusters.data ?? []).filter(c => c.status?.grafanaURL);
   const cluster = clusterParam ?? withGrafana[0]?.metadata.name;
@@ -63,7 +71,7 @@ export function GrafanaPage() {
         )
       }
     >
-      <Alert>{clusters.error}</Alert>
+      <Alert>{clusters.error ?? session.error}</Alert>
       {clusters.data && withGrafana.length === 0 && (
         <Empty>
           No workload cluster has Grafana yet - it's installed per workload cluster once it's provisioned.{' '}
@@ -72,7 +80,7 @@ export function GrafanaPage() {
       )}
       {clusters.data && cluster && !known && <Alert>Workload cluster {cluster} not found.</Alert>}
       {known && !ready && <Alert kind="info">Grafana on {cluster} isn't ready yet.</Alert>}
-      {cluster && ready && (
+      {cluster && ready && session.data && (
         <iframe
           key={cluster}
           className="grafana-frame"

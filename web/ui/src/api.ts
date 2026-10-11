@@ -200,6 +200,11 @@ export const api = {
         `&resource=${seg(resource)}&start=${startSeconds}&end=${endSeconds}&step=${seg(step)}`
     ),
 
+  // -- Grafana proxy (internal/api/grafana_session.go): sets the cookie the
+  // proxy itself authenticates with, since its <iframe> can't send a bearer
+  // token.
+  grafanaSession: () => request<{ expiresAt: string }>('/api/v1/grafana/session', json('POST', {})),
+
   // -- Alerts (internal/api/alerts.go) - aggregated across every workload
   // cluster's own Alertmanager, there is no central instance.
   alerts: () => request<List<Alert>>('/api/v1/alerts').then(r => r.items ?? []),
