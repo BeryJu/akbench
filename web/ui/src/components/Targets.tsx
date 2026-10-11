@@ -96,7 +96,6 @@ export function TargetKey({ index }: { index: number }) {
 }
 
 export const TARGET_METRICS = ['iterations', 'iteration_duration_p95', 'http_req_duration_p99', 'http_req_failed', 'checks'];
-const DELTA_METRIC = 'iteration_duration_p95';
 
 export function TargetTable({
   rows,
@@ -110,7 +109,7 @@ export function TargetTable({
   rows: TargetRow[];
   metrics: CompareMetric[];
   metricKeys?: string[];
-  /** Target the Δ column is relative to; a Δ column only shows with onBaseline. */
+  /** Target the per-metric Δ is relative to; Δs only show with onBaseline. */
   baseline?: string;
   onBaseline?: (target: string) => void;
   /** p95 trend per target, keyed by target. */
@@ -120,7 +119,7 @@ export function TargetTable({
   const columns = metricKeys
     .map(key => metrics.find(m => m.key === key))
     .filter((m): m is CompareMetric => m !== undefined);
-  const deltaMetric = onBaseline && rows.length > 1 ? metrics.find(m => m.key === DELTA_METRIC) : undefined;
+  const showDelta = onBaseline !== undefined && rows.length > 1;
   const baseRow = rows.find(r => r.target === baseline) ?? rows[0];
   const dark = useDarkTheme();
 
@@ -136,10 +135,9 @@ export function TargetTable({
                 {m.label}
               </th>
             ))}
-            {deltaMetric && <th className="num">Δ {deltaMetric.label}</th>}
             {sparklines && <th>p95 trend</th>}
             <th>Runner</th>
-            {(actions || deltaMetric) && <th />}
+            {(actions || showDelta) && <th />}
           </tr>
         </thead>
         <tbody>
@@ -161,34 +159,30 @@ export function TargetTable({
               {columns.map(m => (
                 <td key={m.key} className="mono num">
                   {formatMetricValue(row.values[m.key], m.unit)}
-                </td>
-              ))}
-              {deltaMetric && (
-                <td className="mono num">
-                  {row === baseRow ? (
-                    <span className="muted">baseline</span>
-                  ) : (
-                    <Delta
-                      value={relativeDelta(row.values[deltaMetric.key], baseRow.values[deltaMetric.key])}
-                      better={deltaMetric.better}
-                    />
+                  {showDelta && row !== baseRow && (
+                    <div style={{ fontSize: 12 }}>
+                      <Delta value={relativeDelta(row.values[m.key], baseRow.values[m.key])} better={m.better} />
+                    </div>
                   )}
                 </td>
-              )}
+              ))}
               {sparklines && (
                 <td>
                   <Sparkline points={sparklines.get(row.target) ?? []} color={colorFor(row.index, dark)} />
                 </td>
               )}
               <td>{row.ready === undefined ? <span className="muted">-</span> : <Badge value={row.ready ? 'Ready' : 'Not ready'} />}</td>
-              {(actions || deltaMetric) && (
+              {(actions || showDelta) && (
                 <td className="actions">
                   <span className="row" style={{ justifyContent: 'flex-end', flexWrap: 'nowrap' }}>
-                    {deltaMetric && row !== baseRow && (
-                      <button type="button" className="small" onClick={() => onBaseline?.(row.target)}>
-                        Use as baseline
-                      </button>
-                    )}
+                    {showDelta &&
+                      (row === baseRow ? (
+                        <span className="muted">baseline</span>
+                      ) : (
+                        <button type="button" className="small" onClick={() => onBaseline?.(row.target)}>
+                          Use as baseline
+                        </button>
+                      ))}
                     {actions?.(row)}
                   </span>
                 </td>
