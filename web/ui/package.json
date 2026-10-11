@@ -12,6 +12,8 @@
   },
   "dependencies": {
     "@goauthentik/brand-assets": "^2.0.0",
+    "@goauthentik/fonts": "^2.0.0",
+    "@goauthentik/theme": "^2.0.1",
     "@monaco-editor/react": "^4.7.0",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/addon-web-links": "^0.12.0",
