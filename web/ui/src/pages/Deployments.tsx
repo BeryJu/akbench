@@ -23,7 +23,7 @@ import { ObjectYaml } from '../components/ObjectYaml';
 import { ConditionList, StatusBadge } from '../components/Status';
 import { Alert, confirmAndRun, Empty, errorMessage, Field, Page, Table } from '../components/ui';
 import { shellLinkForCluster } from '../shell/links';
-import { AuthentikDeployment, AuthentikDeploymentSpec, PlacementMode, PostgresMode } from '../types';
+import { AuthentikDeployment, AuthentikDeploymentSpec, PlacementMode, PostgresMode, testCaseDeployments } from '../types';
 import { useResource } from '../useResource';
 
 export function DeploymentsPage() {
@@ -525,7 +525,9 @@ export function DeploymentViewPage() {
   const { name = '' } = useParams();
   const deployment = useResource(() => api.deployment(name), [name], 10000);
   const testCases = useResource(() => api.testCases(), [], 15000);
-  const testids = (testCases.data ?? []).filter(tc => tc.spec.deploymentRef.name === name).map(tc => tc.metadata.name);
+  const testids = (testCases.data ?? [])
+    .filter(tc => testCaseDeployments(tc.spec).some(ref => ref.name === name))
+    .map(tc => tc.metadata.name);
   const [kicking, setKicking] = useState(false);
 
   const d = deployment.data;

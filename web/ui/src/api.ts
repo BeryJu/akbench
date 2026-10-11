@@ -152,7 +152,9 @@ export const api = {
   updateTestCase: (name: string, obj: { spec: TestCaseSpec }) =>
     request<TestCase>(`/api/v1/testcases/${seg(name)}`, json('PUT', obj)),
   deleteTestCase: (name: string) => request<void>(`/api/v1/testcases/${seg(name)}`, { method: 'DELETE' }),
-  runTestCase: (name: string) => request<TestRun>(`/api/v1/testcases/${seg(name)}/runs`, json('POST', {})),
+  // One TestRun per deployment the TestCase drives (see testCaseDeployments) -
+  // always an array, even for today's common single-deployment case.
+  runTestCase: (name: string) => request<TestRun[]>(`/api/v1/testcases/${seg(name)}/runs`, json('POST', {})),
 
   // -- Test case templates
   testCaseTemplates: () =>

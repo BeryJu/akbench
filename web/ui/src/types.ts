@@ -108,7 +108,12 @@ export interface AuthentikDeployment {
 }
 
 export interface TestCaseSpec {
-  deploymentRef: { name: string };
+  // deploymentRef is deprecated (kept for objects created before
+  // deploymentRefs existed) - prefer deploymentRefs, which supports driving
+  // the same test against multiple deployments at once. Both optional at
+  // this layer; the CRD/controller require at least one to resolve.
+  deploymentRef?: { name: string };
+  deploymentRefs?: { name: string }[];
   runnerClusterRef?: { name: string };
   template?: string;
   inline?: string;
@@ -126,6 +131,12 @@ export interface TestCaseSpec {
   extraTags?: Record<string, string>;
 }
 
+export interface TestCaseDeploymentStatus {
+  name: string;
+  ready: boolean;
+  burnWorkloadRef?: { name: string };
+}
+
 export interface TestCase {
   metadata: ObjectMeta;
   spec: TestCaseSpec;
@@ -133,8 +144,25 @@ export interface TestCase {
     conditions?: Condition[];
     phase?: string;
     observedGeneration?: number;
-    burnWorkloadRef?: { name: string };
+    deployments?: TestCaseDeploymentStatus[];
   };
+}
+
+/**
+ * testCaseDeployments mirrors TestCase.Deployments() (api/v1alpha1/testcase_types.go):
+ * prefers spec.deploymentRefs, falls back to the deprecated singular
+ * spec.deploymentRef - the one place the frontend should read "which
+ * deployment(s) does this TestCase drive" rather than reading either field
+ * directly.
+ */
+export function testCaseDeployments(spec: TestCaseSpec): { name: string }[] {
+  if (spec.deploymentRefs && spec.deploymentRefs.length > 0) {
+    return spec.deploymentRefs;
+  }
+  if (spec.deploymentRef?.name) {
+    return [spec.deploymentRef];
+  }
+  return [];
 }
 
 export interface TestCaseTemplateSpec {
@@ -159,6 +187,12 @@ export interface TestRun {
   metadata: ObjectMeta;
   spec: {
     testCaseRef: { name: string };
+    // deploymentRef pins this run to one specific entry of its TestCase's
+    // own deployments (see testCaseDeployments) - unset on every TestRun
+    // created before multi-deployment TestCases existed, in which case it
+    // ran (and still is read as having run) against that TestCase's own
+    // first/only deployment.
+    deploymentRef?: { name: string };
     overrides?: { vus?: number; iterations?: number; flow?: string };
   };
   status?: {
@@ -253,7 +287,9 @@ export interface CompareMetric {
 export interface CompareResponse {
   window: string;
   metrics: CompareMetric[];
-  results: { testid: string; values: Record<string, number> }[];
+  // One row per (testid, target) pair - a testid driving more than one
+  // AuthentikDeployment produces more than one row, target always populated.
+  results: { testid: string; target: string; values: Record<string, number> }[];
 }
 
 export interface RangePoint {
@@ -263,6 +299,7 @@ export interface RangePoint {
 
 export interface RangeSeries {
   testid: string;
+  target: string;
   points: RangePoint[];
 }
 

@@ -36,15 +36,26 @@ const CHART_RANGES = [
 ];
 const DEFAULT_RANGE_SECONDS = CHART_RANGES[0].seconds;
 
-/** best picks the winning test per metric, honouring its direction. */
+/** resultKey/resultLabel identify and label one compare row - a (testid,
+ * target) pair, since a multi-deployment TestCase now produces more than one
+ * row per testid. Label drops the target suffix unless the testid actually
+ * has more than one row in this response, same disambiguation the charts use. */
+function resultKey(r: CompareResponse['results'][number]): string {
+  return `${r.testid}::${r.target}`;
+}
+function resultLabel(r: CompareResponse['results'][number], results: CompareResponse['results']): string {
+  return results.filter(other => other.testid === r.testid).length > 1 ? `${r.testid} / ${r.target}` : r.testid;
+}
+
+/** best picks the winning (testid, target) row per metric, honouring its direction. */
 function best(response: CompareResponse, key: string, better: string): string | undefined {
   const scored = response.results
     .filter(r => r.values[key] !== undefined)
-    .map(r => ({ testid: r.testid, value: r.values[key] }));
+    .map(r => ({ rowKey: resultKey(r), value: r.values[key] }));
   if (scored.length < 2) {
     return undefined;
   }
-  return scored.reduce((a, b) => ((better === 'lower' ? b.value < a.value : b.value > a.value) ? b : a)).testid;
+  return scored.reduce((a, b) => ((better === 'lower' ? b.value < a.value : b.value > a.value) ? b : a)).rowKey;
 }
 
 export function ComparePage() {
@@ -163,7 +174,7 @@ export function ComparePage() {
               <tr>
                 <th>Metric</th>
                 {results.map(r => (
-                  <th key={r.testid}>{r.testid}</th>
+                  <th key={resultKey(r)}>{resultLabel(r, results)}</th>
                 ))}
               </tr>
             </thead>
@@ -176,9 +187,9 @@ export function ComparePage() {
                       {m.label} <span className="muted">({m.better} is better)</span>
                     </td>
                     {results.map(r => (
-                      <td key={r.testid} className="mono">
+                      <td key={resultKey(r)} className="mono">
                         {formatMetricValue(r.values[m.key], m.unit)}
-                        {winner === r.testid ? ' ✓' : ''}
+                        {winner === resultKey(r) ? ' ✓' : ''}
                       </td>
                     ))}
                   </tr>

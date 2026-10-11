@@ -112,12 +112,22 @@ function rangeChartOptions(unit: string, showLegend: boolean): ChartOptions<'lin
 }
 
 /** rangeDatasets turns a RangeResponse into Chart.js datasets, one per
- * series, labeled by whatever the caller wants (a plain testid, or a
- * shortened pod name) - spanGaps true mirrors recharts' own connectNulls. */
-function rangeDatasets(data: RangeResponse | undefined, labelFor: (seriesKey: string) => string) {
-  return (data?.series ?? []).map((series, i) => ({
-    label: labelFor(series.testid),
-    data: (series.points ?? []).map(p => ({ x: p.time, y: p.value })),
+ * (testid, target) series. A series is labeled by its testid alone unless
+ * that testid has more than one target in this response (a multi-deployment
+ * TestCase), in which case "testid / target" disambiguates - avoids an
+ * always-on suffix for the common single-deployment case. spanGaps true
+ * mirrors recharts' own connectNulls. */
+function rangeDatasets(data: RangeResponse | undefined) {
+  const series = data?.series ?? [];
+  const targetsByTestID = new Map<string, Set<string>>();
+  for (const s of series) {
+    const targets = targetsByTestID.get(s.testid) ?? new Set<string>();
+    targets.add(s.target);
+    targetsByTestID.set(s.testid, targets);
+  }
+  return series.map((s, i) => ({
+    label: (targetsByTestID.get(s.testid)?.size ?? 0) > 1 ? `${s.testid} / ${s.target}` : s.testid,
+    data: (s.points ?? []).map(p => ({ x: p.time, y: p.value })),
     borderColor: colorFor(i),
     backgroundColor: colorFor(i),
     spanGaps: true,
@@ -158,9 +168,9 @@ export function MetricsChart({
 
   const unit = data?.metric.unit ?? '';
   const label = data?.metric.label ?? metric;
-  const datasets = useMemo(() => rangeDatasets(data, id => id), [data]);
+  const datasets = useMemo(() => rangeDatasets(data), [data]);
   const hasData = datasets.some(d => d.data.length > 0);
-  const options = useMemo(() => rangeChartOptions(unit, testids.length > 1), [unit, testids.length]);
+  const options = useMemo(() => rangeChartOptions(unit, datasets.length > 1), [unit, datasets.length]);
 
   return (
     <div className="panel">
@@ -246,9 +256,9 @@ export function ResourceChart({
 
   const unit = data?.metric.unit ?? '';
   const label = data?.metric.label ?? resource;
-  const datasets = useMemo(() => rangeDatasets(data, id => id), [data]);
+  const datasets = useMemo(() => rangeDatasets(data), [data]);
   const hasData = datasets.some(d => d.data.length > 0);
-  const options = useMemo(() => rangeChartOptions(unit, testids.length > 1), [unit, testids.length]);
+  const options = useMemo(() => rangeChartOptions(unit, datasets.length > 1), [unit, datasets.length]);
 
   return (
     <div className="panel">

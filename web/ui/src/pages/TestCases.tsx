@@ -24,7 +24,7 @@ import { Badge, ConditionList, StatusBadge } from '../components/Status';
 import { Alert, confirmAndRun, errorMessage, Field, formatTimestamp, Page, Table } from '../components/ui';
 import { metricsAnchorFromRuns } from '../format';
 import { shellLinkForCluster } from '../shell/links';
-import { TestCase, TestCaseSpec, TestProfile } from '../types';
+import { TestCase, TestCaseSpec, TestProfile, testCaseDeployments } from '../types';
 import { useResource } from '../useResource';
 
 export function TestCasesPage() {
@@ -33,8 +33,12 @@ export function TestCasesPage() {
 
   async function runNow(name: string) {
     try {
-      const run = await api.runTestCase(name);
-      setNotice(`Started test run ${run.metadata.name}`);
+      const runs = await api.runTestCase(name);
+      setNotice(
+        runs.length > 1
+          ? `Started ${runs.length} test runs (one per deployment)`
+          : `Started test run ${runs[0]?.metadata.name ?? ''}`
+      );
     } catch (err) {
       window.alert(errorMessage(err));
     }
@@ -60,7 +64,16 @@ export function TestCasesPage() {
           { label: 'Name', render: tc => <Link to={`/testcases/${tc.metadata.name}`}>{tc.metadata.name}</Link> },
           {
             label: 'Deployment',
-            render: tc => <Link to={`/deployments/${tc.spec.deploymentRef.name}`}>{tc.spec.deploymentRef.name}</Link>,
+            render: tc => (
+              <span className="row" style={{ gap: 4 }}>
+                {testCaseDeployments(tc.spec).map((ref, i) => (
+                  <span key={ref.name}>
+                    {i > 0 && ', '}
+                    <Link to={`/deployments/${ref.name}`}>{ref.name}</Link>
+                  </span>
+                ))}
+              </span>
+            ),
           },
           { label: 'Template', render: tc => (tc.spec.inline !== undefined ? <em>inline</em> : (tc.spec.template ?? '-')) },
           { label: 'Profile', render: tc => <Badge value={tc.spec.profile} /> },
@@ -109,7 +122,7 @@ const INLINE_TEMPLATE = '__inline__';
 
 function emptySpec(): TestCaseSpec {
   return {
-    deploymentRef: { name: '' },
+    deploymentRefs: [],
     template: 'login',
     profile: 'Quick',
     vus: 8,
@@ -132,12 +145,27 @@ function TestCaseForm({ existing }: { existing?: TestCase }) {
 
   const patch = (changes: Partial<TestCaseSpec>) => setSpec(current => ({ ...current, ...changes }));
 
+  const selectedDeployments = testCaseDeployments(spec).map(r => r.name);
+  function toggleDeployment(deploymentName: string) {
+    const next = selectedDeployments.includes(deploymentName)
+      ? selectedDeployments.filter(n => n !== deploymentName)
+      : [...selectedDeployments, deploymentName];
+    // Always write deploymentRefs going forward and drop the deprecated
+    // singular field, even if it's what this TestCase was loaded with -
+    // any edit through this form migrates it cleanly.
+    patch({ deploymentRefs: next.map(n => ({ name: n })), deploymentRef: undefined });
+  }
+
   // scriptConfigMapRef (bring-your-own ConfigMap) is a power-user escape
   // hatch deliberately not offered here - it survives a save untouched.
   const scriptChoice = spec.inline !== undefined ? INLINE_TEMPLATE : (spec.template ?? 'login');
 
   async function submit(event: FormEvent) {
     event.preventDefault();
+    if (selectedDeployments.length === 0) {
+      setError('Select at least one deployment to drive');
+      return;
+    }
     setSaving(true);
     setError(undefined);
     try {
@@ -164,19 +192,23 @@ function TestCaseForm({ existing }: { existing?: TestCase }) {
             <Field label="Name" help="Also the k6 testid every metric is split on">
               <input required value={name} disabled={Boolean(existing)} onChange={e => setName(e.target.value)} />
             </Field>
-            <Field label="Deployment to drive">
-              <select
-                required
-                value={spec.deploymentRef.name}
-                onChange={e => patch({ deploymentRef: { name: e.target.value } })}
-              >
-                <option value="">Choose a deployment</option>
+            <Field
+              label="Deployment(s) to drive"
+              help="Select more than one to run this same test independently against each - useful for comparing a test's own performance across deployments."
+            >
+              <div className="row">
                 {(deployments.data ?? []).map(d => (
-                  <option key={d.metadata.name} value={d.metadata.name}>
+                  <label className="check" key={d.metadata.name} style={{ marginRight: 12 }}>
+                    <input
+                      type="checkbox"
+                      checked={selectedDeployments.includes(d.metadata.name)}
+                      onChange={() => toggleDeployment(d.metadata.name)}
+                    />
                     {d.metadata.name}
-                  </option>
+                  </label>
                 ))}
-              </select>
+                {deployments.data?.length === 0 && <span className="muted">No deployments yet.</span>}
+              </div>
             </Field>
           </div>
         </fieldset>
@@ -305,15 +337,16 @@ export function TestCaseViewPage() {
   const testCase = useResource(() => api.testCase(name), [name], 10000);
   const tc = testCase.data;
   const profile = tc?.spec.profile;
-  const deploymentName = tc?.spec.deploymentRef.name;
-  const deployment = useResource(
-    () => (deploymentName ? api.deployment(deploymentName) : Promise.resolve(undefined)),
-    [deploymentName],
+  const deploymentRefs = tc ? testCaseDeployments(tc.spec) : [];
+  // Fetched so each deployment row can resolve its own cluster (for the "k6
+  // logs" shell link) - a multi-deployment TestCase can legitimately have
+  // targets on different clusters.
+  const deployments = useResource(
+    () => Promise.all(deploymentRefs.map(ref => api.deployment(ref.name).catch(() => undefined))),
+    [deploymentRefs.map(r => r.name).join(',')],
     0
   );
-  // A TestCase runs where its runnerClusterRef says, defaulting to its
-  // deployment's own cluster.
-  const cluster = tc?.spec.runnerClusterRef?.name ?? deployment.data?.spec.clusterRef?.name;
+  const deploymentByName = new Map((deployments.data ?? []).filter(Boolean).map(d => [d!.metadata.name, d!]));
   const runs = useResource(() => api.testRuns(name), [name], 10000);
   const sortedRuns = [...(runs.data ?? [])].sort((a, b) =>
     (b.metadata.creationTimestamp ?? '').localeCompare(a.metadata.creationTimestamp ?? '')
@@ -324,12 +357,14 @@ export function TestCaseViewPage() {
 
   const [running, setRunning] = useState(false);
   const [runError, setRunError] = useState<string>();
+  const [notice, setNotice] = useState<string>();
 
   async function runNow() {
     setRunning(true);
     setRunError(undefined);
     try {
-      await api.runTestCase(name);
+      const started = await api.runTestCase(name);
+      setNotice(started.length > 1 ? `Started ${started.length} test runs (one per deployment)` : 'Started test run');
       runs.reload();
     } catch (err) {
       setRunError(errorMessage(err));
@@ -341,7 +376,10 @@ export function TestCaseViewPage() {
   return (
     <Page
       title={name}
-      subtitle={tc && `${tc.spec.profile} test against ${tc.spec.deploymentRef.name}, ${tc.spec.vus} VUs`}
+      subtitle={
+        tc &&
+        `${tc.spec.profile} test against ${deploymentRefs.map(r => r.name).join(', ') || '(no deployment set)'}, ${tc.spec.vus} VUs`
+      }
       actions={
         <>
           {profile === 'Quick' && (
@@ -356,23 +394,33 @@ export function TestCaseViewPage() {
       }
     >
       <Alert>{testCase.error ?? runError}</Alert>
+      <Alert kind="success">{notice}</Alert>
       {tc && (
         <div className="panel">
           <div className="row" style={{ marginBottom: 8 }}>
             <StatusBadge kind="testcase" name={name} namespace={tc.metadata.namespace} phase={tc.status?.phase} conditions={tc.status?.conditions} />
-            <Link to={`/deployments/${tc.spec.deploymentRef.name}`}>Deployment: {tc.spec.deploymentRef.name}</Link>
-            {tc.status?.burnWorkloadRef && tc.metadata.namespace && (
-              <Link
-                className="button small"
-                to={shellLinkForCluster(
-                  cluster,
-                  `kubectl logs -n ${tc.metadata.namespace} deploy/${tc.status.burnWorkloadRef.name} -f --tail=200`
-                )}
-              >
-                k6 logs
-              </Link>
-            )}
           </div>
+          {deploymentRefs.map(ref => {
+            const depStatus = tc.status?.deployments?.find(d => d.name === ref.name);
+            const cluster = tc.spec.runnerClusterRef?.name ?? deploymentByName.get(ref.name)?.spec.clusterRef?.name;
+            return (
+              <div className="row" key={ref.name} style={{ marginBottom: 4 }}>
+                <Link to={`/deployments/${ref.name}`}>Deployment: {ref.name}</Link>
+                {depStatus && <Badge value={depStatus.ready ? 'Ready' : 'Not ready'} />}
+                {depStatus?.burnWorkloadRef && tc.metadata.namespace && (
+                  <Link
+                    className="button small"
+                    to={shellLinkForCluster(
+                      cluster,
+                      `kubectl logs -n ${tc.metadata.namespace} deploy/${depStatus.burnWorkloadRef.name} -f --tail=200`
+                    )}
+                  >
+                    k6 logs
+                  </Link>
+                )}
+              </div>
+            );
+          })}
           <ConditionList conditions={tc.status?.conditions} />
         </div>
       )}
