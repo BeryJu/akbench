@@ -101,7 +101,9 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("load kubeconfig: %w", err)
 	}
-	c, err := client.New(cfg, client.Options{Scheme: scheme})
+	// NewWithWatch, not New: the live-events feed (api.Server.RunEventWatchers)
+	// watches every bench resource kind through this same client.
+	c, err := client.NewWithWatch(cfg, client.Options{Scheme: scheme})
 	if err != nil {
 		return fmt.Errorf("build client: %w", err)
 	}
@@ -123,7 +125,8 @@ func run() error {
 		log.Info("OIDC login enabled", "issuer", oidcCfg.Issuer, "clientID", oidcCfg.ClientID)
 	}
 
-	shell, err := shellConfig(c, shellBinary, shellKubeconfig, shellSecret, corsOrigin)
+	wsOrigins := wsOriginPatterns(corsOrigin)
+	shell, err := shellConfig(c, shellBinary, shellKubeconfig, shellSecret, wsOrigins)
 	if err != nil {
 		return err
 	}
@@ -145,15 +148,17 @@ func run() error {
 	}
 
 	srv := api.New(c, api.Config{
-		Namespace:     namespace,
-		Token:         token,
-		PrometheusURL: prometheusURL,
-		CAPIAvailable: capiAvailable,
-		OIDC:          verifier,
-		OIDCConfig:    oidcCfg,
-		Shell:         shell,
-		UI:            ui,
+		Namespace:        namespace,
+		Token:            token,
+		PrometheusURL:    prometheusURL,
+		CAPIAvailable:    capiAvailable,
+		OIDC:             verifier,
+		OIDCConfig:       oidcCfg,
+		Shell:            shell,
+		UI:               ui,
+		WSOriginPatterns: wsOrigins,
 	})
+	go srv.RunEventWatchers(ctx)
 
 	handler := srv.Router()
 	if corsOrigin != "" {
@@ -209,7 +214,7 @@ func resolveToken(ctx context.Context, c client.Client, namespace, secretName st
 
 // shellConfig builds the in-browser shell's configuration from whichever
 // kubeconfig source is set, or returns nil (shell disabled) for neither.
-func shellConfig(c client.Client, shellBinary, file, secretRef, corsOrigin string) (*api.ShellConfig, error) {
+func shellConfig(c client.Client, shellBinary, file, secretRef string, wsOrigins []string) (*api.ShellConfig, error) {
 	var load func(context.Context) ([]byte, error)
 	switch {
 	case file != "" && secretRef != "":
@@ -238,12 +243,19 @@ func shellConfig(c client.Client, shellBinary, file, secretRef, corsOrigin strin
 	if _, err := os.Stat(shellBinary); err != nil {
 		return nil, fmt.Errorf("--shell: %w", err)
 	}
-	var origins []string
-	if corsOrigin != "" {
-		// AcceptOptions.OriginPatterns match host[:port], not full origins.
-		origins = []string{strings.TrimPrefix(strings.TrimPrefix(corsOrigin, "https://"), "http://")}
+	return &api.ShellConfig{Kubeconfig: load, Shell: shellBinary, OriginPatterns: wsOrigins}, nil
+}
+
+// wsOriginPatterns derives the extra host patterns a WebSocket upgrade
+// (shell or live events) accepts cross-origin from the same --cors-origin
+// flag the plain-HTTP CORS middleware uses - empty unless that's set, which
+// only happens for the dev-server-against-a-remote-backend case.
+func wsOriginPatterns(corsOrigin string) []string {
+	if corsOrigin == "" {
+		return nil
 	}
-	return &api.ShellConfig{Kubeconfig: load, Shell: shellBinary, OriginPatterns: origins}, nil
+	// AcceptOptions.OriginPatterns match host[:port], not full origins.
+	return []string{strings.TrimPrefix(strings.TrimPrefix(corsOrigin, "https://"), "http://")}
 }
 
 // hasCAPI reports whether cluster.x-k8s.io Clusters are servable, which is

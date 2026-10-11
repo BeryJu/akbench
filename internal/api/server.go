@@ -55,22 +55,32 @@ type Config struct {
 
 	// HTTPClient is used for Prometheus calls. Defaults to a 30s client.
 	HTTPClient *http.Client
+
+	// WSOriginPatterns are extra host patterns allowed to open a WebSocket
+	// (shell or live-events) cross-origin - same-origin is always allowed.
+	// Only non-empty for the dev-server CORS case (see cmd/apiserver's
+	// --cors-origin).
+	WSOriginPatterns []string
 }
 
 // Server holds the wiring shared by all handlers.
 type Server struct {
-	client client.Client
+	client client.WithWatch
 	cfg    Config
 	http   *http.Client
 	shell  *shellState
 	// grafanaKey signs the Grafana proxy's session cookies (grafana_session.go).
-	grafanaKey []byte
-	traces     *traceBreakdownCache
+	grafanaKey    []byte
+	traces        *traceBreakdownCache
+	events        *eventHub
+	eventsTickets *eventsState
 }
 
 // New builds a Server. The client must be backed by the management cluster
-// and its scheme must know the bench.goauthentik.io types.
-func New(c client.Client, cfg Config) *Server {
+// and its scheme must know the bench.goauthentik.io types. It must support
+// Watch (client.NewWithWatch, not client.New) - the live-events feed watches
+// every bench resource kind through this same client.
+func New(c client.WithWatch, cfg Config) *Server {
 	if cfg.Namespace == "" {
 		cfg.Namespace = "default"
 	}
@@ -80,7 +90,9 @@ func New(c client.Client, cfg Config) *Server {
 	}
 	return &Server{
 		client: c, cfg: cfg, http: httpClient, shell: newShellState(), grafanaKey: newGrafanaSessionKey(),
-		traces: &traceBreakdownCache{entries: map[string]TraceBreakdown{}},
+		traces:        &traceBreakdownCache{entries: map[string]TraceBreakdown{}},
+		events:        newEventHub(),
+		eventsTickets: newEventsState(),
 	}
 }
 
@@ -92,9 +104,9 @@ const probeStatusField = "status"
 
 // Router builds the full HTTP surface. Everything under /api/v1 requires a
 // bearer token except the auth discovery endpoint the login screen needs and
-// the shell's WebSocket, which authenticates with a single-use ticket minted
-// by an authenticated request (see shell.go). /healthz, /readyz and the UI's
-// static assets are public.
+// the two WebSocket endpoints (shell, live events), which authenticate with
+// a single-use ticket minted by an authenticated request (see shell.go,
+// events.go). /healthz, /readyz and the UI's static assets are public.
 func (s *Server) Router() http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID, middleware.Recoverer)
@@ -113,6 +125,7 @@ func (s *Server) Router() http.Handler {
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Get("/auth/config", s.authConfig)
 		r.Get("/shell/connect", s.connectShell)
+		r.Get("/events/connect", s.connectEvents)
 
 		r.Group(func(r chi.Router) {
 			r.Use(s.requireToken)
@@ -148,6 +161,8 @@ func (s *Server) Router() http.Handler {
 
 			r.Get("/shell/contexts", s.listShellContexts)
 			r.Post("/shell/sessions", s.createShellSession)
+
+			r.Post("/events/sessions", s.createEventsSession)
 		})
 
 		// Without this, an unknown /api/v1 path would fall through to the
