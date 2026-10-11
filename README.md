@@ -134,6 +134,15 @@ make test          # envtest (real apiserver, no real controllers e.g. Flux/CNPG
 go test ./test/contract/...   # just the k6 tag/env parity guard
 ```
 
+## Appliance
+
+The easiest way to run akbench is the single-container appliance: k3s as the
+Cluster API management cluster, with Flux, the Cluster API and Incus providers,
+and akbench preinstalled. Workload clusters still run on your own Incus. See
+[appliance/README.md](appliance/README.md), and
+[appliance/MIGRATION.md](appliance/MIGRATION.md) to move an existing
+management cluster onto it.
+
 ## Getting Started
 
 ### Prerequisites

@@ -266,6 +266,14 @@ type WorkloadClusterStatus struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
+// The move-hierarchy label makes `clusterctl move` carry every
+// WorkloadCluster - and everything it owns (the CAPI Cluster tree, its
+// HelmReleases/HelmRepositories, generated Secrets) - to the target
+// management cluster with ownerReferences rebuilt against the new UIDs.
+// Without it, clusterctl discovers WorkloadCluster as the Cluster's owner but
+// never creates it on the target, and the move fails on an ownerReference
+// with an empty UID. See hack/migrate-to-appliance.sh.
+// +kubebuilder:metadata:labels="clusterctl.cluster.x-k8s.io/move-hierarchy=true"
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
 // +kubebuilder:printcolumn:name="ControlPlane",type=boolean,JSONPath=`.status.controlPlaneReady`
 // +kubebuilder:printcolumn:name="Infrastructure",type=boolean,JSONPath=`.status.infrastructureReady`

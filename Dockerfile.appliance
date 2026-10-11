@@ -1,0 +1,64 @@
+# The single-container akbench appliance: k3s as the Cluster API management
+# cluster, with Flux, the Cluster API + Incus providers and akbench itself
+# installed by cmd/appliance on first boot. Incus is never inside it - it
+# talks to an external Incus daemon. See appliance/README.md.
+#
+# K3S_IMAGE/CAPI_VERSION/CAPN_VERSION are kept in sync with
+# appliance/assets.lock by hack/update-appliance-assets.sh.
+ARG K3S_IMAGE=rancher/k3s:v1.36.5-k3s1@sha256:057cfd5a9d51b89f1f0ee139c28d5d5fdd5aa7ddeac2742a0ba90c6dbc0329bb
+
+# Every upstream file the appliance ships, checksum-verified against
+# appliance/assets.lock.
+FROM alpine:3.22 AS assets
+ARG TARGETARCH
+RUN apk add --no-cache curl
+COPY appliance/assets.lock /assets.lock
+RUN set -eu; \
+    arch="${TARGETARCH:-amd64}"; \
+    grep -v '^#' /assets.lock | while read -r sum dest url; do \
+        case "$dest" in bin/clusterctl-linux-*) [ "$dest" = "bin/clusterctl-linux-${arch}" ] || continue ;; esac; \
+        mkdir -p "/out/$(dirname "$dest")"; \
+        curl -fsSLo "/out/$dest" "$url"; \
+        echo "$sum  /out/$dest" | sha256sum -c -; \
+    done; \
+    mv "/out/bin/clusterctl-linux-${arch}" /out/bin/clusterctl; \
+    chmod 0755 /out/bin/clusterctl
+COPY appliance/clusterctl.yaml /out/clusterctl/clusterctl.yaml
+
+FROM golang:1.26 AS builder
+ARG TARGETOS
+ARG TARGETARCH
+# VERSION is both the operator chart version and the operator/apiserver image
+# tag the appliance installs - CI passes the same version it publishes those
+# under, so one appliance image always pins one akbench build.
+ARG VERSION=dev
+ARG IMAGE_REPO=ghcr.io/beryju/akbench
+
+WORKDIR /workspace
+COPY go.mod go.mod
+COPY go.sum go.sum
+RUN go mod download
+COPY . .
+RUN pkg=github.com/goauthentik/authentik-bench/internal/appliance; \
+    CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a \
+    -ldflags "-X ${pkg}.Version=${VERSION} \
+              -X ${pkg}.OperatorImage=${IMAGE_REPO} \
+              -X ${pkg}.APIServerImage=${IMAGE_REPO}-apiserver \
+              -X ${pkg}.OperatorChart=oci://${IMAGE_REPO}-charts/authentik-bench-operator" \
+    -o akbench-appliance ./cmd/appliance
+
+FROM ${K3S_IMAGE}
+ARG CAPI_VERSION=v1.14.3
+ARG CAPN_VERSION=v0.9.1
+COPY --from=assets /out/bin/clusterctl /usr/local/bin/clusterctl
+COPY --from=assets /out/flux /opt/akbench/flux
+COPY --from=assets /out/clusterctl /opt/akbench/clusterctl
+COPY --from=builder /workspace/akbench-appliance /usr/local/bin/akbench-appliance
+COPY appliance/entrypoint.sh /usr/local/bin/akbench-entrypoint
+ENV AKBENCH_CAPI_VERSION=${CAPI_VERSION} \
+    AKBENCH_CAPN_VERSION=${CAPN_VERSION} \
+    KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+VOLUME /var/lib/rancher/k3s
+# 8080: web UI (AKBENCH_UI_PORT); 6443: the management cluster's own API.
+EXPOSE 8080 6443
+ENTRYPOINT ["/usr/local/bin/akbench-entrypoint"]

@@ -21,3 +21,10 @@
 !web/ui/**
 web/ui/node_modules
 web/ui/dist
+
+# Dockerfile.appliance: the stack template cmd/appliance embeds, and the
+# appliance's own entrypoint, asset lock and clusterctl config
+!internal/appliance/manifests/*.tmpl
+!appliance/entrypoint.sh
+!appliance/assets.lock
+!appliance/clusterctl.yaml

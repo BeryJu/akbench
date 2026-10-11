@@ -195,6 +195,25 @@ build-installer: manifests generate kustomize ## Generate a consolidated YAML wi
 helm-chart: manifests generate kustomize helmify ## (Re)generate the operator Helm chart in $(HELM_CHART_DIR) from config/default.
 	"$(KUSTOMIZE)" build config/default | "$(HELMIFY)" $(HELM_CHART_DIR)
 
+##@ Appliance
+
+# Single-container appliance (Dockerfile.appliance, appliance/README.md).
+APPLIANCE_IMG ?= akbench-appliance:dev
+# The operator chart/image and apiserver image version the appliance installs.
+APPLIANCE_VERSION ?= dev
+
+.PHONY: appliance-assets
+appliance-assets: ## Re-pin the appliance's upstream assets (Flux, clusterctl, CAPI/Incus providers, k3s) into appliance/assets.lock.
+	./hack/update-appliance-assets.sh
+
+.PHONY: docker-build-appliance
+docker-build-appliance: ## Build the single-container appliance image.
+	$(CONTAINER_TOOL) build -f Dockerfile.appliance --build-arg VERSION=$(APPLIANCE_VERSION) -t $(APPLIANCE_IMG) .
+
+.PHONY: appliance-dev
+appliance-dev: ## Build the appliance plus a local apiserver image and run them in Docker (see hack/dev-appliance.sh).
+	./hack/dev-appliance.sh
+
 ##@ Deployment
 
 ifndef ignore-not-found

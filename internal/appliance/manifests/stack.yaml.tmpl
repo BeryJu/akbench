@@ -1,0 +1,200 @@
+# Rendered by internal/appliance.RenderStack and server-side applied by
+# cmd/appliance on every boot, after Flux and the Cluster API providers are
+# up (the operator watches CAPI/Flux types and won't start without their
+# CRDs). Every string value goes through toJSON - JSON strings are valid
+# YAML scalars, so PEM blocks and tokens can't break the document.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: authentik-bench
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: apiserver-token
+  namespace: authentik-bench
+type: Opaque
+stringData:
+  token: {{ toJSON .State.APIToken }}
+{{- if .Config.Incus.Server }}
+---
+# The Incus connection every WorkloadCluster's spec.incus.lxcSecretRef names
+# (keys as cluster-api-provider-incus and csi-incus expect them). Only
+# managed when INCUS_SERVER is set, so a Secret migrated from an existing
+# management cluster is left alone otherwise.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ toJSON .Config.Incus.SecretName }}
+  namespace: {{ toJSON .Config.Namespace }}
+type: Opaque
+stringData:
+  server: {{ toJSON .Config.Incus.Server }}
+  project: {{ toJSON .Config.Incus.Project }}
+  client-crt: {{ toJSON .State.IncusClientCert }}
+  client-key: {{ toJSON .State.IncusClientKey }}
+{{- if .Config.Incus.ServerCert }}
+  server-crt: {{ toJSON .Config.Incus.ServerCert }}
+{{- end }}
+{{- if .Config.Incus.InsecureSkipVerify }}
+  insecure-skip-verify: "true"
+{{- end }}
+{{- end }}
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: OCIRepository
+metadata:
+  name: authentik-bench-operator
+  namespace: flux-system
+spec:
+  interval: 10m
+  url: {{ toJSON .Config.OperatorChart }}
+  ref:
+    tag: {{ toJSON .Config.Version }}
+  layerSelector:
+    mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
+    operation: copy
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: authentik-bench-operator
+  namespace: flux-system
+spec:
+  interval: 10m
+  releaseName: authentik-bench-operator
+  targetNamespace: authentik-bench
+  chartRef:
+    kind: OCIRepository
+    name: authentik-bench-operator
+  install:
+    remediation:
+      retries: -1
+  upgrade:
+    remediation:
+      retries: 3
+  values:
+    controllerManager:
+      manager:
+        image:
+          repository: {{ toJSON .Config.OperatorImage }}
+          tag: {{ toJSON .Config.Version }}
+        resources:
+          limits:
+            cpu: "1"
+            memory: 1Gi
+          requests:
+            cpu: 50m
+            memory: 128Mi
+  # The chart has no env passthrough; BENCH_NAMESPACE is where the operator
+  # seeds the built-in TestCaseTemplates and must match the apiserver's.
+  postRenderers:
+    - kustomize:
+        patches:
+          - target:
+              kind: Deployment
+              name: authentik-bench-operator-controller-manager
+            patch: |
+              - op: add
+                path: /spec/template/spec/containers/0/env/-
+                value:
+                  name: BENCH_NAMESPACE
+                  value: {{ toJSON .Config.Namespace }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: apiserver
+  namespace: authentik-bench
+---
+# cluster-admin: the kubectl shell hands out the merged kubeconfig and the API
+# CRUDs every akbench CRD - same posture as hack/dev-apiserver.yaml.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: authentik-bench-apiserver
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+  - kind: ServiceAccount
+    name: apiserver
+    namespace: authentik-bench
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: apiserver
+  namespace: authentik-bench
+  labels:
+    app: authentik-bench-apiserver
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: authentik-bench-apiserver
+  template:
+    metadata:
+      labels:
+        app: authentik-bench-apiserver
+    spec:
+      serviceAccountName: apiserver
+      containers:
+        - name: apiserver
+          image: {{ toJSON (printf "%s:%s" .Config.APIServerImage .Config.Version) }}
+          env:
+            - name: BENCH_NAMESPACE
+              value: {{ toJSON .Config.Namespace }}
+            - name: BENCH_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: apiserver-token
+                  key: token
+            # Must match the operator's BENCH_SHELL_KUBECONFIG_NAMESPACE/
+            # BENCH_SHELL_KUBECONFIG_SECRET_NAME defaults (cmd/main.go).
+            - name: BENCH_SHELL_KUBECONFIG_SECRET
+              value: authentik-bench/shell-kubeconfig
+{{- with .Config.OIDCIssuer }}
+            - name: BENCH_OIDC_ISSUER
+              value: {{ toJSON . }}
+{{- end }}
+{{- with .Config.OIDCClientID }}
+            - name: BENCH_OIDC_CLIENT_ID
+              value: {{ toJSON . }}
+{{- end }}
+{{- with .Config.OIDCScopes }}
+            - name: BENCH_OIDC_SCOPES
+              value: {{ toJSON . }}
+{{- end }}
+{{- with .Config.OIDCRequiredGroup }}
+            - name: BENCH_OIDC_REQUIRED_GROUP
+              value: {{ toJSON . }}
+{{- end }}
+          ports:
+            - name: http
+              containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+          resources:
+            requests:
+              cpu: 20m
+              memory: 64Mi
+---
+# k3s's ServiceLB binds the LoadBalancer port on the node - the appliance
+# container itself - so `docker run -p {{ .Config.UIPort }}:{{ .Config.UIPort }}` reaches it.
+apiVersion: v1
+kind: Service
+metadata:
+  name: apiserver
+  namespace: authentik-bench
+spec:
+  type: LoadBalancer
+  selector:
+    app: authentik-bench-apiserver
+  ports:
+    - name: http
+      port: {{ .Config.UIPort }}
+      targetPort: http
