@@ -24,7 +24,7 @@ import { Badge, ConditionList } from '../components/Status';
 import { Alert, confirmAndRun, Empty, formatTimestamp, Page, Table } from '../components/ui';
 import { metricsAnchorFromRuns } from '../format';
 import { shellLinkForCluster } from '../shell/links';
-import { testCaseDeployments } from '../types';
+import { testCaseDeployments, testRunDeployment } from '../types';
 import { useResource } from '../useResource';
 
 export function TestRunsPage() {
@@ -47,11 +47,7 @@ export function TestRunsPage() {
           },
           {
             label: 'Target',
-            // Unset on a run created before multi-deployment TestCases
-            // existed, in which case it ran against that TestCase's own
-            // (only) deployment - not worth an extra fetch per row just to
-            // resolve that here, so it's shown blank instead.
-            render: r => r.spec.deploymentRef?.name ?? <span className="muted">-</span>,
+            render: r => testRunDeployment(r) ?? <span className="muted">-</span>,
           },
           { label: 'Phase', render: r => <Badge value={r.status?.phase ?? 'Pending'} /> },
           { label: 'Started', render: r => formatTimestamp(r.status?.startTime ?? r.metadata.creationTimestamp) },
@@ -91,12 +87,11 @@ export function TestRunViewPage() {
     [testCaseName],
     0
   );
-  // run.spec.deploymentRef pins which of the TestCase's own deployments this
-  // run targeted; unset on a run created before multi-deployment TestCases
-  // existed, in which case it's that TestCase's own first/only deployment -
-  // same fallback TestRunReconciler itself uses.
+  // The run's own record of its target (testRunDeployment), falling back to
+  // the live TestCase's first deployment for a run that hasn't started yet.
   const deploymentName =
-    run.data?.spec.deploymentRef?.name ?? (testCase.data ? testCaseDeployments(testCase.data.spec)[0]?.name : undefined);
+    (run.data && testRunDeployment(run.data)) ??
+    (testCase.data ? testCaseDeployments(testCase.data.spec)[0]?.name : undefined);
   const deployment = useResource(
     () => (deploymentName ? api.deployment(deploymentName) : Promise.resolve(undefined)),
     [deploymentName],

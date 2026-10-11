@@ -42,7 +42,7 @@ const alertmanagerFetchTimeout = 5 * time.Second
 // cluster it came from - Alertmanager is installed per workload cluster (see
 // render.KubePrometheusStackHelmValues/WorkloadClusterReconciler.ensurePrometheus),
 // there is no single central instance to query, unlike Prometheus' own
-// per-testid resolution (prometheusURLForTestID) this mirrors the reasoning
+// per-testid resolution (prometheusURLsForTestID) this mirrors the reasoning
 // of but not the mechanism: alerts aren't scoped to one testid, so every
 // cluster's own Alertmanager is queried and the results merged.
 type Alert struct {

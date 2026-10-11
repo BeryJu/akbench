@@ -79,7 +79,7 @@ spec:
             # internal/api/metrics.go resolves a workload cluster's own
             # Prometheus per-testid (WorkloadCluster.status.prometheusURL,
             # populated by WorkloadClusterReconciler's ensurePrometheus) -
-            # see prometheusURLForTestID. Confirmed via direct ping/wget
+            # see prometheusURLsForTestID. Confirmed via direct ping/wget
             # testing that pods on a workload cluster's overlay network have
             # zero route back into minikube's pod network (100% packet loss
             # even to the node IP), so a workload cluster's own k6 pods could

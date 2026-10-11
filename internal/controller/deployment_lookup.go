@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -90,15 +91,20 @@ func resolveRunnerClient(ctx context.Context, tracker *multicluster.Tracker, loc
 // bare *TestCaseSpec rather than a full TestCase so it works equally from a
 // live TestCase (tc.Spec) and a TestRun's own audit snapshot
 // (run.Status.ResolvedSpec, which has no surrounding TestCase object).
+//
+// A pinned deploymentRef must be one of the TestCase's own deployments: the
+// TestCase only provisions per-target dependencies (e.g. oidc-test-client)
+// for those, and a run against anything else wouldn't be that test's data.
 func resolvedRunDeploymentRef(runSpec *benchv1alpha1.TestRunSpec, tcSpec *benchv1alpha1.TestCaseSpec) (corev1.LocalObjectReference, error) {
+	refs := tcSpec.Deployments()
 	if runSpec.DeploymentRef != nil && runSpec.DeploymentRef.Name != "" {
+		if !slices.ContainsFunc(refs, func(ref corev1.LocalObjectReference) bool { return ref.Name == runSpec.DeploymentRef.Name }) {
+			return corev1.LocalObjectReference{}, fmt.Errorf("deploymentRef %q is not one of the TestCase's deployments", runSpec.DeploymentRef.Name)
+		}
 		return *runSpec.DeploymentRef, nil
 	}
-	if len(tcSpec.DeploymentRefs) > 0 {
-		return tcSpec.DeploymentRefs[0], nil
-	}
-	if tcSpec.DeploymentRef.Name != "" {
-		return tcSpec.DeploymentRef, nil
+	if len(refs) > 0 {
+		return refs[0], nil
 	}
 	return corev1.LocalObjectReference{}, fmt.Errorf("TestCase has no deployment set")
 }

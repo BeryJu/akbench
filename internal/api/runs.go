@@ -76,7 +76,6 @@ func (s *Server) createRun(w http.ResponseWriter, r *http.Request) {
 	// teaching a single TestRun to fan out N Jobs itself.
 	runs := make([]*benchv1alpha1.TestRun, 0, len(deployments))
 	for _, dep := range deployments {
-		dep := dep
 		run := &benchv1alpha1.TestRun{
 			ObjectMeta: metav1.ObjectMeta{
 				GenerateName: name + "-",

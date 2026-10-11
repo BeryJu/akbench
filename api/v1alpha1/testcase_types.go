@@ -48,7 +48,7 @@ type TestCaseSpec struct {
 	// deploymentRefs is empty (see TestCase.Deployments), so existing
 	// objects keep working unchanged.
 	// +optional
-	DeploymentRef corev1.LocalObjectReference `json:"deploymentRef,omitempty"`
+	DeploymentRef corev1.LocalObjectReference `json:"deploymentRef,omitzero"`
 
 	// deploymentRefs names every AuthentikDeployment this test drives - the
 	// test runs independently against each one (same script/VUs/iterations),
@@ -195,13 +195,31 @@ type TestCase struct {
 // nil if neither field is set (the controller reports a clear condition
 // for that case rather than this method guessing).
 func (tc *TestCase) Deployments() []corev1.LocalObjectReference {
-	if len(tc.Spec.DeploymentRefs) > 0 {
-		return tc.Spec.DeploymentRefs
+	return tc.Spec.Deployments()
+}
+
+// Deployments is TestCase.Deployments on a bare spec, for callers that only
+// hold one (e.g. a TestRun's status.resolvedSpec snapshot).
+func (s *TestCaseSpec) Deployments() []corev1.LocalObjectReference {
+	if len(s.DeploymentRefs) > 0 {
+		return s.DeploymentRefs
 	}
-	if tc.Spec.DeploymentRef.Name != "" {
-		return []corev1.LocalObjectReference{tc.Spec.DeploymentRef}
+	if s.DeploymentRef.Name != "" {
+		return []corev1.LocalObjectReference{s.DeploymentRef}
 	}
 	return nil
+}
+
+// MigrateDeploymentRef moves a deprecated singular spec.deploymentRef into
+// spec.deploymentRefs, returning whether anything changed. Lossless:
+// Deployments() resolves to the same list before and after.
+func (s *TestCaseSpec) MigrateDeploymentRef() bool {
+	if len(s.DeploymentRefs) > 0 || s.DeploymentRef.Name == "" {
+		return false
+	}
+	s.DeploymentRefs = []corev1.LocalObjectReference{s.DeploymentRef}
+	s.DeploymentRef = corev1.LocalObjectReference{}
+	return true
 }
 
 // +kubebuilder:object:root=true

@@ -20,7 +20,7 @@ import { Badge } from '../components/Status';
 import { buildTargetRows, burningFor, TargetTable } from '../components/Targets';
 import { Alert, Empty, formatTimestamp, Page, Stat, Table } from '../components/ui';
 import { formatMetricValue } from '../format';
-import { RangePoint } from '../types';
+import { RangePoint, testRunDeployment } from '../types';
 import { useResource } from '../useResource';
 
 // Burn tests lead: they're what keeps deployments under load right now.
@@ -184,7 +184,7 @@ export function DashboardPage() {
             label: 'Test case',
             render: r => <Link to={`/testcases/${r.spec.testCaseRef.name}`}>{r.spec.testCaseRef.name}</Link>,
           },
-          { label: 'Target', render: r => r.spec.deploymentRef?.name ?? <span className="muted">-</span> },
+          { label: 'Target', render: r => testRunDeployment(r) ?? <span className="muted">-</span> },
           { label: 'Phase', render: r => <Badge value={r.status?.phase ?? 'Pending'} /> },
           { label: 'Started', render: r => formatTimestamp(r.status?.startTime ?? r.metadata.creationTimestamp) },
         ]}

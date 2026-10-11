@@ -92,7 +92,7 @@ type deploymentTarget struct {
 
 // deploymentTargetsForTestID resolves every AuthentikDeployment a testid's
 // own TestCase drives (one per TestCase.Deployments() entry) - deliberately
-// NOT the same resolution prometheusURLForTestID uses: that one prefers the
+// NOT the same resolution prometheusURLsForTestID uses: that one prefers the
 // k6 *runner's* cluster (TestCase.Spec.RunnerClusterRef), which can
 // legitimately differ from a deployment's own cluster, but the deployment's
 // server/worker/postgres pods (what this endpoint reports on) always live on

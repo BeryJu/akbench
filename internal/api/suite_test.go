@@ -132,16 +132,19 @@ func sampleDeployment(name string) *benchv1alpha1.AuthentikDeployment {
 }
 
 func sampleTestCase(name, deployment string, profile benchv1alpha1.TestProfile) *benchv1alpha1.TestCase {
-	return &benchv1alpha1.TestCase{
+	tc := &benchv1alpha1.TestCase{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: testNamespace},
 		Spec: benchv1alpha1.TestCaseSpec{
-			DeploymentRef: corev1.LocalObjectReference{Name: deployment},
-			Profile:       profile,
-			Template:      "login",
-			VUs:           8,
-			Iterations:    1000,
+			Profile:    profile,
+			Template:   "login",
+			VUs:        8,
+			Iterations: 1000,
 		},
 	}
+	if deployment != "" {
+		tc.Spec.DeploymentRefs = []corev1.LocalObjectReference{{Name: deployment}}
+	}
+	return tc
 }
 
 // fakePrometheus serves the instant-query shape the compare endpoint parses,

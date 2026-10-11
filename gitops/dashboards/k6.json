@@ -402,8 +402,8 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by (testid) (k6_vus{testid=~\"$testid\", target=~\"$target\", profile=~\"$profile\"})",
-          "legendFormat": "{{testid}} active",
+          "expr": "sum by (testid, target) (k6_vus{testid=~\"$testid\", target=~\"$target\", profile=~\"$profile\"})",
+          "legendFormat": "{{testid}} / {{target}} active",
           "refId": "A",
           "editorMode": "code",
           "range": true
@@ -413,8 +413,8 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by (testid) (k6_vus_max{testid=~\"$testid\", target=~\"$target\", profile=~\"$profile\"})",
-          "legendFormat": "{{testid}} max",
+          "expr": "sum by (testid, target) (k6_vus_max{testid=~\"$testid\", target=~\"$target\", profile=~\"$profile\"})",
+          "legendFormat": "{{testid}} / {{target}} max",
           "refId": "B",
           "editorMode": "code",
           "range": true
@@ -467,8 +467,8 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by (testid) (rate(k6_http_reqs_total{testid=~\"$testid\", target=~\"$target\", profile=~\"$profile\", expected_response=\"false\"}[$__rate_interval])) / sum by (testid) (rate(k6_http_reqs_total{testid=~\"$testid\", target=~\"$target\", profile=~\"$profile\"}[$__rate_interval]))",
-          "legendFormat": "{{testid}} failed requests",
+          "expr": "sum by (testid, target) (rate(k6_http_reqs_total{testid=~\"$testid\", target=~\"$target\", profile=~\"$profile\", expected_response=\"false\"}[$__rate_interval])) / sum by (testid, target) (rate(k6_http_reqs_total{testid=~\"$testid\", target=~\"$target\", profile=~\"$profile\"}[$__rate_interval]))",
+          "legendFormat": "{{testid}} / {{target}} failed requests",
           "refId": "A",
           "editorMode": "code",
           "range": true
@@ -521,8 +521,8 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by (testid) (rate(k6_data_received_total{testid=~\"$testid\", target=~\"$target\", profile=~\"$profile\"}[$__rate_interval]))",
-          "legendFormat": "{{testid}} received",
+          "expr": "sum by (testid, target) (rate(k6_data_received_total{testid=~\"$testid\", target=~\"$target\", profile=~\"$profile\"}[$__rate_interval]))",
+          "legendFormat": "{{testid}} / {{target}} received",
           "refId": "A",
           "editorMode": "code",
           "range": true
@@ -532,8 +532,8 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by (testid) (rate(k6_data_sent_total{testid=~\"$testid\", target=~\"$target\", profile=~\"$profile\"}[$__rate_interval]))",
-          "legendFormat": "{{testid}} sent",
+          "expr": "sum by (testid, target) (rate(k6_data_sent_total{testid=~\"$testid\", target=~\"$target\", profile=~\"$profile\"}[$__rate_interval]))",
+          "legendFormat": "{{testid}} / {{target}} sent",
           "refId": "B",
           "editorMode": "code",
           "range": true

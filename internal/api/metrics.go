@@ -25,6 +25,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -123,55 +124,65 @@ const queryParam = "query"
 // through to its own error message).
 const promStatusSuccess = "success"
 
-// prometheusURLForTestID resolves which Prometheus actually has a given
-// testid's data: a TestCase's object name *is* its k6 testid, and every
-// TestCase drives a Deployment that (via its own or the TestCase's
-// runnerClusterRef override) runs on either the management cluster
-// (s.cfg.PrometheusURL, unchanged from before) or a WorkloadCluster - which,
+// prometheusURLsForTestID resolves which Prometheus instances actually have
+// a given testid's data: a TestCase's object name *is* its k6 testid, and
+// each of its targets' k6 workload (via the TestCase's runnerClusterRef
+// override, else that target's own clusterRef) runs on either the
+// management cluster (s.cfg.PrometheusURL) or a WorkloadCluster - which,
 // since WorkloadClusterReconciler's ensurePrometheus runs, has its own
 // Prometheus reachable at status.prometheusURL. A management-cluster pod
 // can reach a workload cluster's node IP directly (confirmed live - the
 // reverse can't), which is what makes that URL usable from here at all.
 //
-// Falls back to s.cfg.PrometheusURL on any resolution failure (the TestCase/
-// Deployment/WorkloadCluster was deleted, or the WorkloadCluster hasn't
-// reconciled a PrometheusURL yet) rather than erroring outright - historical
-// data for a since-deleted test is still worth trying to show, and an
-// empty fallback surfaces the same "no Prometheus configured" 502 a caller
-// already knows how to read.
-func (s *Server) prometheusURLForTestID(ctx context.Context, testid string) string {
+// A TestCase driving several deployments on different clusters (and no
+// runnerClusterRef) remote-writes each target's samples to a different
+// Prometheus, so this returns every distinct URL, never empty.
+//
+// A target that can't be resolved (the TestCase/Deployment/WorkloadCluster
+// was deleted, or the WorkloadCluster hasn't reconciled a PrometheusURL yet)
+// falls back to s.cfg.PrometheusURL rather than erroring outright -
+// historical data for a since-deleted test is still worth trying to show,
+// and an empty fallback surfaces the same "no Prometheus configured" 502 a
+// caller already knows how to read.
+func (s *Server) prometheusURLsForTestID(ctx context.Context, testid string) []string {
 	var tc benchv1alpha1.TestCase
 	if err := s.client.Get(ctx, types.NamespacedName{Name: testid, Namespace: s.cfg.Namespace}, &tc); err != nil {
-		return s.cfg.PrometheusURL
+		return []string{s.cfg.PrometheusURL}
 	}
 
-	clusterRef := tc.Spec.RunnerClusterRef
-	if clusterRef == nil {
-		// RunnerClusterRef is still single-valued per TestCase regardless of
-		// how many deployments it drives (the k6 workload itself runs in one
-		// place) - when unset, fall back to the first target's own cluster,
-		// same convention TestCaseReconciler/TestRunReconciler use elsewhere.
-		deployments := tc.Deployments()
-		if len(deployments) == 0 {
-			return s.cfg.PrometheusURL
+	var clusterNames []string
+	if tc.Spec.RunnerClusterRef != nil && tc.Spec.RunnerClusterRef.Name != "" {
+		clusterNames = append(clusterNames, tc.Spec.RunnerClusterRef.Name)
+	} else {
+		for _, ref := range tc.Deployments() {
+			var topo benchv1alpha1.AuthentikDeployment
+			key := types.NamespacedName{Name: ref.Name, Namespace: s.cfg.Namespace}
+			if err := s.client.Get(ctx, key, &topo); err != nil {
+				clusterNames = append(clusterNames, "")
+				continue
+			}
+			clusterNames = append(clusterNames, topo.Spec.ClusterRef.Name)
 		}
-		var topo benchv1alpha1.AuthentikDeployment
-		key := types.NamespacedName{Name: deployments[0].Name, Namespace: s.cfg.Namespace}
-		if err := s.client.Get(ctx, key, &topo); err != nil {
-			return s.cfg.PrometheusURL
-		}
-		clusterRef = &topo.Spec.ClusterRef
-	}
-	if clusterRef.Name == "" {
-		return s.cfg.PrometheusURL
 	}
 
-	var wc benchv1alpha1.WorkloadCluster
-	key := types.NamespacedName{Name: clusterRef.Name, Namespace: s.cfg.Namespace}
-	if err := s.client.Get(ctx, key, &wc); err != nil || wc.Status.PrometheusURL == "" {
-		return s.cfg.PrometheusURL
+	var urls []string
+	for _, name := range clusterNames {
+		promURL := s.cfg.PrometheusURL
+		if name != "" {
+			var wc benchv1alpha1.WorkloadCluster
+			key := types.NamespacedName{Name: name, Namespace: s.cfg.Namespace}
+			if err := s.client.Get(ctx, key, &wc); err == nil && wc.Status.PrometheusURL != "" {
+				promURL = wc.Status.PrometheusURL
+			}
+		}
+		if !slices.Contains(urls, promURL) {
+			urls = append(urls, promURL)
+		}
 	}
-	return wc.Status.PrometheusURL
+	if len(urls) == 0 {
+		return []string{s.cfg.PrometheusURL}
+	}
+	return urls
 }
 
 // proxyQuery forwards a PromQL query to the management cluster's own
@@ -318,7 +329,7 @@ func (s *Server) compare(w http.ResponseWriter, r *http.Request) {
 
 	resp := compareResponse{Window: window, Metrics: compareMetrics}
 	for _, id := range testids {
-		baseURL := s.prometheusURLForTestID(r.Context(), id)
+		baseURLs := s.prometheusURLsForTestID(r.Context(), id)
 		selector := fmt.Sprintf("testid=%q", id)
 
 		rows := map[string]*CompareResult{}
@@ -343,13 +354,15 @@ func (s *Server) compare(w http.ResponseWriter, r *http.Request) {
 			} else {
 				query = fmt.Sprintf(query, selector)
 			}
-			samples, err := s.promInstantMulti(r.Context(), baseURL, query, at)
-			if err != nil {
-				writeError(w, r, http.StatusBadGateway, err.Error())
-				return
-			}
-			for _, sample := range samples {
-				ensureRow(sample.Target).Values[m.Key] = sample.Value
+			for _, baseURL := range baseURLs {
+				samples, err := s.promInstantMulti(r.Context(), baseURL, query, at)
+				if err != nil {
+					writeError(w, r, http.StatusBadGateway, err.Error())
+					return
+				}
+				for _, sample := range samples {
+					ensureRow(sample.Target).Values[m.Key] = sample.Value
+				}
 			}
 		}
 		if len(order) == 0 {
@@ -454,7 +467,6 @@ func (s *Server) metricsRange(w http.ResponseWriter, r *http.Request) {
 
 	resp := rangeResponse{Metric: *metric}
 	for _, id := range testids {
-		baseURL := s.prometheusURLForTestID(r.Context(), id)
 		selector := fmt.Sprintf("testid=%q", id)
 		query := metric.Query
 		if strings.Count(query, "%s") == 2 {
@@ -462,10 +474,14 @@ func (s *Server) metricsRange(w http.ResponseWriter, r *http.Request) {
 		} else {
 			query = fmt.Sprintf(query, selector)
 		}
-		series, err := s.promRangeMulti(r.Context(), baseURL, query, start, end, step)
-		if err != nil {
-			writeError(w, r, http.StatusBadGateway, err.Error())
-			return
+		var series []promSeries
+		for _, baseURL := range s.prometheusURLsForTestID(r.Context(), id) {
+			got, err := s.promRangeMulti(r.Context(), baseURL, query, start, end, step)
+			if err != nil {
+				writeError(w, r, http.StatusBadGateway, err.Error())
+				return
+			}
+			series = append(series, got...)
 		}
 		byTarget := make(map[string][]RangePoint, len(series))
 		for _, ser := range series {

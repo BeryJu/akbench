@@ -52,10 +52,10 @@ var _ = Describe("TestCase Controller", func() {
 			tc := &benchv1alpha1.TestCase{
 				ObjectMeta: metav1.ObjectMeta{Name: resourceName, Namespace: "default"},
 				Spec: benchv1alpha1.TestCaseSpec{
-					DeploymentRef: corev1.LocalObjectReference{Name: topo.Name},
-					Profile:       benchv1alpha1.ProfileBurn,
-					VUs:           8,
-					Flow:          "default-authentication-flow",
+					DeploymentRefs: []corev1.LocalObjectReference{{Name: topo.Name}},
+					Profile:        benchv1alpha1.ProfileBurn,
+					VUs:            8,
+					Flow:           "default-authentication-flow",
 				},
 			}
 			Expect(k8sClient.Create(context.Background(), tc)).To(Succeed())
@@ -107,11 +107,11 @@ var _ = Describe("TestCase Controller", func() {
 			tc := &benchv1alpha1.TestCase{
 				ObjectMeta: metav1.ObjectMeta{Name: resourceName, Namespace: "default"},
 				Spec: benchv1alpha1.TestCaseSpec{
-					DeploymentRef: corev1.LocalObjectReference{Name: topo.Name},
-					Profile:       benchv1alpha1.ProfileQuick,
-					VUs:           4,
-					Iterations:    100,
-					Flow:          "default-authentication-flow",
+					DeploymentRefs: []corev1.LocalObjectReference{{Name: topo.Name}},
+					Profile:        benchv1alpha1.ProfileQuick,
+					VUs:            4,
+					Iterations:     100,
+					Flow:           "default-authentication-flow",
 				},
 			}
 			Expect(k8sClient.Create(context.Background(), tc)).To(Succeed())
@@ -148,11 +148,11 @@ var _ = Describe("TestCase Controller", func() {
 			tc := &benchv1alpha1.TestCase{
 				ObjectMeta: metav1.ObjectMeta{Name: resourceName, Namespace: "default"},
 				Spec: benchv1alpha1.TestCaseSpec{
-					DeploymentRef: corev1.LocalObjectReference{Name: topo.Name},
-					Inline:        inlineBody,
-					Profile:       benchv1alpha1.ProfileQuick,
-					VUs:           1,
-					Iterations:    1,
+					DeploymentRefs: []corev1.LocalObjectReference{{Name: topo.Name}},
+					Inline:         inlineBody,
+					Profile:        benchv1alpha1.ProfileQuick,
+					VUs:            1,
+					Iterations:     1,
 				},
 			}
 			Expect(k8sClient.Create(context.Background(), tc)).To(Succeed())
@@ -182,11 +182,11 @@ var _ = Describe("TestCase Controller", func() {
 			tc := &benchv1alpha1.TestCase{
 				ObjectMeta: metav1.ObjectMeta{Name: resourceName, Namespace: "default"},
 				Spec: benchv1alpha1.TestCaseSpec{
-					DeploymentRef: corev1.LocalObjectReference{Name: topo.Name},
-					Template:      "does-not-exist",
-					Profile:       benchv1alpha1.ProfileQuick,
-					VUs:           1,
-					Iterations:    1,
+					DeploymentRefs: []corev1.LocalObjectReference{{Name: topo.Name}},
+					Template:       "does-not-exist",
+					Profile:        benchv1alpha1.ProfileQuick,
+					VUs:            1,
+					Iterations:     1,
 				},
 			}
 			Expect(k8sClient.Create(context.Background(), tc)).To(Succeed())
@@ -275,6 +275,80 @@ var _ = Describe("TestCase Controller", func() {
 			ready := meta.FindStatusCondition(tc.Status.Conditions, benchv1alpha1.ConditionReady)
 			Expect(ready).NotTo(BeNil())
 			Expect(ready.Status).To(Equal(metav1.ConditionTrue))
+		})
+
+		It("keeps every target's burn Deployment across reconciles instead of recreating it", func() {
+			r := &TestCaseReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Recorder: record.NewFakeRecorder(100)}
+			_, err := r.Reconcile(context.Background(), reconcile.Request{NamespacedName: typeNamespacedName})
+			Expect(err).NotTo(HaveOccurred())
+
+			depBKey := types.NamespacedName{Name: "k6-" + resourceName + "-" + topoB.Name, Namespace: "default"}
+			var before appsv1.Deployment
+			Expect(k8sClient.Get(context.Background(), depBKey, &before)).To(Succeed())
+
+			_, err = r.Reconcile(context.Background(), reconcile.Request{NamespacedName: typeNamespacedName})
+			Expect(err).NotTo(HaveOccurred())
+
+			var after appsv1.Deployment
+			Expect(k8sClient.Get(context.Background(), depBKey, &after)).To(Succeed())
+			Expect(after.UID).To(Equal(before.UID), "a later target's burn Deployment must not be deleted by an earlier target's cleanup")
+		})
+	})
+
+	Context("Burn profile, pre-multi-deployment object", func() {
+		const resourceName = "burn-login-legacy"
+		typeNamespacedName := types.NamespacedName{Name: resourceName, Namespace: "default"}
+		legacyKey := types.NamespacedName{Name: "k6-" + resourceName, Namespace: "default"}
+
+		BeforeEach(func() {
+			tc := &benchv1alpha1.TestCase{
+				ObjectMeta: metav1.ObjectMeta{Name: resourceName, Namespace: "default"},
+				Spec: benchv1alpha1.TestCaseSpec{
+					DeploymentRef: corev1.LocalObjectReference{Name: topo.Name}, //nolint:staticcheck // exercising the deprecated field's migration
+					Profile:       benchv1alpha1.ProfileBurn,
+					VUs:           8,
+					Flow:          "default-authentication-flow",
+				},
+			}
+			Expect(k8sClient.Create(context.Background(), tc)).To(Succeed())
+
+			// The Burn Deployment as written before multi-deployment support:
+			// named k6-<testcase>, no object labels, selector on LabelTestCase only.
+			podLabels := map[string]string{benchv1alpha1.LabelTestCase: resourceName}
+			legacy := &appsv1.Deployment{
+				ObjectMeta: metav1.ObjectMeta{Name: legacyKey.Name, Namespace: legacyKey.Namespace},
+				Spec: appsv1.DeploymentSpec{
+					Selector: &metav1.LabelSelector{MatchLabels: podLabels},
+					Template: corev1.PodTemplateSpec{
+						ObjectMeta: metav1.ObjectMeta{Labels: podLabels},
+						Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "k6", Image: "grafana/k6"}}},
+					},
+				},
+			}
+			Expect(k8sClient.Create(context.Background(), legacy)).To(Succeed())
+		})
+
+		AfterEach(func() {
+			forceDelete(context.Background(), &benchv1alpha1.TestCase{ObjectMeta: metav1.ObjectMeta{Name: typeNamespacedName.Name, Namespace: typeNamespacedName.Namespace}})
+			_ = k8sClient.Delete(context.Background(), &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: legacyKey.Name, Namespace: legacyKey.Namespace}})
+		})
+
+		It("migrates deploymentRef into deploymentRefs and replaces the legacy burn Deployment", func() {
+			r := &TestCaseReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Recorder: record.NewFakeRecorder(100)}
+			_, err := r.Reconcile(context.Background(), reconcile.Request{NamespacedName: typeNamespacedName})
+			Expect(err).NotTo(HaveOccurred())
+
+			var tc benchv1alpha1.TestCase
+			Expect(k8sClient.Get(context.Background(), typeNamespacedName, &tc)).To(Succeed())
+			Expect(tc.Spec.DeploymentRefs).To(Equal([]corev1.LocalObjectReference{{Name: topo.Name}}))
+			Expect(tc.Deployments()).To(Equal([]corev1.LocalObjectReference{{Name: topo.Name}}))
+
+			var legacy appsv1.Deployment
+			err = k8sClient.Get(context.Background(), legacyKey, &legacy)
+			Expect(apierrors.IsNotFound(err)).To(BeTrue(), "legacy burn Deployment should be deleted, got %v", err)
+
+			var current appsv1.Deployment
+			Expect(k8sClient.Get(context.Background(), types.NamespacedName{Name: "k6-" + resourceName + "-" + topo.Name, Namespace: "default"}, &current)).To(Succeed())
 		})
 	})
 })

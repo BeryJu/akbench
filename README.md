@@ -90,7 +90,7 @@ Implemented so far:
   every CRD as unstructured objects (the CRD schema stays the single source
   of truth), proxies PromQL for the compare view (resolved per-testid
   against whichever cluster's own Prometheus actually has that data - see
-  `prometheusURLForTestID`), and reverse-proxies a workload cluster's own
+  `prometheusURLsForTestID`), and reverse-proxies a workload cluster's own
   Grafana (`/grafana-proxy/<cluster>/...`). The same `cmd/apiserver`
   process serves the UI itself, `web/ui` - a Vite + React SPA (no SSR) with
   guided forms for every CRD, native metrics charts and a Compare view - so

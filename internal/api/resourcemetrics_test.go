@@ -143,7 +143,6 @@ func TestListResourceMetricsMultiDeployment(t *testing.T) {
 	depB.Spec.Namespace = "ak-dep-b"
 
 	tc := sampleTestCase("login-multi", "", benchv1alpha1.ProfileBurn)
-	tc.Spec.DeploymentRef = corev1.LocalObjectReference{}
 	tc.Spec.DeploymentRefs = []corev1.LocalObjectReference{{Name: "dep-a"}, {Name: "dep-b"}}
 
 	s, _ := newServer(t, Config{PrometheusURL: prom.URL}, depA, depB, tc)

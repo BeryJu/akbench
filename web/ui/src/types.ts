@@ -208,6 +208,17 @@ export interface TestRun {
   };
 }
 
+/**
+ * testRunDeployment is the deployment a TestRun ran against: its pinned
+ * spec.deploymentRef, else (a run created before TestCases could drive more
+ * than one deployment) the first deployment of its own resolvedSpec
+ * snapshot - the same fallback TestRunReconciler uses.
+ */
+export function testRunDeployment(run: TestRun): string | undefined {
+  const resolved = run.status?.resolvedSpec;
+  return run.spec.deploymentRef?.name ?? (resolved ? testCaseDeployments(resolved)[0]?.name : undefined);
+}
+
 export interface Cluster {
   name: string;
   management: boolean;

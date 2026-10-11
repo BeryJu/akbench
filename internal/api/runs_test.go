@@ -65,7 +65,6 @@ func TestCreateRun(t *testing.T) {
 // N independently inspectable runs instead of N near-identical TestCases).
 func TestCreateRunFansOutAcrossMultipleDeployments(t *testing.T) {
 	tc := sampleTestCase("login-quick", "single-node", benchv1alpha1.ProfileQuick)
-	tc.Spec.DeploymentRef = corev1.LocalObjectReference{}
 	tc.Spec.DeploymentRefs = []corev1.LocalObjectReference{{Name: "single-node"}, {Name: "multi-node"}}
 
 	s, c := newServer(t, Config{},

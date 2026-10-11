@@ -101,6 +101,17 @@ func (r *TestCaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		}
 	}
 
+	// One-time migration of the deprecated singular spec.deploymentRef into
+	// spec.deploymentRefs, so every object converges on the one field the UI,
+	// printcolumns and samples use. Lossless: Deployments() already treated
+	// the two identically, this only makes that explicit in the stored spec.
+	if tc.Spec.MigrateDeploymentRef() {
+		if err := r.Update(ctx, &tc); err != nil {
+			return ctrl.Result{}, err
+		}
+		log.Info("Migrated TestCase deploymentRef to deploymentRefs", "deployment", tc.Spec.DeploymentRefs[0].Name)
+	}
+
 	refs := tc.Deployments()
 	if len(refs) == 0 {
 		setCondition(r.Recorder, &tc, &tc.Status.Conditions, tc.Generation, benchv1alpha1.ConditionDeploymentReady, metav1.ConditionFalse,
@@ -139,7 +150,11 @@ func (r *TestCaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	var notReadyMessages []string
 	allReady := true
 	needsRequeue := false
-	keepBurnNames := map[string]bool{}
+	keepBurnNames := desiredBurnNames(&tc, refs)
+	// Runner clusters visited this pass, keyed by cluster name ("" is the
+	// local cluster), so stale Burn Deployments are cleaned up once per
+	// cluster after every target has been reconciled.
+	runnerClients := map[string]client.Client{}
 
 	for _, ref := range refs {
 		status := benchv1alpha1.TestCaseDeploymentStatus{Name: ref.Name}
@@ -167,6 +182,7 @@ func (r *TestCaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			statuses = append(statuses, status)
 			continue
 		}
+		runnerClients[runnerClusterName(&tc, topo)] = rc
 		if remote {
 			if err := ensureNamespace(ctx, rc, tc.Namespace); err != nil {
 				return ctrl.Result{}, fmt.Errorf("ensure runner namespace for %q: %w", ref.Name, err)
@@ -212,11 +228,10 @@ func (r *TestCaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			if err != nil {
 				return ctrl.Result{}, fmt.Errorf("reconcile burn deployment for %q: %w", ref.Name, err)
 			}
-			keepBurnNames[name] = true
 			status.BurnWorkloadRef = &corev1.LocalObjectReference{Name: name}
 		case benchv1alpha1.ProfileQuick:
 			// Execution is a TestRun's job - nothing to reconcile
-			// continuously here; keepBurnNames staying empty cleans up any
+			// continuously here; keepBurnNames being empty cleans up any
 			// stale Burn Deployment below if the profile was switched from
 			// Burn to Quick.
 		default:
@@ -228,17 +243,22 @@ func (r *TestCaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 
 		status.Ready = true
 		statuses = append(statuses, status)
+	}
 
-		// Cleans up a target that's been removed from DeploymentRefs (or
-		// every target, switching Burn->Quick) on this target's own runner
-		// cluster. Known limitation: if a target is removed entirely and no
-		// other target shares its runner cluster, that cluster is never
-		// visited again by this loop, so its now-orphaned Burn Deployment
-		// is never cleaned up - the same class of gap as this project's
-		// other "day-2 removal" boundaries (e.g. WorkloadCluster worker
-		// pool resize), not something silently assumed away.
+	// Cleans up a target that's been removed from DeploymentRefs (or every
+	// target, switching Burn->Quick) on each runner cluster visited above.
+	// This must run after the loop, with the complete keep set: running it
+	// per target would delete every later target's Burn Deployment on a
+	// shared runner cluster, only for the next iteration to recreate it.
+	// Known limitation: if a target is removed entirely and no remaining
+	// target shares its runner cluster, that cluster is never visited, so its
+	// now-orphaned Burn Deployment is never cleaned up - the same class of
+	// gap as this project's other "day-2 removal" boundaries (e.g.
+	// WorkloadCluster worker pool resize), not something silently assumed
+	// away.
+	for cluster, rc := range runnerClients {
 		if err := r.cleanupStaleBurnDeployments(ctx, rc, &tc, keepBurnNames); err != nil {
-			return ctrl.Result{}, fmt.Errorf("clean up stale burn deployments on %q's runner cluster: %w", ref.Name, err)
+			return ctrl.Result{}, fmt.Errorf("clean up stale burn deployments on runner cluster %q: %w", cluster, err)
 		}
 	}
 
@@ -304,13 +324,15 @@ func (r *TestCaseReconciler) reconcileDelete(ctx context.Context, tc *benchv1alp
 
 // cleanupStaleBurnDeployments deletes every Burn Deployment this TestCase
 // owns on rc whose name isn't in keep - a target removed from
-// DeploymentRefs, every target when switching Burn->Quick (keep == nil), or
-// the one-time rename this TestCase's render.BurnDeploymentName scheme
-// introduced (an older "k6-<name>" Deployment, with no target suffix, is
-// never in keep either). Relies on BurnDeployment's own object-level labels
-// (LabelTestCase, set by render.BurnDeployment) to find them all without
-// needing to already know their exact names.
+// DeploymentRefs, or every target when switching Burn->Quick (keep == nil).
+// Relies on BurnDeployment's own object-level labels (LabelTestCase, set by
+// render.BurnDeployment) to find them all without needing to already know
+// their exact names, plus deleteLegacyBurnDeployment for the one Deployment
+// that predates those labels.
 func (r *TestCaseReconciler) cleanupStaleBurnDeployments(ctx context.Context, rc client.Client, tc *benchv1alpha1.TestCase, keep map[string]bool) error {
+	if err := deleteLegacyBurnDeployment(ctx, rc, tc); err != nil {
+		return err
+	}
 	var list appsv1.DeploymentList
 	if err := rc.List(ctx, &list, client.InNamespace(tc.Namespace), client.MatchingLabels{benchv1alpha1.LabelTestCase: tc.Name}); err != nil {
 		return err
@@ -323,6 +345,60 @@ func (r *TestCaseReconciler) cleanupStaleBurnDeployments(ctx context.Context, rc
 		if err := rc.Delete(ctx, dep); err != nil && !apierrors.IsNotFound(err) {
 			return err
 		}
+	}
+	return nil
+}
+
+// desiredBurnNames is every target's Burn Deployment name, including
+// targets that aren't Ready this pass - a transiently unready target
+// shouldn't lose its load generator just because another target shares its
+// runner cluster. Empty for Quick, so a Burn->Quick switch cleans up
+// everything.
+func desiredBurnNames(tc *benchv1alpha1.TestCase, refs []corev1.LocalObjectReference) map[string]bool {
+	keep := map[string]bool{}
+	if tc.Spec.Profile != benchv1alpha1.ProfileBurn {
+		return keep
+	}
+	for _, ref := range refs {
+		keep[render.BurnDeploymentName(tc.Name, ref.Name)] = true
+	}
+	return keep
+}
+
+// runnerClusterName is the cluster resolveRunnerClient picks for one
+// target, by name ("" is the local cluster).
+func runnerClusterName(tc *benchv1alpha1.TestCase, topo *benchv1alpha1.AuthentikDeployment) string {
+	if tc.Spec.RunnerClusterRef != nil && tc.Spec.RunnerClusterRef.Name != "" {
+		return tc.Spec.RunnerClusterRef.Name
+	}
+	return topo.Spec.ClusterRef.Name
+}
+
+// deleteLegacyBurnDeployment removes the "k6-<testcase>" Burn Deployment
+// written before a TestCase could drive more than one deployment. It had no
+// object-level labels, so cleanupStaleBurnDeployments' label List never
+// finds it, and left alone it would keep generating load against the
+// original target alongside its renamed render.BurnDeploymentName
+// successor. Ownership is checked via its pod template label and its
+// selector lacking LabelDeployment, since the bare name alone can collide
+// with a current-scheme name ("k6-<a>-<b>" is both TestCase "a-b"'s legacy
+// name and TestCase "a"'s name for deployment "b").
+func deleteLegacyBurnDeployment(ctx context.Context, rc client.Client, tc *benchv1alpha1.TestCase) error {
+	var dep appsv1.Deployment
+	if err := rc.Get(ctx, types.NamespacedName{Name: "k6-" + tc.Name, Namespace: tc.Namespace}, &dep); err != nil {
+		return client.IgnoreNotFound(err)
+	}
+	if dep.Spec.Template.Labels[benchv1alpha1.LabelTestCase] != tc.Name {
+		return nil
+	}
+	if dep.Spec.Selector != nil {
+		if _, ok := dep.Spec.Selector.MatchLabels[benchv1alpha1.LabelDeployment]; ok {
+			return nil
+		}
+	}
+	logf.FromContext(ctx).Info("Deleting legacy Burn Deployment", "name", dep.Name)
+	if err := rc.Delete(ctx, &dep); err != nil && !apierrors.IsNotFound(err) {
+		return err
 	}
 	return nil
 }

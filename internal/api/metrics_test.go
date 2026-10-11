@@ -161,7 +161,6 @@ func TestCompareMultiDeploymentShowsOneRowPerTarget(t *testing.T) {
 	defer prom.Close()
 
 	tc := sampleTestCase("login-multi", "", benchv1alpha1.ProfileBurn)
-	tc.Spec.DeploymentRef = corev1.LocalObjectReference{}
 	tc.Spec.DeploymentRefs = []corev1.LocalObjectReference{{Name: "dep-a"}, {Name: "dep-b"}}
 
 	s, _ := newServer(t, Config{PrometheusURL: prom.URL}, sampleDeployment("dep-a"), sampleDeployment("dep-b"), tc)
@@ -246,6 +245,44 @@ func TestMetricsResolvesPerClusterPrometheus(t *testing.T) {
 				t.Errorf("login-wc http_reqs = %v, want 7 (queried the wrong Prometheus)", got)
 			}
 		}
+	}
+}
+
+// TestCompareMultiDeploymentAcrossClusters: one TestCase whose two targets
+// live on different clusters (no runnerClusterRef) has each target's k6
+// workload remote-write to its own cluster's Prometheus, so compare has to
+// query both and merge, not just the first target's.
+func TestCompareMultiDeploymentAcrossClusters(t *testing.T) {
+	mgmtProm := fakePrometheus(t, func(string) (string, string, bool) {
+		return "42", "topo-mgmt", true
+	})
+	wcProm := fakePrometheus(t, func(string) (string, string, bool) {
+		return "7", "topo-wc", true
+	})
+
+	wc := &benchv1alpha1.WorkloadCluster{
+		ObjectMeta: metav1.ObjectMeta{Name: "wc1", Namespace: testNamespace},
+		Status:     benchv1alpha1.WorkloadClusterStatus{PrometheusURL: wcProm.URL},
+	}
+	topoMgmt := sampleDeployment("topo-mgmt")
+	topoWC := sampleDeployment("topo-wc")
+	topoWC.Spec.ClusterRef = corev1.LocalObjectReference{Name: "wc1"}
+	tc := sampleTestCase("login-split", "", benchv1alpha1.ProfileBurn)
+	tc.Spec.DeploymentRefs = []corev1.LocalObjectReference{{Name: "topo-mgmt"}, {Name: "topo-wc"}}
+
+	s, _ := newServer(t, Config{PrometheusURL: mgmtProm.URL}, wc, topoMgmt, topoWC, tc)
+	rec := do(t, s, http.MethodGet, "/api/v1/metrics/compare?testids=login-split", nil)
+	requireStatus(t, rec, http.StatusOK)
+
+	body := decodeBody[struct {
+		Results []CompareResult `json:"results"`
+	}](t, rec)
+	values := map[string]float64{}
+	for _, row := range body.Results {
+		values[row.Target] = row.Values["http_reqs"]
+	}
+	if len(body.Results) != 2 || values["topo-mgmt"] != 42 || values["topo-wc"] != 7 {
+		t.Fatalf("results = %+v, want topo-mgmt=42 from the management Prometheus and topo-wc=7 from wc1's", body.Results)
 	}
 }
 
@@ -394,7 +431,7 @@ func TestMetricsRangeRejectsInjection(t *testing.T) {
 
 // TestMetricsRangeWithoutPrometheus: unlike proxyQuery, metricsRange has no
 // upfront "is Prometheus configured" check any more - which Prometheus to
-// query is resolved per testid (prometheusURLForTestID), since a testid on
+// query is resolved per testid (prometheusURLsForTestID), since a testid on
 // a workload cluster and one on the management cluster can resolve to two
 // different Prometheus instances. An unresolvable testid (as here - no
 // TestCase named "login-a" exists) falls back to the empty

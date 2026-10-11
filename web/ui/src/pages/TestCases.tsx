@@ -25,7 +25,7 @@ import { buildTargetRows, burningFor, TargetTable } from '../components/Targets'
 import { Alert, confirmAndRun, Empty, errorMessage, Field, formatTimestamp, Page, Segmented, Table } from '../components/ui';
 import { metricsAnchorFromRuns } from '../format';
 import { shellLinkForCluster } from '../shell/links';
-import { TestCase, TestCaseSpec, TestProfile, testCaseDeployments } from '../types';
+import { TestCase, TestCaseSpec, TestProfile, testCaseDeployments, testRunDeployment } from '../types';
 import { useResource } from '../useResource';
 
 export function TestCasesPage() {
@@ -540,7 +540,7 @@ export function TestCaseViewPage() {
             empty="No runs yet."
             columns={[
               { label: 'Run', render: r => <Link to={`/testruns/${r.metadata.name}`}>{r.metadata.name}</Link> },
-              { label: 'Target', render: r => r.spec.deploymentRef?.name ?? <span className="muted">-</span> },
+              { label: 'Target', render: r => testRunDeployment(r) ?? <span className="muted">-</span> },
               { label: 'Phase', render: r => <Badge value={r.status?.phase ?? 'Pending'} /> },
               { label: 'Started', render: r => formatTimestamp(r.status?.startTime ?? r.metadata.creationTimestamp) },
               { label: 'Completed', render: r => formatTimestamp(r.status?.completionTime) },
