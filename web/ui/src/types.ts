@@ -128,6 +128,7 @@ export interface TestCaseSpec {
   quickDuration?: string;
   burnDuration?: string;
   traceSampleRate?: string;
+  seed?: number;
   extraTags?: Record<string, string>;
 }
 

@@ -322,6 +322,17 @@ spec:
                         type: string
                     type: object
                     x-kubernetes-map-type: atomic
+                  seed:
+                    description: |-
+                      seed fixes the pseudo-random sequence a randomized script (e.g. the
+                      built-in "mixed-usage" template) draws from, passed to k6 as SEED.
+                      Defaults to a value derived from this TestCase's name (see
+                      TestCase.Seed), so every run of the same TestCase - and every target
+                      it drives - replays the exact same action mix.
+                    format: int64
+                    maximum: 4294967295
+                    minimum: 0
+                    type: integer
                   template:
                     default: login
                     description: |-

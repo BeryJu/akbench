@@ -72,6 +72,14 @@ func defaultTestCaseTemplates(namespace string) []benchv1alpha1.TestCaseTemplate
 				RequiresOAuthClient: true,
 			},
 		},
+		{
+			ObjectMeta: metav1.ObjectMeta{Name: "mixed-usage", Namespace: namespace},
+			Spec: benchv1alpha1.TestCaseTemplateSpec{
+				Description: "Mixes logins, logins followed by API browsing, failed logins and flow page loads, " +
+					"picked from a PRNG seeded per TestCase (spec.seed) so every run replays the same sequence.",
+				Script: mustEmbeddedScript("mixed.ts"),
+			},
+		},
 	}
 }
 

@@ -17,6 +17,8 @@ limitations under the License.
 package v1alpha1
 
 import (
+	"hash/fnv"
+
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -123,6 +125,16 @@ type TestCaseSpec struct {
 	// testid/target/profile.
 	// +optional
 	ExtraTags map[string]string `json:"extraTags,omitempty"`
+
+	// seed fixes the pseudo-random sequence a randomized script (e.g. the
+	// built-in "mixed-usage" template) draws from, passed to k6 as SEED.
+	// Defaults to a value derived from this TestCase's name (see
+	// TestCase.Seed), so every run of the same TestCase - and every target
+	// it drives - replays the exact same action mix.
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=4294967295
+	// +optional
+	Seed *int64 `json:"seed,omitempty"`
 }
 
 // TestCaseDeploymentStatus is one targeted deployment's own status within a
@@ -208,6 +220,19 @@ func (s *TestCaseSpec) Deployments() []corev1.LocalObjectReference {
 		return []corev1.LocalObjectReference{s.DeploymentRef}
 	}
 	return nil
+}
+
+// Seed returns spec.seed if set, otherwise a stable 32-bit FNV-1a hash of
+// the TestCase's name - fixed per TestCase without anyone having to pick
+// one, and reproducible if the TestCase is ever recreated under the same
+// name.
+func (tc *TestCase) Seed() uint32 {
+	if tc.Spec.Seed != nil {
+		return uint32(*tc.Spec.Seed)
+	}
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(tc.Name))
+	return h.Sum32()
 }
 
 // MigrateDeploymentRef moves a deprecated singular spec.deploymentRef into

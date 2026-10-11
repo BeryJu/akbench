@@ -333,6 +333,16 @@ function TestCaseForm({ existing }: { existing?: TestCase }) {
                 onChange={e => patch({ traceSampleRate: e.target.value })}
               />
             </Field>
+            <Field label="Seed" help="Fixes randomized scripts' sequence; defaults to a hash of the name">
+              <input
+                type="number"
+                min={0}
+                max={4294967295}
+                value={spec.seed ?? ''}
+                placeholder="auto"
+                onChange={e => patch({ seed: e.target.value === '' ? undefined : Number(e.target.value) })}
+              />
+            </Field>
           </div>
         </fieldset>
 

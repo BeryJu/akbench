@@ -62,6 +62,9 @@ var wantEnvNames = []string{
 	"QUICK_DURATION",
 	"BURN_DURATION",
 	"TRACE_SAMPLE_RATE",
+	// Not part of the Ansible contract - added for the seeded mixed-usage
+	// template; scripts that don't randomize simply ignore it.
+	"SEED",
 	"USERS_FILE",
 	"K6_PROMETHEUS_RW_SERVER_URL",
 	"K6_PROMETHEUS_RW_TREND_AS_NATIVE_HISTOGRAM",

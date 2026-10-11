@@ -116,7 +116,7 @@ var _ = BeforeSuite(func() {
 		Data:       map[string][]byte{"users.json": []byte("[]")},
 	})).To(Succeed())
 
-	// Mirrors production: the real operator seeds these two built-in
+	// Mirrors production: the real operator seeds these built-in
 	// TestCaseTemplate objects at startup (see seedtemplates.go). Every spec
 	// that reconciles a TestCase/TestRun resolves its template against a
 	// real object now (there's no compiled-in registry fallback anymore), so

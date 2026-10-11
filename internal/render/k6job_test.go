@@ -88,3 +88,35 @@ func labelsEqual(a, b map[string]string) bool {
 	}
 	return true
 }
+
+// TestEnvVarsSeedIsFixedPerTestCase guards the mixed-usage template's
+// reproducibility: SEED must be the same for every target a TestCase drives
+// (so their action sequences are comparable), differ between TestCases, and
+// honor an explicit spec.seed.
+func TestEnvVarsSeedIsFixedPerTestCase(t *testing.T) {
+	seedOf := func(p K6WorkloadParams) string {
+		for _, v := range p.EnvVars() {
+			if v.Name == "SEED" {
+				return v.Value
+			}
+		}
+		t.Fatal("no SEED env var rendered")
+		return ""
+	}
+	tc := &benchv1alpha1.TestCase{ObjectMeta: metav1.ObjectMeta{Name: "mixed-a"}}
+	other := &benchv1alpha1.TestCase{ObjectMeta: metav1.ObjectMeta{Name: "mixed-b"}}
+
+	a := seedOf(K6WorkloadParams{TestCase: tc, TargetName: "topo-a"})
+	if b := seedOf(K6WorkloadParams{TestCase: tc, TargetName: "topo-b"}); a != b {
+		t.Errorf("SEED differs between targets of one TestCase: %s vs %s", a, b)
+	}
+	if b := seedOf(K6WorkloadParams{TestCase: other}); a == b {
+		t.Errorf("SEED %s is the same for two different TestCases", a)
+	}
+
+	explicit := int64(42)
+	tc.Spec.Seed = &explicit
+	if got := seedOf(K6WorkloadParams{TestCase: tc}); got != "42" {
+		t.Errorf("SEED = %s, want explicit spec.seed 42", got)
+	}
+}

@@ -94,6 +94,7 @@ func (p K6WorkloadParams) EnvVars() []corev1.EnvVar {
 		{Name: "QUICK_DURATION", Value: tc.Spec.QuickDuration},
 		{Name: "BURN_DURATION", Value: tc.Spec.BurnDuration},
 		{Name: "TRACE_SAMPLE_RATE", Value: tc.Spec.TraceSampleRate},
+		{Name: "SEED", Value: fmt.Sprintf("%d", tc.Seed())},
 		{Name: "USERS_FILE", Value: UsersFilePath},
 		{Name: "K6_PROMETHEUS_RW_SERVER_URL", Value: p.RemoteWriteURL},
 		{Name: "K6_PROMETHEUS_RW_TREND_AS_NATIVE_HISTOGRAM", Value: "true"},
