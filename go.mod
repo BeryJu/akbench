@@ -8,7 +8,7 @@ require (
 	github.com/creack/pty v1.1.24
 	github.com/fluxcd/helm-controller/api v1.6.5
 	github.com/fluxcd/pkg/apis/meta v1.32.0
-	github.com/fluxcd/source-controller/api v1.9.4
+	github.com/fluxcd/source-controller/api v1.9.6
 	github.com/go-chi/chi/v5 v5.3.2
 	github.com/onsi/ginkgo/v2 v2.33.0
 	github.com/onsi/gomega v1.43.0
