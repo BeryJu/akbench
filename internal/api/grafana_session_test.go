@@ -6,8 +6,6 @@ import (
 	"testing"
 	"time"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
 	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
 )
 
@@ -20,7 +18,7 @@ func grafanaTestServer(t *testing.T) (*Server, **http.Request) {
 		*forwarded = r.Clone(r.Context())
 	}))
 	t.Cleanup(upstream.Close)
-	wc := &benchv1alpha1.WorkloadCluster{ObjectMeta: metav1.ObjectMeta{Name: "bench", Namespace: testNamespace}}
+	wc := &benchv1alpha1.WorkloadCluster{Name: "bench", Namespace: testNamespace}
 	wc.Status.GrafanaURL = upstream.URL
 	s, _ := newServer(t, Config{}, wc)
 	return s, forwarded

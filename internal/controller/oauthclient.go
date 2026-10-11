@@ -8,7 +8,6 @@ import (
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -176,8 +175,8 @@ func (r *TestCaseReconciler) ensureOAuthClient(ctx context.Context, rc client.Cl
 	switch err := deploymentClient.Get(ctx, types.NamespacedName{Name: blueprintCMName, Namespace: topo.Spec.Namespace}, &existingCM); {
 	case apierrors.IsNotFound(err):
 		cm := &corev1.ConfigMap{
-			ObjectMeta: metav1.ObjectMeta{Name: blueprintCMName, Namespace: topo.Spec.Namespace},
-			Data:       map[string]string{oauthBlueprintKey: content},
+			Name: blueprintCMName, Namespace: topo.Spec.Namespace,
+			Data: map[string]string{oauthBlueprintKey: content},
 		}
 		if err := deploymentClient.Create(ctx, cm); err != nil {
 			return "", 0, fmt.Errorf("create oauth2 provider blueprint configmap: %w", err)

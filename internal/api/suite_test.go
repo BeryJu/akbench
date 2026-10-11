@@ -96,7 +96,7 @@ func requireStatus(t *testing.T, rec *httptest.ResponseRecorder, want int) {
 // is not Ready is the operator's problem rather than the API's.
 func sampleDeployment(name string) *benchv1alpha1.AuthentikDeployment {
 	return &benchv1alpha1.AuthentikDeployment{
-		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: testNamespace},
+		Name: name, Namespace: testNamespace,
 		Spec: benchv1alpha1.AuthentikDeploymentSpec{
 			Namespace: "ak-" + name,
 			Server:    benchv1alpha1.WorkloadSpec{Replicas: 2},
@@ -117,7 +117,7 @@ func sampleDeployment(name string) *benchv1alpha1.AuthentikDeployment {
 
 func sampleTestCase(name, deployment string, profile benchv1alpha1.TestProfile) *benchv1alpha1.TestCase {
 	tc := &benchv1alpha1.TestCase{
-		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: testNamespace},
+		Name: name, Namespace: testNamespace,
 		Spec: benchv1alpha1.TestCaseSpec{
 			Profile:    profile,
 			Template:   "login",

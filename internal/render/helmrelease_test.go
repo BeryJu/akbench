@@ -5,14 +5,13 @@ import (
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
 )
 
 func exampleDeployment() *benchv1alpha1.AuthentikDeployment {
 	return &benchv1alpha1.AuthentikDeployment{
-		ObjectMeta: metav1.ObjectMeta{Name: "authentik-1"},
+		Name: "authentik-1",
 		Spec: benchv1alpha1.AuthentikDeploymentSpec{
 			Namespace:  "authentik-1",
 			ClusterRef: corev1.LocalObjectReference{Name: "wc-1"},

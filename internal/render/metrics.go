@@ -76,10 +76,8 @@ const (
 // HelmRepository pointing at the official prometheus-community chart repo.
 func KubePrometheusStackHelmRepository(namespace string) *sourcev1.HelmRepository {
 	return &sourcev1.HelmRepository{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      kubePrometheusStackHelmRepositoryName,
-			Namespace: namespace,
-		},
+		Name:      kubePrometheusStackHelmRepositoryName,
+		Namespace: namespace,
 		Spec: sourcev1.HelmRepositorySpec{
 			URL:      kubePrometheusStackChartRepoURL,
 			Interval: metav1.Duration{Duration: helmRepoInterval},
@@ -109,8 +107,8 @@ func prometheusPodLabels() map[string]string {
 func prometheusCompatServices() []map[string]any {
 	labels := prometheusPodLabels()
 	clusterIP := &corev1.Service{
-		TypeMeta:   metav1.TypeMeta{Kind: "Service", APIVersion: "v1"},
-		ObjectMeta: metav1.ObjectMeta{Name: PrometheusServiceName, Namespace: ObservabilityNamespace},
+		Kind: "Service", APIVersion: "v1",
+		Name: PrometheusServiceName, Namespace: ObservabilityNamespace,
 		Spec: corev1.ServiceSpec{
 			Selector: labels,
 			Ports: []corev1.ServicePort{
@@ -120,8 +118,8 @@ func prometheusCompatServices() []map[string]any {
 		},
 	}
 	nodePort := &corev1.Service{
-		TypeMeta:   metav1.TypeMeta{Kind: "Service", APIVersion: "v1"},
-		ObjectMeta: metav1.ObjectMeta{Name: PrometheusNodePortServiceName, Namespace: ObservabilityNamespace},
+		Kind: "Service", APIVersion: "v1",
+		Name: PrometheusNodePortServiceName, Namespace: ObservabilityNamespace,
 		Spec: corev1.ServiceSpec{
 			Type:     corev1.ServiceTypeNodePort,
 			Selector: labels,
@@ -271,10 +269,8 @@ func KubePrometheusStackHelmValues() (*apiextensionsv1.JSON, error) {
 // version first got installed.
 func KubePrometheusStackHelmRelease(namespace, kubeConfigSecretName string, values *apiextensionsv1.JSON) *helmv2.HelmRelease {
 	return &helmv2.HelmRelease{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      KubePrometheusStackHelmReleaseName,
-			Namespace: namespace,
-		},
+		Name:      KubePrometheusStackHelmReleaseName,
+		Namespace: namespace,
 		Spec: helmv2.HelmReleaseSpec{
 			Interval:    metav1.Duration{Duration: helmRepoInterval},
 			Timeout:     &metav1.Duration{Duration: helmInstallTimeout},

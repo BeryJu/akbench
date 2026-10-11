@@ -8,7 +8,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
-	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -95,19 +94,19 @@ func TempoObjects() []client.Object {
 	labels := tempoLabels()
 	return []client.Object{
 		&corev1.Namespace{
-			TypeMeta:   metav1.TypeMeta{Kind: "Namespace", APIVersion: "v1"},
-			ObjectMeta: metav1.ObjectMeta{Name: ObservabilityNamespace},
+			Kind: "Namespace", APIVersion: "v1",
+			Name: ObservabilityNamespace,
 		},
 		&corev1.ConfigMap{
-			TypeMeta:   metav1.TypeMeta{Kind: "ConfigMap", APIVersion: "v1"},
-			ObjectMeta: metav1.ObjectMeta{Name: tempoConfigMapName, Namespace: ObservabilityNamespace},
-			Data:       map[string]string{"tempo.yaml": tempoConfig},
+			Kind: "ConfigMap", APIVersion: "v1",
+			Name: tempoConfigMapName, Namespace: ObservabilityNamespace,
+			Data: map[string]string{"tempo.yaml": tempoConfig},
 		},
 		&appsv1.Deployment{
-			TypeMeta:   metav1.TypeMeta{Kind: "Deployment", APIVersion: "apps/v1"},
-			ObjectMeta: metav1.ObjectMeta{Name: TempoServiceName, Namespace: ObservabilityNamespace, Labels: labels},
+			Kind: "Deployment", APIVersion: "apps/v1",
+			Name: TempoServiceName, Namespace: ObservabilityNamespace, Labels: labels,
 			Spec: appsv1.DeploymentSpec{
-				Replicas: ptr.To(int32(1)),
+				Replicas: new(int32(1)),
 				Selector: &metav1.LabelSelector{MatchLabels: labels},
 				Template: corev1.PodTemplateSpec{
 					ObjectMeta: metav1.ObjectMeta{
@@ -135,15 +134,13 @@ func TempoObjects() []client.Object {
 						Volumes: []corev1.Volume{
 							{
 								Name: "config",
-								VolumeSource: corev1.VolumeSource{
-									ConfigMap: &corev1.ConfigMapVolumeSource{
-										LocalObjectReference: corev1.LocalObjectReference{Name: tempoConfigMapName},
-									},
+								ConfigMap: &corev1.ConfigMapVolumeSource{
+									Name: tempoConfigMapName,
 								},
 							},
 							{
-								Name:         "data",
-								VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
+								Name:     "data",
+								EmptyDir: &corev1.EmptyDirVolumeSource{},
 							},
 						},
 					},
@@ -151,8 +148,8 @@ func TempoObjects() []client.Object {
 			},
 		},
 		&corev1.Service{
-			TypeMeta:   metav1.TypeMeta{Kind: "Service", APIVersion: "v1"},
-			ObjectMeta: metav1.ObjectMeta{Name: TempoServiceName, Namespace: ObservabilityNamespace, Labels: labels},
+			Kind: "Service", APIVersion: "v1",
+			Name: TempoServiceName, Namespace: ObservabilityNamespace, Labels: labels,
 			Spec: corev1.ServiceSpec{
 				Selector: labels,
 				Ports: []corev1.ServicePort{

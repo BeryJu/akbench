@@ -6,7 +6,6 @@ import (
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/utils/ptr"
 
 	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
 )
@@ -111,11 +110,11 @@ fi
 `, host, psql, psql, psql)
 
 	return &batchv1.Job{
-		TypeMeta:   metav1.TypeMeta{Kind: "Job", APIVersion: "batch/v1"},
-		ObjectMeta: metav1.ObjectMeta{Name: PostgresRoleFixJobName(t), Namespace: t.Spec.Namespace},
+		Kind: "Job", APIVersion: "batch/v1",
+		Name: PostgresRoleFixJobName(t), Namespace: t.Spec.Namespace,
 		Spec: batchv1.JobSpec{
-			BackoffLimit:            ptr.To(int32(10)),
-			TTLSecondsAfterFinished: ptr.To(int32(3600)),
+			BackoffLimit:            new(int32(10)),
+			TTLSecondsAfterFinished: new(int32(3600)),
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{Labels: DeploymentLabels(t.Name)},
 				Spec: corev1.PodSpec{
@@ -130,8 +129,8 @@ fi
 							// whose password we already know.
 							{Name: "PGPASSWORD", ValueFrom: &corev1.EnvVarSource{
 								SecretKeyRef: &corev1.SecretKeySelector{
-									LocalObjectReference: corev1.LocalObjectReference{Name: embeddedPostgresSecretName(t)},
-									Key:                  "password",
+									Name: embeddedPostgresSecretName(t),
+									Key:  "password",
 								},
 							}},
 							// POSTGRES_PASSWORD - the value the exporter
@@ -140,8 +139,8 @@ fi
 							// mechanism rather than shell/string interpolation.
 							{Name: "POSTGRES_PASSWORD", ValueFrom: &corev1.EnvVarSource{
 								SecretKeyRef: &corev1.SecretKeySelector{
-									LocalObjectReference: corev1.LocalObjectReference{Name: embeddedPostgresSecretName(t)},
-									Key:                  "postgres-password",
+									Name: embeddedPostgresSecretName(t),
+									Key:  "postgres-password",
 								},
 							}},
 						},

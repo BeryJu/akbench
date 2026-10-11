@@ -6,8 +6,6 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
 	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
 )
 
@@ -45,16 +43,16 @@ func TestListAlertsAggregatesAcrossClusters(t *testing.T) {
 	defer am2.Close()
 
 	wc1 := &benchv1alpha1.WorkloadCluster{
-		ObjectMeta: metav1.ObjectMeta{Name: "wc1", Namespace: testNamespace},
-		Status:     benchv1alpha1.WorkloadClusterStatus{AlertmanagerURL: am1.URL},
+		Name: "wc1", Namespace: testNamespace,
+		Status: benchv1alpha1.WorkloadClusterStatus{AlertmanagerURL: am1.URL},
 	}
 	wc2 := &benchv1alpha1.WorkloadCluster{
-		ObjectMeta: metav1.ObjectMeta{Name: "wc2", Namespace: testNamespace},
-		Status:     benchv1alpha1.WorkloadClusterStatus{AlertmanagerURL: am2.URL},
+		Name: "wc2", Namespace: testNamespace,
+		Status: benchv1alpha1.WorkloadClusterStatus{AlertmanagerURL: am2.URL},
 	}
 	// Not yet reconciled - must be skipped, not treated as an error.
 	wc3 := &benchv1alpha1.WorkloadCluster{
-		ObjectMeta: metav1.ObjectMeta{Name: "wc3", Namespace: testNamespace},
+		Name: "wc3", Namespace: testNamespace,
 	}
 
 	s, _ := newServer(t, Config{}, wc1, wc2, wc3)
@@ -87,12 +85,12 @@ func TestListAlertsSkipsUnreachableCluster(t *testing.T) {
 	defer am.Close()
 
 	reachable := &benchv1alpha1.WorkloadCluster{
-		ObjectMeta: metav1.ObjectMeta{Name: "reachable", Namespace: testNamespace},
-		Status:     benchv1alpha1.WorkloadClusterStatus{AlertmanagerURL: am.URL},
+		Name: "reachable", Namespace: testNamespace,
+		Status: benchv1alpha1.WorkloadClusterStatus{AlertmanagerURL: am.URL},
 	}
 	unreachable := &benchv1alpha1.WorkloadCluster{
-		ObjectMeta: metav1.ObjectMeta{Name: "unreachable", Namespace: testNamespace},
-		Status:     benchv1alpha1.WorkloadClusterStatus{AlertmanagerURL: "http://127.0.0.1:1"},
+		Name: "unreachable", Namespace: testNamespace,
+		Status: benchv1alpha1.WorkloadClusterStatus{AlertmanagerURL: "http://127.0.0.1:1"},
 	}
 
 	s, _ := newServer(t, Config{}, reachable, unreachable)

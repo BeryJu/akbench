@@ -172,16 +172,14 @@ func (s *Server) traceBreakdown(w http.ResponseWriter, r *http.Request) {
 		if target.Error != "" {
 			continue
 		}
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			result, err := s.searchTraceSpans(r.Context(), target.TempoURL, testid, target.Target, end.Add(-span), end)
 			if err != nil {
 				resp.Targets[i].Error = err.Error()
 				return
 			}
 			resp.Targets[i] = summarizeTraceSpans(target.Target, result)
-		}()
+		})
 	}
 	wg.Wait()
 

@@ -1,19 +1,3 @@
-/*
-Copyright 2026.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
-
 package controller
 
 import (
@@ -140,8 +124,8 @@ func (r *AuthentikDeploymentReconciler) resolveFixturesBlueprint(ctx context.Con
 	switch {
 	case apierrors.IsNotFound(mirrorErr):
 		mirrored := &corev1.ConfigMap{
-			ObjectMeta: metav1.ObjectMeta{Name: fixturesBlueprintConfigMapName, Namespace: topo.Spec.Namespace},
-			Data:       map[string]string{fixturesBlueprintKey: content},
+			Name: fixturesBlueprintConfigMapName, Namespace: topo.Spec.Namespace,
+			Data: map[string]string{fixturesBlueprintKey: content},
 		}
 		if err := rc.Create(ctx, mirrored); err != nil {
 			return false, "", fmt.Errorf("mirror fixtures blueprint configmap: %w", err)
@@ -508,7 +492,7 @@ func (r *AuthentikDeploymentReconciler) reconcileDelete(ctx context.Context, top
 			// that may never come back.
 			log.Info("cluster unreachable during delete, skipping remote namespace cleanup", "clusterRef", topo.Spec.ClusterRef.Name, "error", err.Error())
 		} else {
-			ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: topo.Spec.Namespace}}
+			ns := &corev1.Namespace{Name: topo.Spec.Namespace}
 			if err := rc.Delete(ctx, ns); err != nil && !apierrors.IsNotFound(err) {
 				return ctrl.Result{}, fmt.Errorf("delete target namespace %q: %w", topo.Spec.Namespace, err)
 			}
@@ -629,7 +613,7 @@ func connectionFromSecret(sec corev1.Secret, hostKey, portKey, dbKey, userKey, p
 }
 
 func ensureNamespace(ctx context.Context, rc client.Client, name string) error {
-	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: name}}
+	ns := &corev1.Namespace{Name: name}
 	err := rc.Get(ctx, types.NamespacedName{Name: name}, ns)
 	if err == nil {
 		return nil
@@ -678,7 +662,7 @@ func (r *AuthentikDeploymentReconciler) deploymentsForConfigMap(ctx context.Cont
 	for _, topo := range list.Items {
 		ref := topo.Spec.Authentik.ExtraValuesRef
 		if cm.GetName() == fixturesBlueprintConfigMapName || (ref != nil && ref.Name == cm.GetName()) {
-			reqs = append(reqs, reconcile.Request{NamespacedName: types.NamespacedName{Name: topo.Name, Namespace: topo.Namespace}})
+			reqs = append(reqs, reconcile.Request{Name: topo.Name, Namespace: topo.Namespace})
 		}
 	}
 	return reqs

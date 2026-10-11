@@ -8,7 +8,6 @@ import (
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/utils/ptr"
 
 	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
 )
@@ -89,11 +88,11 @@ func BlueprintJob(t *benchv1alpha1.AuthentikDeployment, name, sourceConfigMapNam
 	}
 
 	return &batchv1.Job{
-		TypeMeta:   metav1.TypeMeta{Kind: "Job", APIVersion: "batch/v1"},
-		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: t.Spec.Namespace},
+		Kind: "Job", APIVersion: "batch/v1",
+		Name: name, Namespace: t.Spec.Namespace,
 		Spec: batchv1.JobSpec{
-			BackoffLimit:            ptr.To(int32(3)),
-			TTLSecondsAfterFinished: ptr.To(int32(3600)),
+			BackoffLimit:            new(int32(3)),
+			TTLSecondsAfterFinished: new(int32(3600)),
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{Labels: DeploymentLabels(t.Name)},
 				Spec: corev1.PodSpec{
@@ -104,13 +103,13 @@ func BlueprintJob(t *benchv1alpha1.AuthentikDeployment, name, sourceConfigMapNam
 					// used to need on the server Deployment before this PVC
 					// moved here (see fsGroupPolicy: File on csi-incus's own
 					// CSIDriver).
-					SecurityContext: &corev1.PodSecurityContext{FSGroup: ptr.To(int64(1000))},
+					SecurityContext: &corev1.PodSecurityContext{FSGroup: new(int64(1000))},
 					Containers: []corev1.Container{{
 						Name:    "apply-blueprint",
 						Image:   fmt.Sprintf("%s:%s", image, tag),
 						Command: []string{"sh", "-c", fmt.Sprintf("cp %s %s && ak apply_blueprint %s", sourcePath, targetPath, targetPath)},
 						EnvFrom: []corev1.EnvFromSource{
-							{SecretRef: &corev1.SecretEnvSource{LocalObjectReference: corev1.LocalObjectReference{Name: authentikConfigSecretName(t)}}},
+							{SecretRef: &corev1.SecretEnvSource{Name: authentikConfigSecretName(t)}},
 						},
 						VolumeMounts: []corev1.VolumeMount{
 							{Name: "blueprint-source", MountPath: blueprintSourceMountPath, ReadOnly: true},
@@ -118,12 +117,14 @@ func BlueprintJob(t *benchv1alpha1.AuthentikDeployment, name, sourceConfigMapNam
 						},
 					}},
 					Volumes: []corev1.Volume{
-						{Name: "blueprint-source", VolumeSource: corev1.VolumeSource{
-							ConfigMap: &corev1.ConfigMapVolumeSource{LocalObjectReference: corev1.LocalObjectReference{Name: sourceConfigMapName}},
-						}},
-						{Name: "blueprint-target", VolumeSource: corev1.VolumeSource{
+						{
+							Name:      "blueprint-source",
+							ConfigMap: &corev1.ConfigMapVolumeSource{Name: sourceConfigMapName},
+						},
+						{
+							Name:                  "blueprint-target",
 							PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: BlueprintPVCName(t)},
-						}},
+						},
 					},
 				},
 			},

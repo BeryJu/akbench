@@ -8,7 +8,6 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 
 	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
@@ -61,11 +60,9 @@ func (s *Server) createRun(w http.ResponseWriter, r *http.Request) {
 	runs := make([]*benchv1alpha1.TestRun, 0, len(deployments))
 	for _, dep := range deployments {
 		run := &benchv1alpha1.TestRun{
-			ObjectMeta: metav1.ObjectMeta{
-				GenerateName: name + "-",
-				Namespace:    s.cfg.Namespace,
-				Labels:       map[string]string{benchv1alpha1.LabelTestCase: name},
-			},
+			GenerateName: name + "-",
+			Namespace:    s.cfg.Namespace,
+			Labels:       map[string]string{benchv1alpha1.LabelTestCase: name},
 			Spec: benchv1alpha1.TestRunSpec{
 				TestCaseRef:   corev1.LocalObjectReference{Name: name},
 				DeploymentRef: &dep,

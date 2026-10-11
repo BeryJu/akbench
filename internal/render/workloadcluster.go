@@ -6,7 +6,6 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/utils/ptr"
 
 	bootstrapv1 "sigs.k8s.io/cluster-api/api/bootstrap/kubeadm/v1beta2"
 	controlplanev1 "sigs.k8s.io/cluster-api/api/controlplane/kubeadm/v1beta2"
@@ -101,9 +100,9 @@ func workerKubeadmConfigTemplateName(wc *benchv1alpha1.WorkloadCluster, pool ben
 // Kubernetes Node back to the LXCMachine that created it.
 func nodeRegistrationArgs() []bootstrapv1.Arg {
 	return []bootstrapv1.Arg{
-		{Name: "eviction-hard", Value: ptr.To("nodefs.available<0%,nodefs.inodesFree<0%,imagefs.available<0%")},
-		{Name: "fail-swap-on", Value: ptr.To("false")},
-		{Name: "provider-id", Value: ptr.To("lxc:///{{ v1.local_hostname }}")},
+		{Name: "eviction-hard", Value: new("nodefs.available<0%,nodefs.inodesFree<0%,imagefs.available<0%")},
+		{Name: "fail-swap-on", Value: new("false")},
+		{Name: "provider-id", Value: new("lxc:///{{ v1.local_hostname }}")},
 	}
 }
 
@@ -240,10 +239,8 @@ func KubeadmControlPlane(wc *benchv1alpha1.WorkloadCluster) *controlplanev1.Kube
 	replicas := wc.Spec.ControlPlane.Replicas
 	nodeReg := bootstrapv1.NodeRegistrationOptions{KubeletExtraArgs: nodeRegistrationArgs()}
 	return &controlplanev1.KubeadmControlPlane{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      ControlPlaneName(wc),
-			Namespace: wc.Namespace,
-		},
+		Name:      ControlPlaneName(wc),
+		Namespace: wc.Namespace,
 		Spec: controlplanev1.KubeadmControlPlaneSpec{
 			Replicas: &replicas,
 			Version:  wc.Spec.KubernetesVersion,
@@ -270,7 +267,7 @@ func KubeadmControlPlane(wc *benchv1alpha1.WorkloadCluster) *controlplanev1.Kube
 				ClusterConfiguration: bootstrapv1.ClusterConfiguration{
 					APIServer: bootstrapv1.APIServer{
 						ExtraArgs: []bootstrapv1.Arg{
-							{Name: "bind-address", Value: ptr.To("::")},
+							{Name: "bind-address", Value: new("::")},
 						},
 					},
 				},
@@ -331,12 +328,10 @@ func MachineDeployment(wc *benchv1alpha1.WorkloadCluster, pool benchv1alpha1.Wor
 		}
 	}
 	return &clusterv1.MachineDeployment{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:        MachineDeploymentName(wc, pool),
-			Namespace:   wc.Namespace,
-			Labels:      labels,
-			Annotations: annotations,
-		},
+		Name:        MachineDeploymentName(wc, pool),
+		Namespace:   wc.Namespace,
+		Labels:      labels,
+		Annotations: annotations,
 		Spec: clusterv1.MachineDeploymentSpec{
 			ClusterName: wc.Name,
 			Replicas:    &replicas,
@@ -370,10 +365,8 @@ func MachineDeployment(wc *benchv1alpha1.WorkloadCluster, pool benchv1alpha1.Wor
 func WorkerKubeadmConfigTemplate(wc *benchv1alpha1.WorkloadCluster, pool benchv1alpha1.WorkerPoolSpec) *bootstrapv1.KubeadmConfigTemplate {
 	nodeReg := bootstrapv1.NodeRegistrationOptions{KubeletExtraArgs: nodeRegistrationArgs()}
 	return &bootstrapv1.KubeadmConfigTemplate{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      workerKubeadmConfigTemplateName(wc, pool),
-			Namespace: wc.Namespace,
-		},
+		Name:      workerKubeadmConfigTemplateName(wc, pool),
+		Namespace: wc.Namespace,
 		Spec: bootstrapv1.KubeadmConfigTemplateSpec{
 			Template: bootstrapv1.KubeadmConfigTemplateResource{
 				Spec: bootstrapv1.KubeadmConfigSpec{
@@ -392,10 +385,8 @@ func WorkerKubeadmConfigTemplate(wc *benchv1alpha1.WorkloadCluster, pool benchv1
 // CAPI's core controller actually reconciles.
 func Cluster(wc *benchv1alpha1.WorkloadCluster) *clusterv1.Cluster {
 	return &clusterv1.Cluster{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      wc.Name,
-			Namespace: wc.Namespace,
-		},
+		Name:      wc.Name,
+		Namespace: wc.Namespace,
 		Spec: clusterv1.ClusterSpec{
 			ClusterNetwork: clusterv1.ClusterNetwork{
 				ServiceDomain: "cluster.local",

@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -13,8 +12,8 @@ import (
 
 func TestEnsureFixturesSecretCreatesOnRemote(t *testing.T) {
 	source := fake.NewClientBuilder().WithScheme(clientgoscheme.Scheme).WithObjects(&corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: fixturesSecretName, Namespace: "default"},
-		Data:       map[string][]byte{"users.json": []byte(`[{"username":"a"}]`)},
+		Name: fixturesSecretName, Namespace: "default",
+		Data: map[string][]byte{"users.json": []byte(`[{"username":"a"}]`)},
 	}).Build()
 	remote := fake.NewClientBuilder().WithScheme(clientgoscheme.Scheme).Build()
 
@@ -33,12 +32,12 @@ func TestEnsureFixturesSecretCreatesOnRemote(t *testing.T) {
 
 func TestEnsureFixturesSecretUpdatesExistingOnRemote(t *testing.T) {
 	source := fake.NewClientBuilder().WithScheme(clientgoscheme.Scheme).WithObjects(&corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: fixturesSecretName, Namespace: "default"},
-		Data:       map[string][]byte{"users.json": []byte("new")},
+		Name: fixturesSecretName, Namespace: "default",
+		Data: map[string][]byte{"users.json": []byte("new")},
 	}).Build()
 	remote := fake.NewClientBuilder().WithScheme(clientgoscheme.Scheme).WithObjects(&corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: fixturesSecretName, Namespace: "default"},
-		Data:       map[string][]byte{"users.json": []byte("stale")},
+		Name: fixturesSecretName, Namespace: "default",
+		Data: map[string][]byte{"users.json": []byte("stale")},
 	}).Build()
 
 	if err := ensureFixturesSecret(context.Background(), source, remote, "default"); err != nil {

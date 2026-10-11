@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/intstr"
 )
@@ -62,8 +61,8 @@ func alertmanagerPodLabels() map[string]string {
 func alertmanagerCompatServices() []map[string]any {
 	labels := alertmanagerPodLabels()
 	clusterIP := &corev1.Service{
-		TypeMeta:   metav1.TypeMeta{Kind: "Service", APIVersion: "v1"},
-		ObjectMeta: metav1.ObjectMeta{Name: AlertmanagerServiceName, Namespace: ObservabilityNamespace},
+		Kind: "Service", APIVersion: "v1",
+		Name: AlertmanagerServiceName, Namespace: ObservabilityNamespace,
 		Spec: corev1.ServiceSpec{
 			Selector: labels,
 			Ports: []corev1.ServicePort{
@@ -72,8 +71,8 @@ func alertmanagerCompatServices() []map[string]any {
 		},
 	}
 	nodePort := &corev1.Service{
-		TypeMeta:   metav1.TypeMeta{Kind: "Service", APIVersion: "v1"},
-		ObjectMeta: metav1.ObjectMeta{Name: AlertmanagerNodePortServiceName, Namespace: ObservabilityNamespace},
+		Kind: "Service", APIVersion: "v1",
+		Name: AlertmanagerNodePortServiceName, Namespace: ObservabilityNamespace,
 		Spec: corev1.ServiceSpec{
 			Type:     corev1.ServiceTypeNodePort,
 			Selector: labels,

@@ -9,7 +9,6 @@ import (
 	"github.com/go-chi/chi/v5"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/yaml"
 
@@ -79,8 +78,8 @@ func (s *Server) putExtraValues(w http.ResponseWriter, r *http.Request) {
 
 	cmName := extraValuesConfigMapName(name)
 	cm := &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{Name: cmName, Namespace: s.cfg.Namespace},
-		Data:       map[string]string{"values.yaml": body.ValuesYAML},
+		Name: cmName, Namespace: s.cfg.Namespace,
+		Data: map[string]string{"values.yaml": body.ValuesYAML},
 	}
 	var existing corev1.ConfigMap
 	err := s.client.Get(r.Context(), types.NamespacedName{Name: cmName, Namespace: s.cfg.Namespace}, &existing)

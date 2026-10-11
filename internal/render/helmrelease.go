@@ -45,10 +45,8 @@ func HelmRepository(namespace string, spec benchv1alpha1.ChartSpec) *sourcev1.He
 		url = defaultChartRepo
 	}
 	return &sourcev1.HelmRepository{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      HelmRepositoryName,
-			Namespace: namespace,
-		},
+		Name:      HelmRepositoryName,
+		Namespace: namespace,
 		Spec: sourcev1.HelmRepositorySpec{
 			URL:      url,
 			Interval: metav1.Duration{Duration: helmRepoInterval},
@@ -327,10 +325,8 @@ func BlueprintPVCName(t *benchv1alpha1.AuthentikDeployment) string {
 // comment for why).
 func BlueprintPVC(t *benchv1alpha1.AuthentikDeployment) *corev1.PersistentVolumeClaim {
 	return &corev1.PersistentVolumeClaim{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      BlueprintPVCName(t),
-			Namespace: t.Spec.Namespace,
-		},
+		Name:      BlueprintPVCName(t),
+		Namespace: t.Spec.Namespace,
 		Spec: corev1.PersistentVolumeClaimSpec{
 			AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
 			Resources: corev1.VolumeResourceRequirements{
@@ -351,10 +347,8 @@ func HelmRelease(t *benchv1alpha1.AuthentikDeployment, kubeConfigSecretName stri
 		version = "*"
 	}
 	hr := &helmv2.HelmRelease{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      HelmReleaseName(t),
-			Namespace: t.Namespace,
-		},
+		Name:      HelmReleaseName(t),
+		Namespace: t.Namespace,
 		Spec: helmv2.HelmReleaseSpec{
 			Interval: metav1.Duration{Duration: helmRepoInterval},
 			// helm-controller's own default (5m) isn't enough on a cold

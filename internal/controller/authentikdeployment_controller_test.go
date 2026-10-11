@@ -28,7 +28,7 @@ var _ = Describe("AuthentikDeployment Controller", func() {
 		BeforeEach(func() {
 			typeNamespacedName = types.NamespacedName{Name: resourceName, Namespace: "default"}
 			topo := &benchv1alpha1.AuthentikDeployment{
-				ObjectMeta: metav1.ObjectMeta{Name: resourceName, Namespace: "default"},
+				Name: resourceName, Namespace: "default",
 				Spec: benchv1alpha1.AuthentikDeploymentSpec{
 					Namespace: "authentik-" + resourceName,
 					Server:    benchv1alpha1.WorkloadSpec{Replicas: 2},
@@ -40,7 +40,7 @@ var _ = Describe("AuthentikDeployment Controller", func() {
 		})
 
 		AfterEach(func() {
-			forceDelete(ctx, &benchv1alpha1.AuthentikDeployment{ObjectMeta: metav1.ObjectMeta{Name: resourceName, Namespace: "default"}})
+			forceDelete(ctx, &benchv1alpha1.AuthentikDeployment{Name: resourceName, Namespace: "default"})
 		})
 
 		It("renders a HelmRepository and a HelmRelease with the deployment's values", func() {
@@ -92,10 +92,8 @@ var _ = Describe("AuthentikDeployment Controller", func() {
 			Expect(k8sClient.Get(context.Background(), typeNamespacedName, &topo)).To(Succeed())
 
 			sts := &appsv1.StatefulSet{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      render.EmbeddedPostgresStatefulSetName(&topo),
-					Namespace: topo.Spec.Namespace,
-				},
+				Name:      render.EmbeddedPostgresStatefulSetName(&topo),
+				Namespace: topo.Spec.Namespace,
 				Spec: appsv1.StatefulSetSpec{
 					Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "postgresql"}},
 					Template: corev1.PodTemplateSpec{
@@ -133,7 +131,7 @@ var _ = Describe("AuthentikDeployment Controller", func() {
 		BeforeEach(func() {
 			typeNamespacedName = types.NamespacedName{Name: resourceName, Namespace: "default"}
 			topo := &benchv1alpha1.AuthentikDeployment{
-				ObjectMeta: metav1.ObjectMeta{Name: resourceName, Namespace: "default"},
+				Name: resourceName, Namespace: "default",
 				Spec: benchv1alpha1.AuthentikDeploymentSpec{
 					Namespace: "authentik-" + resourceName,
 					Server:    benchv1alpha1.WorkloadSpec{Replicas: 1},
@@ -146,7 +144,7 @@ var _ = Describe("AuthentikDeployment Controller", func() {
 		})
 
 		AfterEach(func() {
-			forceDelete(ctx, &benchv1alpha1.AuthentikDeployment{ObjectMeta: metav1.ObjectMeta{Name: resourceName, Namespace: "default"}})
+			forceDelete(ctx, &benchv1alpha1.AuthentikDeployment{Name: resourceName, Namespace: "default"})
 		})
 
 		It("renders a required pod anti-affinity directly on server/worker", func() {
@@ -182,16 +180,16 @@ var _ = Describe("AuthentikDeployment Controller", func() {
 		BeforeEach(func() {
 			typeNamespacedName = types.NamespacedName{Name: resourceName, Namespace: "default"}
 			targetNs := "authentik-" + resourceName
-			Expect(k8sClient.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: targetNs}})).To(Succeed())
+			Expect(k8sClient.Create(ctx, &corev1.Namespace{Name: targetNs})).To(Succeed())
 			Expect(k8sClient.Create(ctx, &corev1.Secret{
-				ObjectMeta: metav1.ObjectMeta{Name: "external-pg", Namespace: targetNs},
+				Name: "external-pg", Namespace: targetNs,
 				StringData: map[string]string{
 					"host": "pg.example.com", "port": "5432", "database": "authentik",
 					"username": "authentik", "password": "s3cret",
 				},
 			})).To(Succeed())
 			topo := &benchv1alpha1.AuthentikDeployment{
-				ObjectMeta: metav1.ObjectMeta{Name: resourceName, Namespace: "default"},
+				Name: resourceName, Namespace: "default",
 				Spec: benchv1alpha1.AuthentikDeploymentSpec{
 					Namespace: targetNs,
 					Server:    benchv1alpha1.WorkloadSpec{Replicas: 1},
@@ -206,8 +204,8 @@ var _ = Describe("AuthentikDeployment Controller", func() {
 		})
 
 		AfterEach(func() {
-			forceDelete(ctx, &benchv1alpha1.AuthentikDeployment{ObjectMeta: metav1.ObjectMeta{Name: resourceName, Namespace: "default"}})
-			forceDelete(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "authentik-" + resourceName}})
+			forceDelete(ctx, &benchv1alpha1.AuthentikDeployment{Name: resourceName, Namespace: "default"})
+			forceDelete(ctx, &corev1.Namespace{Name: "authentik-" + resourceName})
 		})
 
 		It("wires the referenced secret's connection into the chart values without touching CNPG", func() {
@@ -235,7 +233,7 @@ var _ = Describe("AuthentikDeployment Controller", func() {
 	Context("clusterRef set without a multicluster tracker wired up", func() {
 		It("reports DependencyNotReady and requeues instead of touching a remote cluster", func() {
 			topo := &benchv1alpha1.AuthentikDeployment{
-				ObjectMeta: metav1.ObjectMeta{Name: "deployment-remote", Namespace: "default"},
+				Name: "deployment-remote", Namespace: "default",
 				Spec: benchv1alpha1.AuthentikDeploymentSpec{
 					ClusterRef: corev1.LocalObjectReference{Name: "some-workload-cluster"},
 					Namespace:  "authentik-deployment-remote",

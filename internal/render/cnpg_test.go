@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
@@ -12,7 +11,7 @@ import (
 
 func TestCNPGClusterDefaults(t *testing.T) {
 	topo := &benchv1alpha1.AuthentikDeployment{
-		ObjectMeta: metav1.ObjectMeta{Name: "authentik-1"},
+		Name: "authentik-1",
 		Spec: benchv1alpha1.AuthentikDeploymentSpec{
 			Namespace:  "authentik-1",
 			ClusterRef: corev1.LocalObjectReference{Name: "wc-1"},
@@ -52,7 +51,7 @@ func TestCNPGClusterDefaults(t *testing.T) {
 // clusterRef-less deployment falls back to.
 func TestCNPGClusterNoPodMonitorWithoutClusterRef(t *testing.T) {
 	topo := &benchv1alpha1.AuthentikDeployment{
-		ObjectMeta: metav1.ObjectMeta{Name: "authentik-1"},
+		Name: "authentik-1",
 		Spec: benchv1alpha1.AuthentikDeploymentSpec{
 			Namespace: "authentik-1",
 			Postgres:  benchv1alpha1.PostgresSpec{Mode: benchv1alpha1.PostgresCNPG},
@@ -67,7 +66,7 @@ func TestCNPGClusterNoPodMonitorWithoutClusterRef(t *testing.T) {
 
 func TestCNPGClusterHonorsSpec(t *testing.T) {
 	topo := &benchv1alpha1.AuthentikDeployment{
-		ObjectMeta: metav1.ObjectMeta{Name: "authentik-1"},
+		Name: "authentik-1",
 		Spec: benchv1alpha1.AuthentikDeploymentSpec{
 			Postgres: benchv1alpha1.PostgresSpec{
 				Mode: benchv1alpha1.PostgresCNPG,
@@ -93,7 +92,7 @@ func TestCNPGClusterHonorsSpec(t *testing.T) {
 
 func TestCNPGClusterCrossDeploymentIsolation(t *testing.T) {
 	topo := &benchv1alpha1.AuthentikDeployment{
-		ObjectMeta: metav1.ObjectMeta{Name: "authentik-1"},
+		Name: "authentik-1",
 		Spec: benchv1alpha1.AuthentikDeploymentSpec{
 			Namespace: "authentik-1",
 			Postgres:  benchv1alpha1.PostgresSpec{Mode: benchv1alpha1.PostgresCNPG},

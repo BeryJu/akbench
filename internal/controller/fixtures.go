@@ -6,7 +6,6 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -38,8 +37,8 @@ func ensureFixturesSecret(ctx context.Context, c client.Client, rc client.Client
 	switch {
 	case apierrors.IsNotFound(err):
 		mirrored := &corev1.Secret{
-			ObjectMeta: metav1.ObjectMeta{Name: fixturesSecretName, Namespace: namespace},
-			Data:       source.Data,
+			Name: fixturesSecretName, Namespace: namespace,
+			Data: source.Data,
 		}
 		return rc.Create(ctx, mirrored)
 	case err != nil:

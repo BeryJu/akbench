@@ -12,7 +12,6 @@ import (
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
 	"github.com/goauthentik/authentik-bench/internal/render"
@@ -20,7 +19,7 @@ import (
 
 func exampleTestCase(profile benchv1alpha1.TestProfile) *benchv1alpha1.TestCase {
 	return &benchv1alpha1.TestCase{
-		ObjectMeta: metav1.ObjectMeta{Name: "login-baseline", Namespace: "default"},
+		Name: "login-baseline", Namespace: "default",
 		Spec: benchv1alpha1.TestCaseSpec{
 			Template:        "login",
 			Profile:         profile,

@@ -32,10 +32,8 @@ const (
 // pointing at the official Flannel chart repo.
 func CNIHelmRepository(namespace string) *sourcev1.HelmRepository {
 	return &sourcev1.HelmRepository{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      CNIHelmRepositoryName,
-			Namespace: namespace,
-		},
+		Name:      CNIHelmRepositoryName,
+		Namespace: namespace,
 		Spec: sourcev1.HelmRepositorySpec{
 			URL:      cniChartRepoURL,
 			Interval: metav1.Duration{Duration: helmRepoInterval},
@@ -50,10 +48,8 @@ func CNIHelmRepository(namespace string) *sourcev1.HelmRepository {
 // doesn't already exist on a fresh kubeadm cluster.
 func CNIHelmRelease(namespace, kubeConfigSecretName string) *helmv2.HelmRelease {
 	return &helmv2.HelmRelease{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      CNIHelmReleaseName,
-			Namespace: namespace,
-		},
+		Name:      CNIHelmReleaseName,
+		Namespace: namespace,
 		Spec: helmv2.HelmReleaseSpec{
 			Interval:    metav1.Duration{Duration: helmRepoInterval},
 			Timeout:     &metav1.Duration{Duration: helmInstallTimeout},

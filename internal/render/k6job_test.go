@@ -17,7 +17,7 @@ import (
 func TestPodTemplateNeverSharesNodeWithItsDeployment(t *testing.T) {
 	p := K6WorkloadParams{
 		TestCase: &benchv1alpha1.TestCase{
-			ObjectMeta: metav1.ObjectMeta{Name: "login-a"},
+			Name: "login-a",
 			Spec: benchv1alpha1.TestCaseSpec{
 				DeploymentRefs: []corev1.LocalObjectReference{{Name: "topo-a"}},
 				Profile:        benchv1alpha1.ProfileBurn,
@@ -55,7 +55,7 @@ func TestPodTemplateNeverSharesNodeWithItsDeployment(t *testing.T) {
 // the selector too, disambiguating one target from another.
 func TestBurnDeploymentSelectorIsUniquePerDeployment(t *testing.T) {
 	tc := &benchv1alpha1.TestCase{
-		ObjectMeta: metav1.ObjectMeta{Name: "login-multi"},
+		Name: "login-multi",
 		Spec: benchv1alpha1.TestCaseSpec{
 			DeploymentRefs: []corev1.LocalObjectReference{{Name: "topo-a"}, {Name: "topo-b"}},
 			Profile:        benchv1alpha1.ProfileBurn,
@@ -103,8 +103,8 @@ func TestEnvVarsSeedIsFixedPerTestCase(t *testing.T) {
 		t.Fatal("no SEED env var rendered")
 		return ""
 	}
-	tc := &benchv1alpha1.TestCase{ObjectMeta: metav1.ObjectMeta{Name: "mixed-a"}}
-	other := &benchv1alpha1.TestCase{ObjectMeta: metav1.ObjectMeta{Name: "mixed-b"}}
+	tc := &benchv1alpha1.TestCase{Name: "mixed-a"}
+	other := &benchv1alpha1.TestCase{Name: "mixed-b"}
 
 	a := seedOf(K6WorkloadParams{TestCase: tc, TargetName: "topo-a"})
 	if b := seedOf(K6WorkloadParams{TestCase: tc, TargetName: "topo-b"}); a != b {

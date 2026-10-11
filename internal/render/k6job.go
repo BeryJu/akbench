@@ -154,17 +154,13 @@ func (p K6WorkloadParams) volumes() ([]corev1.Volume, []corev1.VolumeMount) {
 	volumes := []corev1.Volume{
 		{
 			Name: "scripts",
-			VolumeSource: corev1.VolumeSource{
-				ConfigMap: &corev1.ConfigMapVolumeSource{
-					LocalObjectReference: corev1.LocalObjectReference{Name: p.ScriptConfigMapName},
-				},
+			ConfigMap: &corev1.ConfigMapVolumeSource{
+				Name: p.ScriptConfigMapName,
 			},
 		},
 		{
-			Name: "fixtures",
-			VolumeSource: corev1.VolumeSource{
-				Secret: &corev1.SecretVolumeSource{SecretName: p.FixturesSecretName},
-			},
+			Name:   "fixtures",
+			Secret: &corev1.SecretVolumeSource{SecretName: p.FixturesSecretName},
 		},
 	}
 	mounts := []corev1.VolumeMount{
@@ -184,7 +180,7 @@ func (p K6WorkloadParams) PodTemplate() corev1.PodTemplateSpec {
 		benchv1alpha1.LabelDeployment: p.DeploymentName,
 	}
 	return corev1.PodTemplateSpec{
-		ObjectMeta: metav1.ObjectMeta{Labels: labels},
+		Labels: labels,
 		Spec: corev1.PodSpec{
 			RestartPolicy: corev1.RestartPolicyNever,
 			Containers: []corev1.Container{
@@ -236,10 +232,8 @@ func BurnDeploymentName(testCaseName, deploymentName string) string {
 func QuickJob(name, namespace string, p K6WorkloadParams) *batchv1.Job {
 	backoffLimit := int32(0)
 	return &batchv1.Job{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      name,
-			Namespace: namespace,
-		},
+		Name:      name,
+		Namespace: namespace,
 		Spec: batchv1.JobSpec{
 			BackoffLimit: &backoffLimit,
 			Template:     p.PodTemplate(),
@@ -269,16 +263,14 @@ func BurnDeployment(name, namespace string, p K6WorkloadParams) *appsv1.Deployme
 		benchv1alpha1.LabelDeployment: p.DeploymentName,
 	}}
 	return &appsv1.Deployment{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      name,
-			Namespace: namespace,
-			// Object-level labels (distinct from the pod template's own,
-			// above) so the controller can List every Burn Deployment
-			// belonging to a TestCase - needed to clean up a target that's
-			// been removed from DeploymentRefs, since there's no single
-			// fixed name to Delete by once a TestCase can have more than one.
-			Labels: selector.MatchLabels,
-		},
+		Name:      name,
+		Namespace: namespace,
+		// Object-level labels (distinct from the pod template's own,
+		// above) so the controller can List every Burn Deployment
+		// belonging to a TestCase - needed to clean up a target that's
+		// been removed from DeploymentRefs, since there's no single
+		// fixed name to Delete by once a TestCase can have more than one.
+		Labels: selector.MatchLabels,
 		Spec: appsv1.DeploymentSpec{
 			Replicas: &replicas,
 			Selector: selector,

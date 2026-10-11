@@ -4,14 +4,12 @@ import (
 	"encoding/json"
 	"testing"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
 	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
 )
 
 func exampleAutoscalingCluster() *benchv1alpha1.WorkloadCluster {
 	return &benchv1alpha1.WorkloadCluster{
-		ObjectMeta: metav1.ObjectMeta{Name: "wc-1", Namespace: "default"},
+		Name: "wc-1", Namespace: "default",
 		Spec: benchv1alpha1.WorkloadClusterSpec{
 			WorkerPools: []benchv1alpha1.WorkerPoolSpec{
 				{Name: "workers", Replicas: 1, Autoscaling: &benchv1alpha1.AutoscalingSpec{MinReplicas: 1, MaxReplicas: 4}},
@@ -130,8 +128,8 @@ func TestClusterAutoscalerHelmReleaseHasNoKubeConfig(t *testing.T) {
 // sharing wc.Namespace too (see ClusterAutoscalerNamespace's own doc
 // comment for why it must), so the release name is what has to stay unique.
 func TestClusterAutoscalerReleaseNamesAreUniquePerCluster(t *testing.T) {
-	a := &benchv1alpha1.WorkloadCluster{ObjectMeta: metav1.ObjectMeta{Name: "cluster-a", Namespace: "default"}}
-	b := &benchv1alpha1.WorkloadCluster{ObjectMeta: metav1.ObjectMeta{Name: "cluster-b", Namespace: "default"}}
+	a := &benchv1alpha1.WorkloadCluster{Name: "cluster-a", Namespace: "default"}
+	b := &benchv1alpha1.WorkloadCluster{Name: "cluster-b", Namespace: "default"}
 
 	if ClusterAutoscalerHelmReleaseName(a) == ClusterAutoscalerHelmReleaseName(b) {
 		t.Error("two different WorkloadClusters rendered the same cluster-autoscaler HelmRelease name")

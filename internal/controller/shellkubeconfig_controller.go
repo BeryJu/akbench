@@ -91,8 +91,8 @@ func (r *ShellKubeconfigReconciler) Reconcile(ctx context.Context, _ ctrl.Reques
 // content actually changed.
 func (r *ShellKubeconfigReconciler) applyKubeconfigSecret(ctx context.Context, kubeconfig []byte) (bool, error) {
 	desired := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: r.SecretName, Namespace: r.Namespace},
-		Data:       map[string][]byte{shellKubeconfigDataKey: kubeconfig},
+		Name: r.SecretName, Namespace: r.Namespace,
+		Data: map[string][]byte{shellKubeconfigDataKey: kubeconfig},
 	}
 	if err := r.Create(ctx, desired); err != nil {
 		if !apierrors.IsAlreadyExists(err) {

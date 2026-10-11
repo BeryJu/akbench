@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
@@ -42,14 +41,14 @@ func mustEmbeddedScript(name string) string {
 func defaultTestCaseTemplates(namespace string) []benchv1alpha1.TestCaseTemplate {
 	return []benchv1alpha1.TestCaseTemplate{
 		{
-			ObjectMeta: metav1.ObjectMeta{Name: DefaultTemplateName, Namespace: namespace},
+			Name: DefaultTemplateName, Namespace: namespace,
 			Spec: benchv1alpha1.TestCaseTemplateSpec{
 				Description: "Walks the authentik flow executor through a standard username/password (+ optional MFA) login.",
 				Script:      mustEmbeddedScript("login.ts"),
 			},
 		},
 		{
-			ObjectMeta: metav1.ObjectMeta{Name: "oauth-oidc", Namespace: namespace},
+			Name: "oauth-oidc", Namespace: namespace,
 			Spec: benchv1alpha1.TestCaseTemplateSpec{
 				Description:         "Drives an OAuth2/OIDC authorization-code flow through an oidc-test-client relying party, reusing the same flow-executor walk as login.",
 				Script:              mustEmbeddedScript("oauth.ts"),
@@ -57,7 +56,7 @@ func defaultTestCaseTemplates(namespace string) []benchv1alpha1.TestCaseTemplate
 			},
 		},
 		{
-			ObjectMeta: metav1.ObjectMeta{Name: "mixed-usage", Namespace: namespace},
+			Name: "mixed-usage", Namespace: namespace,
 			Spec: benchv1alpha1.TestCaseTemplateSpec{
 				Description: "Mixes logins, logins followed by API browsing, failed logins and flow page loads, " +
 					"picked from a PRNG seeded per TestCase (spec.seed) so every run replays the same sequence.",

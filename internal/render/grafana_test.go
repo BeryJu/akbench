@@ -5,13 +5,12 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
 )
 
 func TestGrafanaProxyPathPrefix(t *testing.T) {
-	wc := &benchv1alpha1.WorkloadCluster{ObjectMeta: metav1.ObjectMeta{Name: "default-dev-vm-incus"}}
+	wc := &benchv1alpha1.WorkloadCluster{Name: "default-dev-vm-incus"}
 	got := GrafanaProxyPathPrefix(wc)
 	want := "/grafana-proxy/default-dev-vm-incus/"
 	if got != want {
@@ -20,7 +19,7 @@ func TestGrafanaProxyPathPrefix(t *testing.T) {
 }
 
 func TestGrafanaObjects(t *testing.T) {
-	wc := &benchv1alpha1.WorkloadCluster{ObjectMeta: metav1.ObjectMeta{Name: "test-cluster"}}
+	wc := &benchv1alpha1.WorkloadCluster{Name: "test-cluster"}
 	objs := GrafanaObjects(wc)
 
 	found := map[string]int{}

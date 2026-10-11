@@ -3,13 +3,11 @@ package render
 import (
 	"testing"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
 	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
 )
 
 func TestOIDCTestClientObjects(t *testing.T) {
-	tc := &benchv1alpha1.TestCase{ObjectMeta: metav1.ObjectMeta{Name: "oauth-test", Namespace: "default"}}
+	tc := &benchv1alpha1.TestCase{Name: "oauth-test", Namespace: "default"}
 	dep := OIDCTestClientDeployment(tc, "topo-a", "default", "http://authentik.example/application/o/oauth-test/", "client-id-123", "sekrit")
 	svc := OIDCTestClientService(tc, "topo-a", "default")
 

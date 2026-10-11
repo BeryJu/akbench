@@ -8,7 +8,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
-	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
@@ -162,22 +161,22 @@ func GrafanaObjects(wc *benchv1alpha1.WorkloadCluster) []client.Object {
 	rootURL := GrafanaProxyPathPrefix(wc)
 	return []client.Object{
 		&corev1.Namespace{
-			TypeMeta:   metav1.TypeMeta{Kind: "Namespace", APIVersion: "v1"},
-			ObjectMeta: metav1.ObjectMeta{Name: ObservabilityNamespace},
+			Kind: "Namespace", APIVersion: "v1",
+			Name: ObservabilityNamespace,
 		},
 		&corev1.ConfigMap{
-			TypeMeta:   metav1.TypeMeta{Kind: "ConfigMap", APIVersion: "v1"},
-			ObjectMeta: metav1.ObjectMeta{Name: grafanaDatasourcesConfigMapName, Namespace: ObservabilityNamespace},
-			Data:       map[string]string{"datasources.yaml": grafanaDatasources()},
+			Kind: "ConfigMap", APIVersion: "v1",
+			Name: grafanaDatasourcesConfigMapName, Namespace: ObservabilityNamespace,
+			Data: map[string]string{"datasources.yaml": grafanaDatasources()},
 		},
 		&corev1.ConfigMap{
-			TypeMeta:   metav1.TypeMeta{Kind: "ConfigMap", APIVersion: "v1"},
-			ObjectMeta: metav1.ObjectMeta{Name: grafanaProvidersConfigMapName, Namespace: ObservabilityNamespace},
-			Data:       map[string]string{"dashboards.yaml": grafanaDashboardProvider},
+			Kind: "ConfigMap", APIVersion: "v1",
+			Name: grafanaProvidersConfigMapName, Namespace: ObservabilityNamespace,
+			Data: map[string]string{"dashboards.yaml": grafanaDashboardProvider},
 		},
 		&corev1.ConfigMap{
-			TypeMeta:   metav1.TypeMeta{Kind: "ConfigMap", APIVersion: "v1"},
-			ObjectMeta: metav1.ObjectMeta{Name: grafanaDashboardsConfigMapName, Namespace: ObservabilityNamespace},
+			Kind: "ConfigMap", APIVersion: "v1",
+			Name: grafanaDashboardsConfigMapName, Namespace: ObservabilityNamespace,
 			Data: map[string]string{
 				"compare-tests.json": string(grafanaDashboardCompareTests),
 				"k6.json":            string(grafanaDashboardK6),
@@ -187,10 +186,10 @@ func GrafanaObjects(wc *benchv1alpha1.WorkloadCluster) []client.Object {
 			},
 		},
 		&appsv1.Deployment{
-			TypeMeta:   metav1.TypeMeta{Kind: "Deployment", APIVersion: "apps/v1"},
-			ObjectMeta: metav1.ObjectMeta{Name: GrafanaServiceName, Namespace: ObservabilityNamespace, Labels: labels},
+			Kind: "Deployment", APIVersion: "apps/v1",
+			Name: GrafanaServiceName, Namespace: ObservabilityNamespace, Labels: labels,
 			Spec: appsv1.DeploymentSpec{
-				Replicas: ptr.To(int32(1)),
+				Replicas: new(int32(1)),
 				Selector: &metav1.LabelSelector{MatchLabels: labels},
 				Template: corev1.PodTemplateSpec{
 					ObjectMeta: metav1.ObjectMeta{Labels: labels},
@@ -238,26 +237,20 @@ func GrafanaObjects(wc *benchv1alpha1.WorkloadCluster) []client.Object {
 						Volumes: []corev1.Volume{
 							{
 								Name: "datasources",
-								VolumeSource: corev1.VolumeSource{
-									ConfigMap: &corev1.ConfigMapVolumeSource{
-										LocalObjectReference: corev1.LocalObjectReference{Name: grafanaDatasourcesConfigMapName},
-									},
+								ConfigMap: &corev1.ConfigMapVolumeSource{
+									Name: grafanaDatasourcesConfigMapName,
 								},
 							},
 							{
 								Name: "providers",
-								VolumeSource: corev1.VolumeSource{
-									ConfigMap: &corev1.ConfigMapVolumeSource{
-										LocalObjectReference: corev1.LocalObjectReference{Name: grafanaProvidersConfigMapName},
-									},
+								ConfigMap: &corev1.ConfigMapVolumeSource{
+									Name: grafanaProvidersConfigMapName,
 								},
 							},
 							{
 								Name: "dashboards",
-								VolumeSource: corev1.VolumeSource{
-									ConfigMap: &corev1.ConfigMapVolumeSource{
-										LocalObjectReference: corev1.LocalObjectReference{Name: grafanaDashboardsConfigMapName},
-									},
+								ConfigMap: &corev1.ConfigMapVolumeSource{
+									Name: grafanaDashboardsConfigMapName,
 								},
 							},
 						},
@@ -266,16 +259,16 @@ func GrafanaObjects(wc *benchv1alpha1.WorkloadCluster) []client.Object {
 			},
 		},
 		&corev1.Service{
-			TypeMeta:   metav1.TypeMeta{Kind: "Service", APIVersion: "v1"},
-			ObjectMeta: metav1.ObjectMeta{Name: GrafanaServiceName, Namespace: ObservabilityNamespace, Labels: labels},
+			Kind: "Service", APIVersion: "v1",
+			Name: GrafanaServiceName, Namespace: ObservabilityNamespace, Labels: labels,
 			Spec: corev1.ServiceSpec{
 				Selector: labels,
 				Ports:    []corev1.ServicePort{{Name: "http", Port: GrafanaPort, TargetPort: intstr.FromInt32(GrafanaPort)}},
 			},
 		},
 		&corev1.Service{
-			TypeMeta:   metav1.TypeMeta{Kind: "Service", APIVersion: "v1"},
-			ObjectMeta: metav1.ObjectMeta{Name: GrafanaNodePortServiceName, Namespace: ObservabilityNamespace},
+			Kind: "Service", APIVersion: "v1",
+			Name: GrafanaNodePortServiceName, Namespace: ObservabilityNamespace,
 			Spec: corev1.ServiceSpec{
 				Type:     corev1.ServiceTypeNodePort,
 				Selector: labels,

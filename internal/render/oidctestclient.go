@@ -7,7 +7,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
-	"k8s.io/utils/ptr"
 
 	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
 )
@@ -59,10 +58,10 @@ func OIDCTestClientDeployment(tc *benchv1alpha1.TestCase, deploymentName, namesp
 	name := OIDCTestClientName(tc, deploymentName)
 	labels := oidcTestClientLabels(tc, deploymentName)
 	return &appsv1.Deployment{
-		TypeMeta:   metav1.TypeMeta{Kind: "Deployment", APIVersion: "apps/v1"},
-		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace, Labels: labels},
+		Kind: "Deployment", APIVersion: "apps/v1",
+		Name: name, Namespace: namespace, Labels: labels,
 		Spec: appsv1.DeploymentSpec{
-			Replicas: ptr.To(int32(1)),
+			Replicas: new(int32(1)),
 			Selector: &metav1.LabelSelector{MatchLabels: labels},
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{Labels: labels},
@@ -79,9 +78,7 @@ func OIDCTestClientDeployment(tc *benchv1alpha1.TestCase, deploymentName, namesp
 						},
 						Ports: []corev1.ContainerPort{{Name: "http", ContainerPort: OIDCTestClientPort}},
 						ReadinessProbe: &corev1.Probe{
-							ProbeHandler: corev1.ProbeHandler{
-								HTTPGet: &corev1.HTTPGetAction{Path: "/health", Port: intstr.FromInt32(OIDCTestClientPort)},
-							},
+							HTTPGet: &corev1.HTTPGetAction{Path: "/health", Port: intstr.FromInt32(OIDCTestClientPort)},
 						},
 					}},
 				},
@@ -95,8 +92,8 @@ func OIDCTestClientDeployment(tc *benchv1alpha1.TestCase, deploymentName, namesp
 func OIDCTestClientService(tc *benchv1alpha1.TestCase, deploymentName, namespace string) *corev1.Service {
 	name := OIDCTestClientName(tc, deploymentName)
 	return &corev1.Service{
-		TypeMeta:   metav1.TypeMeta{Kind: "Service", APIVersion: "v1"},
-		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
+		Kind: "Service", APIVersion: "v1",
+		Name: name, Namespace: namespace,
 		Spec: corev1.ServiceSpec{
 			Selector: oidcTestClientLabels(tc, deploymentName),
 			Ports: []corev1.ServicePort{

@@ -13,8 +13,6 @@ import (
 	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
 	controlplanev1 "sigs.k8s.io/cluster-api/api/controlplane/kubeadm/v1beta2"
 	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 
@@ -42,10 +40,8 @@ var _ = Describe("WorkloadCluster Controller", func() {
 			err := k8sClient.Get(ctx, typeNamespacedName, workloadcluster)
 			if err != nil && errors.IsNotFound(err) {
 				resource := &benchv1alpha1.WorkloadCluster{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      resourceName,
-						Namespace: resourceNamespace,
-					},
+					Name:      resourceName,
+					Namespace: resourceNamespace,
 					Spec: benchv1alpha1.WorkloadClusterSpec{
 						KubernetesVersion: "v1.31.0",
 						Provider:          benchv1alpha1.InfrastructureIncus,
@@ -70,7 +66,7 @@ var _ = Describe("WorkloadCluster Controller", func() {
 
 			By("Cleanup the specific resource instance WorkloadCluster")
 			forceDelete(ctx, resource)
-			forceDelete(ctx, &clusterv1.Cluster{ObjectMeta: metav1.ObjectMeta{Name: resourceName, Namespace: resourceNamespace}})
+			forceDelete(ctx, &clusterv1.Cluster{Name: resourceName, Namespace: resourceNamespace})
 		})
 		It("should successfully reconcile the resource", func() {
 			By("Reconciling the created resource")

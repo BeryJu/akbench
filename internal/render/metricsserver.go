@@ -45,10 +45,8 @@ const (
 // HelmRepository pointing at the official metrics-server chart repo.
 func MetricsServerHelmRepository(namespace string) *sourcev1.HelmRepository {
 	return &sourcev1.HelmRepository{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      MetricsServerHelmRepositoryName,
-			Namespace: namespace,
-		},
+		Name:      MetricsServerHelmRepositoryName,
+		Namespace: namespace,
 		Spec: sourcev1.HelmRepositorySpec{
 			URL:      metricsServerChartRepoURL,
 			Interval: metav1.Duration{Duration: helmRepoInterval},
@@ -74,10 +72,8 @@ func MetricsServerHelmValues() (*apiextensionsv1.JSON, error) {
 // render.KubeconfigSecretName).
 func MetricsServerHelmRelease(namespace, kubeConfigSecretName string, values *apiextensionsv1.JSON) *helmv2.HelmRelease {
 	return &helmv2.HelmRelease{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      MetricsServerHelmReleaseName,
-			Namespace: namespace,
-		},
+		Name:      MetricsServerHelmReleaseName,
+		Namespace: namespace,
 		Spec: helmv2.HelmReleaseSpec{
 			Interval:    metav1.Duration{Duration: helmRepoInterval},
 			Timeout:     &metav1.Duration{Duration: helmInstallTimeout},

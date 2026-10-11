@@ -444,8 +444,8 @@ func (r *TestCaseReconciler) ensureScriptConfigMap(ctx context.Context, rc clien
 
 	name := "k6-script-" + tc.Name
 	cm := &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: tc.Namespace},
-		Data:       map[string]string{key: content},
+		Name: name, Namespace: tc.Namespace,
+		Data: map[string]string{key: content},
 	}
 	if !remote {
 		if err := controllerutil.SetControllerReference(tc, cm, r.Scheme); err != nil {
@@ -522,7 +522,7 @@ func (r *TestCaseReconciler) testCasesForDeployment(ctx context.Context, topo cl
 	var reqs []reconcile.Request
 	for _, tc := range list.Items {
 		if slices.ContainsFunc(tc.Deployments(), func(ref corev1.LocalObjectReference) bool { return ref.Name == topo.GetName() }) {
-			reqs = append(reqs, reconcile.Request{NamespacedName: types.NamespacedName{Name: tc.Name, Namespace: tc.Namespace}})
+			reqs = append(reqs, reconcile.Request{Name: tc.Name, Namespace: tc.Namespace})
 		}
 	}
 	return reqs

@@ -86,10 +86,8 @@ func HasAutoscalingPool(wc *benchv1alpha1.WorkloadCluster) bool {
 // same way CNIHelmRepository/MetricsServerHelmRepository already are.
 func ClusterAutoscalerHelmRepository(namespace string) *sourcev1.HelmRepository {
 	return &sourcev1.HelmRepository{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      ClusterAutoscalerHelmRepositoryName,
-			Namespace: namespace,
-		},
+		Name:      ClusterAutoscalerHelmRepositoryName,
+		Namespace: namespace,
 		Spec: sourcev1.HelmRepositorySpec{
 			URL:      clusterAutoscalerChartRepoURL,
 			Interval: metav1.Duration{Duration: helmRepoInterval},
@@ -155,10 +153,8 @@ func ClusterAutoscalerHelmValues(wc *benchv1alpha1.WorkloadCluster) (*apiextensi
 func ClusterAutoscalerHelmRelease(wc *benchv1alpha1.WorkloadCluster, values *apiextensionsv1.JSON) *helmv2.HelmRelease {
 	name := ClusterAutoscalerHelmReleaseName(wc)
 	return &helmv2.HelmRelease{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      name,
-			Namespace: wc.Namespace,
-		},
+		Name:      name,
+		Namespace: wc.Namespace,
 		Spec: helmv2.HelmReleaseSpec{
 			Interval:    metav1.Duration{Duration: helmRepoInterval},
 			Timeout:     &metav1.Duration{Duration: helmInstallTimeout},

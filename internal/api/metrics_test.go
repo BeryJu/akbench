@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
 )
@@ -196,8 +195,8 @@ func TestMetricsResolvesPerClusterPrometheus(t *testing.T) {
 	})
 
 	wc := &benchv1alpha1.WorkloadCluster{
-		ObjectMeta: metav1.ObjectMeta{Name: "wc1", Namespace: testNamespace},
-		Status:     benchv1alpha1.WorkloadClusterStatus{PrometheusURL: wcProm.URL},
+		Name: "wc1", Namespace: testNamespace,
+		Status: benchv1alpha1.WorkloadClusterStatus{PrometheusURL: wcProm.URL},
 	}
 	topoMgmt := sampleDeployment("topo-mgmt")
 	topoWC := sampleDeployment("topo-wc")
@@ -245,8 +244,8 @@ func TestCompareMultiDeploymentAcrossClusters(t *testing.T) {
 	})
 
 	wc := &benchv1alpha1.WorkloadCluster{
-		ObjectMeta: metav1.ObjectMeta{Name: "wc1", Namespace: testNamespace},
-		Status:     benchv1alpha1.WorkloadClusterStatus{PrometheusURL: wcProm.URL},
+		Name: "wc1", Namespace: testNamespace,
+		Status: benchv1alpha1.WorkloadClusterStatus{PrometheusURL: wcProm.URL},
 	}
 	topoMgmt := sampleDeployment("topo-mgmt")
 	topoWC := sampleDeployment("topo-wc")

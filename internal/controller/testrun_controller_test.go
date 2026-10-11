@@ -7,7 +7,6 @@ import (
 	. "github.com/onsi/gomega"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -25,7 +24,7 @@ var _ = Describe("TestRun Controller", func() {
 	BeforeEach(func() {
 		topo = createReadyDeployment(context.Background(), "testrun-deployment", "authentik-1", "authentik-1-server.ns.svc.cluster.local", 80)
 		tc = &benchv1alpha1.TestCase{
-			ObjectMeta: metav1.ObjectMeta{Name: "quick-login", Namespace: "default"},
+			Name: "quick-login", Namespace: "default",
 			Spec: benchv1alpha1.TestCaseSpec{
 				DeploymentRefs: []corev1.LocalObjectReference{{Name: topo.Name}},
 				Profile:        benchv1alpha1.ProfileQuick,
@@ -37,14 +36,14 @@ var _ = Describe("TestRun Controller", func() {
 		Expect(k8sClient.Create(context.Background(), tc)).To(Succeed())
 
 		run := &benchv1alpha1.TestRun{
-			ObjectMeta: metav1.ObjectMeta{Name: resourceName, Namespace: "default"},
-			Spec:       benchv1alpha1.TestRunSpec{TestCaseRef: corev1.LocalObjectReference{Name: tc.Name}},
+			Name: resourceName, Namespace: "default",
+			Spec: benchv1alpha1.TestRunSpec{TestCaseRef: corev1.LocalObjectReference{Name: tc.Name}},
 		}
 		Expect(k8sClient.Create(context.Background(), run)).To(Succeed())
 	})
 
 	AfterEach(func() {
-		forceDelete(context.Background(), &benchv1alpha1.TestRun{ObjectMeta: metav1.ObjectMeta{Name: resourceName, Namespace: "default"}})
+		forceDelete(context.Background(), &benchv1alpha1.TestRun{Name: resourceName, Namespace: "default"})
 		forceDelete(context.Background(), tc)
 		forceDelete(context.Background(), topo)
 	})
@@ -95,7 +94,7 @@ var _ = Describe("TestRun Controller, multi-deployment TestCase", func() {
 		topoA = createReadyDeployment(context.Background(), "testrun-multi-a", "target-a", "a.ns.svc.cluster.local", 80)
 		topoB = createReadyDeployment(context.Background(), "testrun-multi-b", "target-b", "b.ns.svc.cluster.local", 80)
 		tc = &benchv1alpha1.TestCase{
-			ObjectMeta: metav1.ObjectMeta{Name: "quick-login-multi", Namespace: "default"},
+			Name: "quick-login-multi", Namespace: "default",
 			Spec: benchv1alpha1.TestCaseSpec{
 				DeploymentRefs: []corev1.LocalObjectReference{{Name: topoA.Name}, {Name: topoB.Name}},
 				Profile:        benchv1alpha1.ProfileQuick,
@@ -108,9 +107,9 @@ var _ = Describe("TestRun Controller, multi-deployment TestCase", func() {
 	})
 
 	AfterEach(func() {
-		forceDelete(context.Background(), &benchv1alpha1.TestRun{ObjectMeta: metav1.ObjectMeta{Name: "quick-run-multi-a", Namespace: "default"}})
-		forceDelete(context.Background(), &benchv1alpha1.TestRun{ObjectMeta: metav1.ObjectMeta{Name: "quick-run-multi-b", Namespace: "default"}})
-		forceDelete(context.Background(), &benchv1alpha1.TestRun{ObjectMeta: metav1.ObjectMeta{Name: "quick-run-multi-foreign", Namespace: "default"}})
+		forceDelete(context.Background(), &benchv1alpha1.TestRun{Name: "quick-run-multi-a", Namespace: "default"})
+		forceDelete(context.Background(), &benchv1alpha1.TestRun{Name: "quick-run-multi-b", Namespace: "default"})
+		forceDelete(context.Background(), &benchv1alpha1.TestRun{Name: "quick-run-multi-foreign", Namespace: "default"})
 		forceDelete(context.Background(), tc)
 		forceDelete(context.Background(), topoA)
 		forceDelete(context.Background(), topoB)
@@ -118,7 +117,7 @@ var _ = Describe("TestRun Controller, multi-deployment TestCase", func() {
 
 	It("runs each pinned TestRun against its own deploymentRef, not the TestCase's first deployment", func() {
 		runA := &benchv1alpha1.TestRun{
-			ObjectMeta: metav1.ObjectMeta{Name: "quick-run-multi-a", Namespace: "default"},
+			Name: "quick-run-multi-a", Namespace: "default",
 			Spec: benchv1alpha1.TestRunSpec{
 				TestCaseRef:   corev1.LocalObjectReference{Name: tc.Name},
 				DeploymentRef: &corev1.LocalObjectReference{Name: topoB.Name},
@@ -127,7 +126,7 @@ var _ = Describe("TestRun Controller, multi-deployment TestCase", func() {
 		Expect(k8sClient.Create(context.Background(), runA)).To(Succeed())
 
 		r := &TestRunReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Recorder: record.NewFakeRecorder(100)}
-		_, err := r.Reconcile(context.Background(), reconcile.Request{NamespacedName: types.NamespacedName{Name: runA.Name, Namespace: "default"}})
+		_, err := r.Reconcile(context.Background(), reconcile.Request{Name: runA.Name, Namespace: "default"})
 		Expect(err).NotTo(HaveOccurred())
 
 		Expect(k8sClient.Get(context.Background(), types.NamespacedName{Name: runA.Name, Namespace: "default"}, runA)).To(Succeed())
@@ -142,13 +141,13 @@ var _ = Describe("TestRun Controller, multi-deployment TestCase", func() {
 
 	It("falls back to the TestCase's first deployment when deploymentRef is unset", func() {
 		runB := &benchv1alpha1.TestRun{
-			ObjectMeta: metav1.ObjectMeta{Name: "quick-run-multi-b", Namespace: "default"},
-			Spec:       benchv1alpha1.TestRunSpec{TestCaseRef: corev1.LocalObjectReference{Name: tc.Name}},
+			Name: "quick-run-multi-b", Namespace: "default",
+			Spec: benchv1alpha1.TestRunSpec{TestCaseRef: corev1.LocalObjectReference{Name: tc.Name}},
 		}
 		Expect(k8sClient.Create(context.Background(), runB)).To(Succeed())
 
 		r := &TestRunReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Recorder: record.NewFakeRecorder(100)}
-		_, err := r.Reconcile(context.Background(), reconcile.Request{NamespacedName: types.NamespacedName{Name: runB.Name, Namespace: "default"}})
+		_, err := r.Reconcile(context.Background(), reconcile.Request{Name: runB.Name, Namespace: "default"})
 		Expect(err).NotTo(HaveOccurred())
 
 		Expect(k8sClient.Get(context.Background(), types.NamespacedName{Name: runB.Name, Namespace: "default"}, runB)).To(Succeed())
@@ -162,7 +161,7 @@ var _ = Describe("TestRun Controller, multi-deployment TestCase", func() {
 
 	It("fails a TestRun pinned to a deployment the TestCase doesn't drive", func() {
 		run := &benchv1alpha1.TestRun{
-			ObjectMeta: metav1.ObjectMeta{Name: "quick-run-multi-foreign", Namespace: "default"},
+			Name: "quick-run-multi-foreign", Namespace: "default",
 			Spec: benchv1alpha1.TestRunSpec{
 				TestCaseRef:   corev1.LocalObjectReference{Name: tc.Name},
 				DeploymentRef: &corev1.LocalObjectReference{Name: "not-a-target"},
@@ -171,7 +170,7 @@ var _ = Describe("TestRun Controller, multi-deployment TestCase", func() {
 		Expect(k8sClient.Create(context.Background(), run)).To(Succeed())
 
 		r := &TestRunReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Recorder: record.NewFakeRecorder(100)}
-		_, err := r.Reconcile(context.Background(), reconcile.Request{NamespacedName: types.NamespacedName{Name: run.Name, Namespace: "default"}})
+		_, err := r.Reconcile(context.Background(), reconcile.Request{Name: run.Name, Namespace: "default"})
 		Expect(err).NotTo(HaveOccurred())
 
 		Expect(k8sClient.Get(context.Background(), types.NamespacedName{Name: run.Name, Namespace: "default"}, run)).To(Succeed())

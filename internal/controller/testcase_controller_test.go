@@ -34,7 +34,7 @@ var _ = Describe("TestCase Controller", func() {
 
 		BeforeEach(func() {
 			tc := &benchv1alpha1.TestCase{
-				ObjectMeta: metav1.ObjectMeta{Name: resourceName, Namespace: "default"},
+				Name: resourceName, Namespace: "default",
 				Spec: benchv1alpha1.TestCaseSpec{
 					DeploymentRefs: []corev1.LocalObjectReference{{Name: topo.Name}},
 					Profile:        benchv1alpha1.ProfileBurn,
@@ -46,7 +46,7 @@ var _ = Describe("TestCase Controller", func() {
 		})
 
 		AfterEach(func() {
-			forceDelete(context.Background(), &benchv1alpha1.TestCase{ObjectMeta: metav1.ObjectMeta{Name: typeNamespacedName.Name, Namespace: typeNamespacedName.Namespace}})
+			forceDelete(context.Background(), &benchv1alpha1.TestCase{Name: typeNamespacedName.Name, Namespace: typeNamespacedName.Namespace})
 		})
 
 		It("owns a Deployment tagged with the testid/target/profile contract", func() {
@@ -89,7 +89,7 @@ var _ = Describe("TestCase Controller", func() {
 
 		BeforeEach(func() {
 			tc := &benchv1alpha1.TestCase{
-				ObjectMeta: metav1.ObjectMeta{Name: resourceName, Namespace: "default"},
+				Name: resourceName, Namespace: "default",
 				Spec: benchv1alpha1.TestCaseSpec{
 					DeploymentRefs: []corev1.LocalObjectReference{{Name: topo.Name}},
 					Profile:        benchv1alpha1.ProfileQuick,
@@ -102,7 +102,7 @@ var _ = Describe("TestCase Controller", func() {
 		})
 
 		AfterEach(func() {
-			forceDelete(context.Background(), &benchv1alpha1.TestCase{ObjectMeta: metav1.ObjectMeta{Name: typeNamespacedName.Name, Namespace: typeNamespacedName.Namespace}})
+			forceDelete(context.Background(), &benchv1alpha1.TestCase{Name: typeNamespacedName.Name, Namespace: typeNamespacedName.Namespace})
 		})
 
 		It("does not create a burn Deployment - execution belongs to a TestRun", func() {
@@ -130,7 +130,7 @@ var _ = Describe("TestCase Controller", func() {
 
 		BeforeEach(func() {
 			tc := &benchv1alpha1.TestCase{
-				ObjectMeta: metav1.ObjectMeta{Name: resourceName, Namespace: "default"},
+				Name: resourceName, Namespace: "default",
 				Spec: benchv1alpha1.TestCaseSpec{
 					DeploymentRefs: []corev1.LocalObjectReference{{Name: topo.Name}},
 					Inline:         inlineBody,
@@ -143,7 +143,7 @@ var _ = Describe("TestCase Controller", func() {
 		})
 
 		AfterEach(func() {
-			forceDelete(context.Background(), &benchv1alpha1.TestCase{ObjectMeta: metav1.ObjectMeta{Name: typeNamespacedName.Name, Namespace: typeNamespacedName.Namespace}})
+			forceDelete(context.Background(), &benchv1alpha1.TestCase{Name: typeNamespacedName.Name, Namespace: typeNamespacedName.Namespace})
 		})
 
 		It("mirrors the inline body verbatim into the script ConfigMap under script.ts, overriding template", func() {
@@ -164,7 +164,7 @@ var _ = Describe("TestCase Controller", func() {
 
 		BeforeEach(func() {
 			tc := &benchv1alpha1.TestCase{
-				ObjectMeta: metav1.ObjectMeta{Name: resourceName, Namespace: "default"},
+				Name: resourceName, Namespace: "default",
 				Spec: benchv1alpha1.TestCaseSpec{
 					DeploymentRefs: []corev1.LocalObjectReference{{Name: topo.Name}},
 					Template:       "does-not-exist",
@@ -177,7 +177,7 @@ var _ = Describe("TestCase Controller", func() {
 		})
 
 		AfterEach(func() {
-			forceDelete(context.Background(), &benchv1alpha1.TestCase{ObjectMeta: metav1.ObjectMeta{Name: typeNamespacedName.Name, Namespace: typeNamespacedName.Namespace}})
+			forceDelete(context.Background(), &benchv1alpha1.TestCase{Name: typeNamespacedName.Name, Namespace: typeNamespacedName.Namespace})
 		})
 
 		It("reports DependencyNotReady with a clear message instead of silently falling back", func() {
@@ -207,7 +207,7 @@ var _ = Describe("TestCase Controller", func() {
 		BeforeEach(func() {
 			topoB = createReadyDeployment(context.Background(), "testcase-deployment-b", "authentik-2", "authentik-2-server.ns.svc.cluster.local", 80)
 			tc := &benchv1alpha1.TestCase{
-				ObjectMeta: metav1.ObjectMeta{Name: resourceName, Namespace: "default"},
+				Name: resourceName, Namespace: "default",
 				Spec: benchv1alpha1.TestCaseSpec{
 					DeploymentRefs: []corev1.LocalObjectReference{{Name: topo.Name}, {Name: topoB.Name}},
 					Profile:        benchv1alpha1.ProfileBurn,
@@ -219,7 +219,7 @@ var _ = Describe("TestCase Controller", func() {
 		})
 
 		AfterEach(func() {
-			forceDelete(context.Background(), &benchv1alpha1.TestCase{ObjectMeta: metav1.ObjectMeta{Name: typeNamespacedName.Name, Namespace: typeNamespacedName.Namespace}})
+			forceDelete(context.Background(), &benchv1alpha1.TestCase{Name: typeNamespacedName.Name, Namespace: typeNamespacedName.Namespace})
 			forceDelete(context.Background(), topoB)
 		})
 
@@ -286,7 +286,7 @@ var _ = Describe("TestCase Controller", func() {
 
 		BeforeEach(func() {
 			tc := &benchv1alpha1.TestCase{
-				ObjectMeta: metav1.ObjectMeta{Name: resourceName, Namespace: "default"},
+				Name: resourceName, Namespace: "default",
 				Spec: benchv1alpha1.TestCaseSpec{
 					DeploymentRef: corev1.LocalObjectReference{Name: topo.Name}, //nolint:staticcheck // exercising the deprecated field's migration
 					Profile:       benchv1alpha1.ProfileBurn,
@@ -300,7 +300,7 @@ var _ = Describe("TestCase Controller", func() {
 			// named k6-<testcase>, no object labels, selector on LabelTestCase only.
 			podLabels := map[string]string{benchv1alpha1.LabelTestCase: resourceName}
 			legacy := &appsv1.Deployment{
-				ObjectMeta: metav1.ObjectMeta{Name: legacyKey.Name, Namespace: legacyKey.Namespace},
+				Name: legacyKey.Name, Namespace: legacyKey.Namespace,
 				Spec: appsv1.DeploymentSpec{
 					Selector: &metav1.LabelSelector{MatchLabels: podLabels},
 					Template: corev1.PodTemplateSpec{
@@ -313,8 +313,8 @@ var _ = Describe("TestCase Controller", func() {
 		})
 
 		AfterEach(func() {
-			forceDelete(context.Background(), &benchv1alpha1.TestCase{ObjectMeta: metav1.ObjectMeta{Name: typeNamespacedName.Name, Namespace: typeNamespacedName.Namespace}})
-			_ = k8sClient.Delete(context.Background(), &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: legacyKey.Name, Namespace: legacyKey.Namespace}})
+			forceDelete(context.Background(), &benchv1alpha1.TestCase{Name: typeNamespacedName.Name, Namespace: typeNamespacedName.Namespace})
+			_ = k8sClient.Delete(context.Background(), &appsv1.Deployment{Name: legacyKey.Name, Namespace: legacyKey.Namespace})
 		})
 
 		It("migrates deploymentRef into deploymentRefs and replaces the legacy burn Deployment", func() {

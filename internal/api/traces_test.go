@@ -10,7 +10,6 @@ import (
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
 )
@@ -47,13 +46,13 @@ func TestTraceBreakdown(t *testing.T) {
 	}))
 	t.Cleanup(grafana.Close)
 
-	wc := &benchv1alpha1.WorkloadCluster{ObjectMeta: metav1.ObjectMeta{Name: "bench", Namespace: testNamespace}}
+	wc := &benchv1alpha1.WorkloadCluster{Name: "bench", Namespace: testNamespace}
 	wc.Status.GrafanaURL = grafana.URL
-	onCluster := &benchv1alpha1.AuthentikDeployment{ObjectMeta: metav1.ObjectMeta{Name: "ak-a", Namespace: testNamespace}}
+	onCluster := &benchv1alpha1.AuthentikDeployment{Name: "ak-a", Namespace: testNamespace}
 	onCluster.Spec.ClusterRef = corev1.LocalObjectReference{Name: "bench"}
 	onCluster.Spec.TargetName = "a"
-	onManagement := &benchv1alpha1.AuthentikDeployment{ObjectMeta: metav1.ObjectMeta{Name: "ak-b", Namespace: testNamespace}}
-	tc := &benchv1alpha1.TestCase{ObjectMeta: metav1.ObjectMeta{Name: "login", Namespace: testNamespace}}
+	onManagement := &benchv1alpha1.AuthentikDeployment{Name: "ak-b", Namespace: testNamespace}
+	tc := &benchv1alpha1.TestCase{Name: "login", Namespace: testNamespace}
 	tc.Spec.DeploymentRefs = []corev1.LocalObjectReference{{Name: "ak-a"}, {Name: "ak-b"}}
 	s, _ := newServer(t, Config{}, wc, onCluster, onManagement, tc)
 

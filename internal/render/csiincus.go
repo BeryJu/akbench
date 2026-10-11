@@ -72,10 +72,8 @@ const (
 // pointing at csi-incus's published chart.
 func CSIIncusHelmRepository(namespace string) *sourcev1.HelmRepository {
 	return &sourcev1.HelmRepository{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      CSIIncusHelmRepositoryName,
-			Namespace: namespace,
-		},
+		Name:      CSIIncusHelmRepositoryName,
+		Namespace: namespace,
 		Spec: sourcev1.HelmRepositorySpec{
 			Type:     sourcev1.HelmRepositoryTypeOCI,
 			URL:      csiIncusOCIRepoURL,
@@ -139,10 +137,8 @@ func CSIIncusHelmValues(source *corev1.Secret) (*apiextensionsv1.JSON, error) {
 // "<cluster>-kubeconfig" Secret CAPI writes (see render.KubeconfigSecretName).
 func CSIIncusHelmRelease(namespace, kubeConfigSecretName string, values *apiextensionsv1.JSON) *helmv2.HelmRelease {
 	return &helmv2.HelmRelease{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      CSIIncusHelmReleaseName,
-			Namespace: namespace,
-		},
+		Name:      CSIIncusHelmReleaseName,
+		Namespace: namespace,
 		Spec: helmv2.HelmReleaseSpec{
 			Interval:    metav1.Duration{Duration: helmRepoInterval},
 			Timeout:     &metav1.Duration{Duration: helmInstallTimeout},

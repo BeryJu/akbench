@@ -46,7 +46,7 @@ func forceDelete(ctx context.Context, obj client.Object) {
 // alone.
 func createReadyDeployment(ctx context.Context, name, targetName, host string, port int32) *benchv1alpha1.AuthentikDeployment {
 	topo := &benchv1alpha1.AuthentikDeployment{
-		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
+		Name: name, Namespace: "default",
 		Spec: benchv1alpha1.AuthentikDeploymentSpec{
 			TargetName: targetName,
 			Namespace:  "authentik-" + name,

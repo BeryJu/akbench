@@ -13,7 +13,6 @@ import (
 	. "github.com/onsi/gomega"
 
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -96,8 +95,8 @@ var _ = BeforeSuite(func() {
 	// every spec that reconciles a TestCase/TestRun needs it present, so it's
 	// created once here rather than per-spec.
 	Expect(k8sClient.Create(ctx, &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: fixturesSecretName, Namespace: "default"},
-		Data:       map[string][]byte{"users.json": []byte("[]")},
+		Name: fixturesSecretName, Namespace: "default",
+		Data: map[string][]byte{"users.json": []byte("[]")},
 	})).To(Succeed())
 
 	// Mirrors production: the real operator seeds these built-in

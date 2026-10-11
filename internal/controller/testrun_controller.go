@@ -317,7 +317,7 @@ func (r *TestRunReconciler) reconcileDelete(ctx context.Context, run *benchv1alp
 		if err != nil {
 			logf.FromContext(ctx).Info("runner cluster unreachable during delete, skipping remote job cleanup", "error", err.Error())
 		} else {
-			job := &batchv1.Job{ObjectMeta: metav1.ObjectMeta{Name: run.Status.JobRef.Name, Namespace: run.Namespace}}
+			job := &batchv1.Job{Name: run.Status.JobRef.Name, Namespace: run.Namespace}
 			propagation := client.PropagationPolicy(metav1.DeletePropagationBackground)
 			if err := rc.Delete(ctx, job, propagation); err != nil && !apierrors.IsNotFound(err) {
 				return ctrl.Result{}, err

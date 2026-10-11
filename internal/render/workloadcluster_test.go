@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
@@ -13,7 +12,7 @@ import (
 
 func TestKubeadmControlPlaneBindsDualStack(t *testing.T) {
 	wc := &benchv1alpha1.WorkloadCluster{
-		ObjectMeta: metav1.ObjectMeta{Name: "wc-a", Namespace: "default"},
+		Name: "wc-a", Namespace: "default",
 		Spec: benchv1alpha1.WorkloadClusterSpec{
 			KubernetesVersion: "v1.31.0",
 			Provider:          benchv1alpha1.InfrastructureIncus,
@@ -39,7 +38,7 @@ func TestKubeadmControlPlaneBindsDualStack(t *testing.T) {
 
 func TestLXCClusterOverridesHAProxyForDualStack(t *testing.T) {
 	wc := &benchv1alpha1.WorkloadCluster{
-		ObjectMeta: metav1.ObjectMeta{Name: "wc-a", Namespace: "default"},
+		Name: "wc-a", Namespace: "default",
 		Spec: benchv1alpha1.WorkloadClusterSpec{
 			KubernetesVersion: "v1.31.0",
 			Provider:          benchv1alpha1.InfrastructureIncus,
@@ -79,7 +78,7 @@ func TestLXCClusterOverridesHAProxyForDualStack(t *testing.T) {
 
 func wcWithPools(pools ...benchv1alpha1.WorkerPoolSpec) *benchv1alpha1.WorkloadCluster {
 	return &benchv1alpha1.WorkloadCluster{
-		ObjectMeta: metav1.ObjectMeta{Name: "wc-a", Namespace: "default"},
+		Name: "wc-a", Namespace: "default",
 		Spec: benchv1alpha1.WorkloadClusterSpec{
 			KubernetesVersion: "v1.31.0",
 			Provider:          benchv1alpha1.InfrastructureIncus,
