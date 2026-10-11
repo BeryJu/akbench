@@ -214,6 +214,69 @@ var _ = Describe("TestCase Controller", func() {
 			Expect(script.Message).To(ContainSubstring("does-not-exist"))
 		})
 	})
+
+	Context("Burn profile, multiple deployments", func() {
+		const resourceName = "burn-login-multi"
+		typeNamespacedName := types.NamespacedName{Name: resourceName, Namespace: "default"}
+		var topoB *benchv1alpha1.AuthentikDeployment
+
+		BeforeEach(func() {
+			topoB = createReadyDeployment(context.Background(), "testcase-deployment-b", "authentik-2", "authentik-2-server.ns.svc.cluster.local", 80)
+			tc := &benchv1alpha1.TestCase{
+				ObjectMeta: metav1.ObjectMeta{Name: resourceName, Namespace: "default"},
+				Spec: benchv1alpha1.TestCaseSpec{
+					DeploymentRefs: []corev1.LocalObjectReference{{Name: topo.Name}, {Name: topoB.Name}},
+					Profile:        benchv1alpha1.ProfileBurn,
+					VUs:            8,
+					Flow:           "default-authentication-flow",
+				},
+			}
+			Expect(k8sClient.Create(context.Background(), tc)).To(Succeed())
+		})
+
+		AfterEach(func() {
+			forceDelete(context.Background(), &benchv1alpha1.TestCase{ObjectMeta: metav1.ObjectMeta{Name: typeNamespacedName.Name, Namespace: typeNamespacedName.Namespace}})
+			forceDelete(context.Background(), topoB)
+		})
+
+		It("owns one independently-selectable burn Deployment per target and reports both in status", func() {
+			r := &TestCaseReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Recorder: record.NewFakeRecorder(100)}
+			_, err := r.Reconcile(context.Background(), reconcile.Request{NamespacedName: typeNamespacedName})
+			Expect(err).NotTo(HaveOccurred())
+
+			depAName := "k6-" + resourceName + "-" + topo.Name
+			depBName := "k6-" + resourceName + "-" + topoB.Name
+
+			var depA, depB appsv1.Deployment
+			Expect(k8sClient.Get(context.Background(), types.NamespacedName{Name: depAName, Namespace: "default"}, &depA)).To(Succeed())
+			Expect(k8sClient.Get(context.Background(), types.NamespacedName{Name: depBName, Namespace: "default"}, &depB)).To(Succeed())
+
+			argsA := depA.Spec.Template.Spec.Containers[0].Args
+			Expect(argsA).To(ContainElement("target=authentik-1"))
+			argsB := depB.Spec.Template.Spec.Containers[0].Args
+			Expect(argsB).To(ContainElement("target=authentik-2"))
+
+			selA, _ := metav1.LabelSelectorAsMap(depA.Spec.Selector)
+			selB, _ := metav1.LabelSelectorAsMap(depB.Spec.Selector)
+			Expect(selA).NotTo(Equal(selB), "the two burn Deployments must not share a selector")
+
+			var tc benchv1alpha1.TestCase
+			Expect(k8sClient.Get(context.Background(), typeNamespacedName, &tc)).To(Succeed())
+			Expect(tc.Status.Deployments).To(HaveLen(2))
+			statusA := findDeploymentStatus(tc.Status.Deployments, topo.Name)
+			statusB := findDeploymentStatus(tc.Status.Deployments, topoB.Name)
+			Expect(statusA).NotTo(BeNil())
+			Expect(statusA.Ready).To(BeTrue())
+			Expect(statusA.BurnWorkloadRef.Name).To(Equal(depAName))
+			Expect(statusB).NotTo(BeNil())
+			Expect(statusB.Ready).To(BeTrue())
+			Expect(statusB.BurnWorkloadRef.Name).To(Equal(depBName))
+
+			ready := meta.FindStatusCondition(tc.Status.Conditions, benchv1alpha1.ConditionReady)
+			Expect(ready).NotTo(BeNil())
+			Expect(ready.Status).To(Equal(metav1.ConditionTrue))
+		})
+	})
 })
 
 func envMap(vars []corev1.EnvVar) map[string]string {
