@@ -29,6 +29,7 @@ const nav = [
   { to: '/clusters', label: 'Clusters' },
   { to: '/testruns', label: 'Test runs' },
   { to: '/compare', label: 'Compare' },
+  { to: '/alerts', label: 'Alerts' },
 ];
 
 export function Layout() {

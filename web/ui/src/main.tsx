@@ -80,6 +80,7 @@ const router = createBrowserRouter([
       { path: 'testruns', element: page(testRuns, 'TestRunsPage') },
       { path: 'testruns/:name', element: page(testRuns, 'TestRunViewPage') },
       { path: 'compare', element: page(() => import('./pages/Compare'), 'ComparePage') },
+      { path: 'alerts', element: page(() => import('./pages/Alerts'), 'AlertsPage') },
       // Rendered by Layout's persistent ShellWorkspace, not an Outlet.
       { path: 'shell', element: null },
       { path: '*', element: <NotFound /> },

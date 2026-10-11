@@ -150,6 +150,8 @@ func (s *Server) Router() http.Handler {
 			r.Get("/metrics/compare", s.compare)
 			r.Get("/metrics/range", s.metricsRange)
 
+			r.Get("/alerts", s.listAlerts)
+
 			r.Get("/shell/contexts", s.listShellContexts)
 			r.Post("/shell/sessions", s.createShellSession)
 		})

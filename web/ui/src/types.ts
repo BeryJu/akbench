@@ -30,6 +30,18 @@ export interface Condition {
   lastTransitionTime?: string;
 }
 
+// Alert is one firing/pending/silenced alert from a workload cluster's own
+// Alertmanager (see internal/api/alerts.go - there is no central instance).
+export interface Alert {
+  cluster: string;
+  labels: Record<string, string>;
+  annotations: Record<string, string>;
+  state: string;
+  startsAt: string;
+  endsAt?: string;
+  generatorURL?: string;
+}
+
 export interface ObjectMeta {
   name: string;
   namespace?: string;
