@@ -21,15 +21,29 @@ import { useAuth } from './auth';
 // xterm.js only loads once the shell is first opened.
 const ShellWorkspace = lazy(async () => ({ default: (await import('./shell/ShellWorkspace')).ShellWorkspace }));
 
-const nav = [
-  { to: '/', label: 'Dashboard', end: true },
-  { to: '/deployments', label: 'Deployments' },
-  { to: '/testcases', label: 'Test cases' },
-  { to: '/testcasetemplates', label: 'Test case templates' },
-  { to: '/clusters', label: 'Clusters' },
-  { to: '/testruns', label: 'Test runs' },
-  { to: '/compare', label: 'Compare' },
-  { to: '/alerts', label: 'Alerts' },
+// Grouped by what you're doing with it, not alphabetically or by when it
+// was added: overview first, then the things you define/configure, then the
+// things that show what already happened. Shell stays separate below a
+// divider - it's a tool, not a resource view.
+const navSections: { label?: string; items: { to: string; label: string; end?: boolean }[] }[] = [
+  { items: [{ to: '/', label: 'Dashboard', end: true }] },
+  {
+    label: 'Configure',
+    items: [
+      { to: '/clusters', label: 'Clusters' },
+      { to: '/deployments', label: 'Deployments' },
+      { to: '/testcases', label: 'Test cases' },
+      { to: '/testcasetemplates', label: 'Test case templates' },
+    ],
+  },
+  {
+    label: 'Activity',
+    items: [
+      { to: '/testruns', label: 'Test runs' },
+      { to: '/compare', label: 'Compare' },
+      { to: '/alerts', label: 'Alerts' },
+    ],
+  },
 ];
 
 export function Layout() {
@@ -52,10 +66,15 @@ export function Layout() {
           <img src="/favicon.svg" alt="" />
           authentik bench
         </div>
-        {nav.map(item => (
-          <NavLink key={item.to} to={item.to} end={item.end} className="nav-link">
-            {item.label}
-          </NavLink>
+        {navSections.map((section, i) => (
+          <div key={section.label ?? i}>
+            {section.label && <div className="nav-section-label">{section.label}</div>}
+            {section.items.map(item => (
+              <NavLink key={item.to} to={item.to} end={item.end} className="nav-link">
+                {item.label}
+              </NavLink>
+            ))}
+          </div>
         ))}
         <div className="nav-sep" />
         <NavLink to="/shell" className="nav-link">
