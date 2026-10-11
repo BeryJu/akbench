@@ -17,7 +17,7 @@
 // One metric over time, one line per test, from /metrics/range or
 // /metrics/resources. Natively rendered (Chart.js via react-chartjs-2) - no
 // Grafana iframe.
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import {
   Chart as ChartJS,
   Legend as ChartJSLegend,
@@ -31,6 +31,7 @@ import {
 import { Line } from 'react-chartjs-2';
 import { api } from '../api';
 import { colorFor, formatMetricValue, stepFor } from '../format';
+import { useDarkTheme } from '../theme';
 import { CompareMetric, RangeResponse } from '../types';
 import { useResource } from '../useResource';
 
@@ -68,9 +69,10 @@ interface ChartTheme {
   border: string;
   panel: string;
   font: string;
+  dark: boolean;
 }
 
-function readChartTheme(): ChartTheme {
+function readChartTheme(dark: boolean): ChartTheme {
   const style = getComputedStyle(document.documentElement);
   const value = (name: string, fallback: string) => style.getPropertyValue(name).trim() || fallback;
   return {
@@ -79,19 +81,15 @@ function readChartTheme(): ChartTheme {
     border: value('--border', '#d2d2d2'),
     panel: value('--panel', '#ffffff'),
     font: value('--ak-global--font-family--body', 'sans-serif'),
+    dark,
   };
 }
 
 /** useChartTheme re-reads the theme whenever main.tsx flips
  * html[data-theme] (an OS light/dark switch), so open charts follow along. */
 function useChartTheme(): ChartTheme {
-  const [theme, setTheme] = useState(readChartTheme);
-  useEffect(() => {
-    const observer = new MutationObserver(() => setTheme(readChartTheme()));
-    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
-    return () => observer.disconnect();
-  }, []);
-  return theme;
+  const dark = useDarkTheme();
+  return useMemo(() => readChartTheme(dark), [dark]);
 }
 
 /**
@@ -158,7 +156,7 @@ function rangeChartOptions(unit: string, showLegend: boolean, theme: ChartTheme)
  * TestCase), in which case "testid / target" disambiguates - avoids an
  * always-on suffix for the common single-deployment case. spanGaps true
  * mirrors recharts' own connectNulls. */
-function rangeDatasets(data: RangeResponse | undefined) {
+function rangeDatasets(data: RangeResponse | undefined, dark: boolean) {
   const series = data?.series ?? [];
   const targetsByTestID = new Map<string, Set<string>>();
   for (const s of series) {
@@ -176,8 +174,8 @@ function rangeDatasets(data: RangeResponse | undefined) {
           : `${s.testid} / ${s.target}`
         : s.testid,
     data: (s.points ?? []).map(p => ({ x: p.time, y: p.value })),
-    borderColor: colorFor(i),
-    backgroundColor: colorFor(i),
+    borderColor: colorFor(i, dark),
+    backgroundColor: colorFor(i, dark),
     spanGaps: true,
   }));
 }
@@ -217,9 +215,9 @@ export function MetricsChart({
 
   const unit = data?.metric.unit ?? '';
   const label = data?.metric.label ?? metric;
-  const datasets = useMemo(() => rangeDatasets(data), [data]);
-  const hasData = datasets.some(d => d.data.length > 0);
   const theme = useChartTheme();
+  const datasets = useMemo(() => rangeDatasets(data, theme.dark), [data, theme.dark]);
+  const hasData = datasets.some(d => d.data.length > 0);
   const options = useMemo(() => rangeChartOptions(unit, datasets.length > 1, theme), [unit, datasets.length, theme]);
 
   return (
@@ -307,9 +305,9 @@ export function ResourceChart({
 
   const unit = data?.metric.unit ?? '';
   const label = data?.metric.label ?? resource;
-  const datasets = useMemo(() => rangeDatasets(data), [data]);
-  const hasData = datasets.some(d => d.data.length > 0);
   const theme = useChartTheme();
+  const datasets = useMemo(() => rangeDatasets(data, theme.dark), [data, theme.dark]);
+  const hasData = datasets.some(d => d.data.length > 0);
   const options = useMemo(() => rangeChartOptions(unit, datasets.length > 1, theme), [unit, datasets.length, theme]);
 
   return (

@@ -30,6 +30,10 @@
   --warn: var(--ak-global--color--warning);
   --err: var(--ak-global--color--danger);
   --info: var(--ak-global--color--info);
+  /* Text-safe variants: --warn and --info are bright fills that fall well
+   * under 4.5:1 as text on the light theme's white surface. */
+  --warn-text: var(--ak-global--color--warning--deep);
+  --info-text: var(--link);
   --code-bg: var(--ak-global--color--surface--raised);
   --radius: 6px;
   font-family: var(--ak-global--font-family--body);
@@ -114,8 +118,11 @@ legend { font-weight: 700; font-size: 15px; margin: 18px 0 8px; padding: 0; }
 .group .table { border: none; border-radius: 0; }
 .table-scroll { overflow-x: auto; }
 .table th.num, .table td.num { text-align: right; white-space: nowrap; }
-.table tr.attention td { background: var(--ak-global--color--warning--fill, transparent); }
-.key { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; flex: none; border-radius: 4px; color: #ffffff; font: 600 11px var(--ak-global--font-family--monospace); }
+/* A translucent tint of the warning color rather than the theme's
+ * warning--fill token, which only has a light-theme value. */
+.table tr.attention td { background: color-mix(in srgb, var(--warn) 12%, transparent); }
+.table tr.attention td:first-child { box-shadow: inset 3px 0 0 var(--warn); }
+.key { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; flex: none; border-radius: 4px; font: 600 11px var(--ak-global--font-family--monospace); }
 .delta.better { color: var(--ok); }
 .delta.worse { color: var(--err); }
 .sparkline { display: block; }
@@ -142,13 +149,13 @@ legend { font-weight: 700; font-size: 15px; margin: 18px 0 8px; padding: 0; }
 /* -- feedback */
 .alert { padding: 8px 12px; border-radius: var(--radius); margin-bottom: 12px; border: 1px solid; }
 .alert.error { color: var(--err); border-color: var(--err); }
-.alert.info { color: var(--info); border-color: var(--info); }
+.alert.info { color: var(--info-text); border-color: var(--info); }
 .alert.success { color: var(--ok); border-color: var(--ok); }
 .badge { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; border: 1px solid currentColor; white-space: nowrap; }
 .badge.ok { color: var(--ok); }
 .badge.err { color: var(--err); }
-.badge.warn { color: var(--warn); }
-.badge.info { color: var(--info); }
+.badge.warn { color: var(--warn-text); }
+.badge.info { color: var(--info-text); }
 .badge.neutral { color: var(--muted); }
 .popover-anchor { position: relative; display: inline-block; }
 .popover { position: absolute; z-index: 20; top: calc(100% + 4px); left: 0; min-width: 340px; max-width: 520px; background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 12px; box-shadow: 0 6px 24px rgba(0,0,0,.18); }

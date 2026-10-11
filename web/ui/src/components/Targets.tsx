@@ -19,7 +19,7 @@
 // difference between rows is the deployments' own.
 import { ReactNode } from 'react';
 import { Link } from 'react-router';
-import { colorFor, formatDuration, formatMetricValue, relativeDelta, shortTag, targetNameOf } from '../format';
+import { colorFor, formatDuration, readableTextOn, formatMetricValue, relativeDelta, shortTag, targetNameOf } from '../format';
 import {
   AuthentikDeployment,
   CompareMetric,
@@ -29,6 +29,7 @@ import {
   TestCase,
   testCaseDeployments,
 } from '../types';
+import { useDarkTheme } from '../theme';
 import { Badge } from './Status';
 
 export interface TargetRow {
@@ -86,8 +87,9 @@ export function targetLetter(index: number): string {
 }
 
 export function TargetKey({ index }: { index: number }) {
+  const color = colorFor(index, useDarkTheme());
   return (
-    <span className="key" style={{ background: colorFor(index) }} aria-hidden="true">
+    <span className="key" style={{ background: color, color: readableTextOn(color) }} aria-hidden="true">
       {targetLetter(index)}
     </span>
   );
@@ -120,6 +122,7 @@ export function TargetTable({
     .filter((m): m is CompareMetric => m !== undefined);
   const deltaMetric = onBaseline && rows.length > 1 ? metrics.find(m => m.key === DELTA_METRIC) : undefined;
   const baseRow = rows.find(r => r.target === baseline) ?? rows[0];
+  const dark = useDarkTheme();
 
   return (
     <div className="table-scroll">
@@ -174,7 +177,7 @@ export function TargetTable({
               )}
               {sparklines && (
                 <td>
-                  <Sparkline points={sparklines.get(row.target) ?? []} color={colorFor(row.index)} />
+                  <Sparkline points={sparklines.get(row.target) ?? []} color={colorFor(row.index, dark)} />
                 </td>
               )}
               <td>{row.ready === undefined ? <span className="muted">-</span> : <Badge value={row.ready ? 'Ready' : 'Not ready'} />}</td>

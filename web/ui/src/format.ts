@@ -98,20 +98,33 @@ export function targetNameOf(deployment: { metadata: { name: string }; spec: { t
 }
 
 // A small qualitative palette, cycled by index so the same test keeps the
-// same color across every chart on a page.
-const palette = [
-  '#0066cc',
-  '#4cb140',
-  '#f0ab00',
-  '#c9190b',
-  '#8476d1',
-  '#009596',
-  '#ec7a08',
-  '#6ca100',
-];
+// same color across every chart on a page. One variant per theme: each
+// color holds at least 3:1 against its own theme's surface, which a single
+// palette can't do for both a white and a near-black background.
+const palettes = {
+  light: ['#0066cc', '#3e8635', '#a36a00', '#c9190b', '#6753ac', '#007a7b', '#c46100', '#4f7c00'],
+  dark: ['#2b9af3', '#5ba352', '#f0ab00', '#fe5142', '#a18fff', '#2fb5b6', '#ec7a08', '#8bc34a'],
+};
 
-export function colorFor(index: number): string {
+export function colorFor(index: number, dark = false): string {
+  const palette = dark ? palettes.dark : palettes.light;
   return palette[index % palette.length];
+}
+
+function relativeLuminance(hex: string): number {
+  const channels = [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16) / 255);
+  const [r, g, b] = channels.map(c => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4));
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+/** readableTextOn picks near-black or white text for a #rrggbb background,
+ * whichever contrasts more - white letters on the palette's yellow or green
+ * are unreadable. */
+export function readableTextOn(hex: string): string {
+  const l = relativeLuminance(hex);
+  const onWhite = 1.05 / (l + 0.05);
+  const onInk = (l + 0.05) / (relativeLuminance('#151515') + 0.05);
+  return onWhite >= onInk ? '#ffffff' : '#151515';
 }
 
 /**

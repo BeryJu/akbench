@@ -20,6 +20,7 @@ import {
   formatDuration,
   formatMetricValue,
   metricsAnchorFromRuns,
+  readableTextOn,
   relativeDelta,
   shortTag,
   stepFor,
@@ -165,5 +166,12 @@ describe('shortTag', () => {
   it('leaves other tags alone', () => {
     expect(shortTag('2026.8.2')).toBe('2026.8.2');
     expect(shortTag('gh-main')).toBe('gh-main');
+  });
+});
+
+describe('readableTextOn', () => {
+  it('uses white on dark colors and ink on light ones', () => {
+    expect(readableTextOn('#0066cc')).toBe('#ffffff');
+    expect(readableTextOn('#f0ab00')).toBe('#151515');
   });
 });

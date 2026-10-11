@@ -18,7 +18,7 @@ import Editor, { loader } from '@monaco-editor/react';
 import * as monaco from 'monaco-editor';
 import EditorWorker from 'monaco-editor/editor/editor.worker?worker';
 import TsWorker from 'monaco-editor/language/typescript/ts.worker?worker';
-import { useEffect, useState } from 'react';
+import { useDarkTheme } from '../theme';
 import type { CodeEditorProps } from './CodeEditor';
 
 self.MonacoEnvironment = {
@@ -28,18 +28,10 @@ self.MonacoEnvironment = {
 };
 loader.config({ monaco });
 
-function prefersDark(): boolean {
-  return window.matchMedia('(prefers-color-scheme: dark)').matches;
-}
-
 export default function MonacoEditor({ value, onChange, language, height = '300px' }: CodeEditorProps) {
-  const [dark, setDark] = useState(prefersDark);
-  useEffect(() => {
-    const query = window.matchMedia('(prefers-color-scheme: dark)');
-    const update = () => setDark(query.matches);
-    query.addEventListener('change', update);
-    return () => query.removeEventListener('change', update);
-  }, []);
+  // Follows html[data-theme] like the rest of the app, not the OS media
+  // query directly, so it can never disagree with the page around it.
+  const dark = useDarkTheme();
   return (
     <Editor
       height={height}
