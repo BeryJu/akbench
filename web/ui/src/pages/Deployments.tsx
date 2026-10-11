@@ -518,8 +518,7 @@ export function DeploymentEditPage() {
 
 /**
  * The deployment's view: its status, shell hand-offs for its pods on
- * whichever cluster it runs on (the replacement for Headlamp's generic
- * resource views), and metrics for every TestCase pointed at it.
+ * whichever cluster it runs on, and metrics for every TestCase pointed at it.
  */
 export function DeploymentViewPage() {
   const { name = '' } = useParams();

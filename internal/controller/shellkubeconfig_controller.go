@@ -35,33 +35,32 @@ import (
 	"github.com/goauthentik/authentik-bench/internal/render"
 )
 
-// headlampKubeconfigDataKey is the Secret key Headlamp's own KUBECONFIG env
-// var (hack/dev-headlamp-values.yaml) points at.
-const headlampKubeconfigDataKey = "config"
+// shellKubeconfigDataKey is the Secret key cmd/apiserver's
+// --shell-kubeconfig-secret reads the kubeconfig from.
+const shellKubeconfigDataKey = "config"
 
-// HeadlampKubeconfigReconciler maintains one Secret (Namespace/SecretName)
+// ShellKubeconfigReconciler maintains one Secret (Namespace/SecretName)
 // holding a kubeconfig that merges the management cluster's own context
-// with every Ready WorkloadCluster's - see render.HeadlampKubeconfig for
-// why this is a merge into one Secret rather than reshaping Headlamp's own
-// Deployment as clusters come and go.
+// with every Ready WorkloadCluster's - see render.ShellKubeconfig. The
+// in-browser kubectl shell (internal/api/shell.go) reads it fresh for every
+// session, so a cluster that just became Ready is usable at once.
 //
 // This reconciler's own desired state doesn't depend on which specific
 // WorkloadCluster triggered it - every reconcile recomputes the full
 // membership from a fresh List, so which object req names is irrelevant.
-type HeadlampKubeconfigReconciler struct {
+type ShellKubeconfigReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
-	// Namespace/SecretName name the Secret Headlamp itself is configured to
-	// read (hack/dev-headlamp-values.yaml's volume + KUBECONFIG env).
+	// Namespace/SecretName name the Secret cmd/apiserver is configured to
+	// read (BENCH_SHELL_KUBECONFIG_SECRET).
 	Namespace  string
 	SecretName string
 }
 
 // +kubebuilder:rbac:groups=bench.goauthentik.io,resources=workloadclusters,verbs=get;list;watch
 // +kubebuilder:rbac:groups=core,resources=secrets,verbs=get;list;watch;create;update
-// +kubebuilder:rbac:groups=core,resources=pods,verbs=get;list;delete
 
-func (r *HeadlampKubeconfigReconciler) Reconcile(ctx context.Context, _ ctrl.Request) (ctrl.Result, error) {
+func (r *ShellKubeconfigReconciler) Reconcile(ctx context.Context, _ ctrl.Request) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 
 	var list benchv1alpha1.WorkloadClusterList
@@ -87,32 +86,16 @@ func (r *HeadlampKubeconfigReconciler) Reconcile(ctx context.Context, _ ctrl.Req
 		workloadClusters = append(workloadClusters, render.WorkloadClusterKubeconfig{Name: wc.Name, Bytes: raw})
 	}
 
-	merged, err := render.HeadlampKubeconfig(workloadClusters)
+	merged, err := render.ShellKubeconfig(workloadClusters)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("merge kubeconfigs: %w", err)
 	}
 
 	changed, err := r.applyKubeconfigSecret(ctx, merged)
 	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("apply headlamp kubeconfig secret: %w", err)
+		return ctrl.Result{}, fmt.Errorf("apply shell kubeconfig secret: %w", err)
 	}
-	if changed {
-		// Headlamp reads its kubeconfig once at startup - confirmed against
-		// a live instance's own backend log ("Dynamic clusters support:
-		// false", no re-read/watch of the kubeconfig path mentioned at all,
-		// unlike its plugins dir which explicitly logs "Watch Plugins
-		// Changes: true"). Without this, a newly Ready WorkloadCluster (or
-		// one that's gone away) would silently never show up until
-		// something else happened to restart the pod. Deleting the pod
-		// rather than patching the Deployment's own spec: it's Helm-owned,
-		// and a bare delete lets the Deployment's own controller recreate
-		// it without this reconciler needing to know anything about that
-		// object's shape.
-		if err := r.restartHeadlamp(ctx); err != nil {
-			log.Error(err, "restart Headlamp after kubeconfig change")
-		}
-	}
-	log.Info("reconciled Headlamp kubeconfig", "workloadClusters", len(workloadClusters), "restarted", changed)
+	log.Info("Reconciled shell kubeconfig Secret", "workloadClusters", len(workloadClusters), "changed", changed)
 	return ctrl.Result{}, nil
 }
 
@@ -121,12 +104,11 @@ func (r *HeadlampKubeconfigReconciler) Reconcile(ctx context.Context, _ ctrl.Req
 // .Spec (see apply.go's specEqual/copySpec), which Secret has no equivalent
 // of, and unlike those, this Secret's Data is *meant* to change on every
 // reconcile that observes different cluster membership. Returns whether the
-// content actually changed, so the caller only restarts Headlamp when it
-// would otherwise miss a real membership change.
-func (r *HeadlampKubeconfigReconciler) applyKubeconfigSecret(ctx context.Context, kubeconfig []byte) (bool, error) {
+// content actually changed.
+func (r *ShellKubeconfigReconciler) applyKubeconfigSecret(ctx context.Context, kubeconfig []byte) (bool, error) {
 	desired := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{Name: r.SecretName, Namespace: r.Namespace},
-		Data:       map[string][]byte{headlampKubeconfigDataKey: kubeconfig},
+		Data:       map[string][]byte{shellKubeconfigDataKey: kubeconfig},
 	}
 	if err := r.Create(ctx, desired); err != nil {
 		if !apierrors.IsAlreadyExists(err) {
@@ -136,7 +118,7 @@ func (r *HeadlampKubeconfigReconciler) applyKubeconfigSecret(ctx context.Context
 		if err := r.Get(ctx, types.NamespacedName{Name: r.SecretName, Namespace: r.Namespace}, &existing); err != nil {
 			return false, err
 		}
-		if bytes.Equal(existing.Data[headlampKubeconfigDataKey], kubeconfig) {
+		if bytes.Equal(existing.Data[shellKubeconfigDataKey], kubeconfig) {
 			return false, nil
 		}
 		existing.Data = desired.Data
@@ -145,19 +127,10 @@ func (r *HeadlampKubeconfigReconciler) applyKubeconfigSecret(ctx context.Context
 	return true, nil
 }
 
-// restartHeadlamp deletes every Headlamp pod in r.Namespace so its
-// Deployment recreates them against the just-updated kubeconfig Secret.
-func (r *HeadlampKubeconfigReconciler) restartHeadlamp(ctx context.Context) error {
-	return r.DeleteAllOf(ctx, &corev1.Pod{},
-		client.InNamespace(r.Namespace),
-		client.MatchingLabels{"app.kubernetes.io/name": "headlamp"},
-	)
-}
-
 // SetupWithManager sets up the controller with the Manager.
-func (r *HeadlampKubeconfigReconciler) SetupWithManager(mgr ctrl.Manager) error {
+func (r *ShellKubeconfigReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&benchv1alpha1.WorkloadCluster{}).
-		Named("headlampkubeconfig").
+		Named("shellkubeconfig").
 		Complete(r)
 }

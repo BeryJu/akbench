@@ -35,7 +35,7 @@ import (
 // the same way it already resolves an AuthentikDeployment. This reconciler
 // only exists to give a template a Ready condition/phase (validating
 // spec.script isn't empty) so a broken template - e.g. accidentally
-// emptied out via Headlamp's own generic YAML editor - is visible the same
+// emptied out via kubectl edit - is visible the same
 // way every other CRD's status already is, not because anything here needs
 // watching or reacting to.
 type TestCaseTemplateReconciler struct {

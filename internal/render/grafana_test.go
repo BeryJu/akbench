@@ -77,7 +77,7 @@ func TestGrafanaObjects(t *testing.T) {
 		t.Errorf("GF_AUTH_ANONYMOUS_ORG_ROLE = %q, want Admin", env["GF_AUTH_ANONYMOUS_ORG_ROLE"])
 	}
 	// Without this, Grafana sends "X-Frame-Options: deny" on every response
-	// (confirmed live against the real image) and the Headlamp plugin's
+	// (confirmed live against the real image) and the web UI's
 	// iframe gets silently blocked by the browser - not a CORS issue, no
 	// Access-Control-* header involved at all.
 	if env["GF_SECURITY_ALLOW_EMBEDDING"] != "true" {

@@ -32,10 +32,10 @@ users:
 	return []byte(yaml)
 }
 
-func TestHeadlampKubeconfigIncludesManagementContext(t *testing.T) {
-	raw, err := HeadlampKubeconfig(nil)
+func TestShellKubeconfigIncludesManagementContext(t *testing.T) {
+	raw, err := ShellKubeconfig(nil)
 	if err != nil {
-		t.Fatalf("HeadlampKubeconfig: %v", err)
+		t.Fatalf("ShellKubeconfig: %v", err)
 	}
 	cfg, err := clientcmd.Load(raw)
 	if err != nil {
@@ -60,13 +60,13 @@ func TestHeadlampKubeconfigIncludesManagementContext(t *testing.T) {
 	}
 }
 
-func TestHeadlampKubeconfigMergesEveryWorkloadCluster(t *testing.T) {
-	raw, err := HeadlampKubeconfig([]WorkloadClusterKubeconfig{
+func TestShellKubeconfigMergesEveryWorkloadCluster(t *testing.T) {
+	raw, err := ShellKubeconfig([]WorkloadClusterKubeconfig{
 		{Name: "cluster-a", Bytes: fakeWorkloadKubeconfig(t, "cluster-a")},
 		{Name: "cluster-b", Bytes: fakeWorkloadKubeconfig(t, "cluster-b")},
 	})
 	if err != nil {
-		t.Fatalf("HeadlampKubeconfig: %v", err)
+		t.Fatalf("ShellKubeconfig: %v", err)
 	}
 	cfg, err := clientcmd.Load(raw)
 	if err != nil {
@@ -74,8 +74,8 @@ func TestHeadlampKubeconfigMergesEveryWorkloadCluster(t *testing.T) {
 	}
 
 	// The management context plus both workload clusters' own, all present
-	// at once - this is the point of the merge (Headlamp's cluster switcher
-	// shows everything from one Secret).
+	// at once - this is the point of the merge (the kubectl shell sees every
+	// context from one Secret).
 	for _, name := range []string{managementContextName, "cluster-a", "cluster-b"} {
 		if _, ok := cfg.Clusters[name]; !ok {
 			t.Errorf("clusters[%q] missing", name)
@@ -89,8 +89,8 @@ func TestHeadlampKubeconfigMergesEveryWorkloadCluster(t *testing.T) {
 	}
 }
 
-func TestHeadlampKubeconfigRejectsUnparsableWorkloadKubeconfig(t *testing.T) {
-	_, err := HeadlampKubeconfig([]WorkloadClusterKubeconfig{
+func TestShellKubeconfigRejectsUnparsableWorkloadKubeconfig(t *testing.T) {
+	_, err := ShellKubeconfig([]WorkloadClusterKubeconfig{
 		{Name: "broken", Bytes: []byte("not: valid: yaml: [")},
 	})
 	if err == nil {

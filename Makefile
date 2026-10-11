@@ -149,20 +149,8 @@ dev: ## Start the operator and web API against the current kubeconfig context (s
 dev-metrics: ## Install a minimal single-cluster Prometheus (remote-write receiver) for local testing.
 	kubectl apply -f hack/dev-prometheus.yaml
 
-.PHONY: headlamp
-headlamp: ## Install/upgrade Headlamp (the Kubernetes UI replacing web/frontend) on the current kubeconfig context.
-	./hack/install-headlamp.sh
-
-.PHONY: headlamp-plugin
-headlamp-plugin: ## Build web/headlamp-plugin and copy it into the running Headlamp pod (fast dev loop; wiped on pod restart).
-	./hack/build-headlamp-plugin.sh
-
-.PHONY: deploy-headlamp-plugin
-deploy-headlamp-plugin: ## Bake web/headlamp-plugin into an image and install it as a Headlamp initContainer (survives pod restarts).
-	./hack/deploy-headlamp-plugin.sh
-
 .PHONY: deploy-apiserver
-deploy-apiserver: ## Build and deploy cmd/apiserver in-cluster, for the Headlamp plugin to reach.
+deploy-apiserver: ## Build and deploy cmd/apiserver (API, web UI and kubectl shell) in-cluster.
 	./hack/deploy-apiserver.sh
 
 .PHONY: fixtures

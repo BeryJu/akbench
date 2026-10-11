@@ -1,13 +1,12 @@
 # In-cluster deployment of cmd/apiserver: the REST API, the web UI
 # (web/ui, baked into the same image) and the in-browser kubectl shell, all
-# from one process. Also still reachable by the Headlamp plugin through
-# Headlamp's own ApiProxy until that is decommissioned. Applied by
+# from one process. Applied by
 # hack/deploy-apiserver.sh (make deploy-apiserver) against whatever image
 # that script just built/loaded (authentik-bench-apiserver:dev for local
 # dev - see that script). Open the UI at http://<node>:30911/.
 #
 # cluster-admin, matching this repo's existing dev-only security posture
-# (the operator itself and Headlamp are both bound the same way) - not
+# (the operator itself is bound the same way) - not
 # appropriate for a real multi-tenant deployment, fine for this benchmark
 # tool.
 apiVersion: v1
@@ -93,14 +92,14 @@ spec:
                   name: apiserver-token
                   key: token
             # The kubectl shell's kubeconfig: the merged one
-            # HeadlampKubeconfigReconciler maintains (management cluster plus
+            # ShellKubeconfigReconciler maintains (management cluster plus
             # every Ready WorkloadCluster). Read through the API for every
-            # session rather than mounted - it lives in another namespace,
-            # and this way a cluster that just became Ready is usable at once.
-            # Must match the operator's BENCH_HEADLAMP_NAMESPACE/
-            # BENCH_HEADLAMP_KUBECONFIG_SECRET (cmd/main.go).
+            # session rather than mounted, so a cluster that just became
+            # Ready is usable at once.
+            # Must match the operator's BENCH_SHELL_KUBECONFIG_NAMESPACE/
+            # BENCH_SHELL_KUBECONFIG_SECRET_NAME (cmd/main.go).
             - name: BENCH_SHELL_KUBECONFIG_SECRET
-              value: headlamp/headlamp-kubeconfig
+              value: authentik-bench/shell-kubeconfig
             # OIDC login (internal/api/oidc.go), e.g. against an authentik
             # OAuth2/OpenID provider configured as a *public* client with
             # redirect URIs <origin>/auth/callback and <origin>/auth/silent.

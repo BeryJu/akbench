@@ -32,7 +32,7 @@ import (
 	"github.com/coder/websocket"
 )
 
-// testKubeconfig mirrors render.HeadlampKubeconfig's output shape: a
+// testKubeconfig mirrors render.ShellKubeconfig's output shape: a
 // synthesized management context plus one CAPI-style workload context.
 const testKubeconfig = `apiVersion: v1
 kind: Config

@@ -18,7 +18,7 @@ package api
 
 // The in-browser kubectl shell: a real interactive shell on a PTY, with
 // KUBECONFIG pointed at a per-session copy of the merged kubeconfig
-// HeadlampKubeconfigReconciler maintains (the management cluster plus every
+// ShellKubeconfigReconciler maintains (the management cluster plus every
 // Ready WorkloadCluster), bridged to xterm.js over a WebSocket.
 //
 // Auth: a browser's WebSocket API cannot set an Authorization header, so the

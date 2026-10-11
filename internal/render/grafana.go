@@ -31,19 +31,13 @@ import (
 )
 
 // Grafana is installed per workload cluster (same as Prometheus/Pyroscope/
-// Tempo), reached from Headlamp's own Grafana tab through cmd/apiserver's
+// Tempo), reached from the web UI's Grafana page through cmd/apiserver's
 // own reverse proxy (internal/api/grafana_proxy.go), not the k8s API
-// server's service-proxy subresource directly - that first design was
-// tried and confirmed broken live: the k8s apiserver's own /proxy
-// subresource content-rewrites absolute paths in text/html responses,
-// unconditionally prepending its own mount prefix, which has no awareness
-// of Headlamp's own outer /clusters/<name>/ layer sitting in front of it -
-// any already-correct two-layer absolute path gets a third, wrong prefix
-// stacked on top (verified by curling the exact iframe URL three ways:
-// direct to Grafana, via the raw k8s proxy subresource, and via Headlamp
-// itself - only the direct one came back correct). cmd/apiserver's own
-// reverse proxy is a single hop the browser reaches directly via a
-// NodePort (GrafanaNodePort below), sidestepping that entirely. Not the
+// server's service-proxy subresource - that subresource content-rewrites
+// absolute paths in text/html responses, unconditionally prepending its
+// own mount prefix, which breaks Grafana's own already-prefixed absolute
+// paths (confirmed live). cmd/apiserver's reverse proxy is a single hop to
+// Grafana's NodePort (GrafanaNodePort below), sidestepping that entirely. Not the
 // separate, unrelated BENCH_GRAFANA_URL mechanism (internal/grafana/annotate.go,
 // used only for posting TestRun annotations), which assumes one central,
 // directly browser-reachable Grafana and is left alone. The embed-URL

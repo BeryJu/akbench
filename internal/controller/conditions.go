@@ -31,7 +31,7 @@ import (
 // setCondition is a small wrapper around meta.SetStatusCondition so every
 // controller records conditions the same way - it also emits a matching
 // Kubernetes Event on obj, so anyone looking at the object in `kubectl
-// describe`/Headlamp sees the same history without reading operator logs.
+// describe` sees the same history without reading operator logs.
 // Called on every reconcile pass that reaches a given branch, not only on
 // state transitions: this is deliberate, not an oversight - client-go's
 // EventRecorder already aggregates identical repeats (same object/reason/

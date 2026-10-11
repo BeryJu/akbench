@@ -16,9 +16,8 @@
 
 // Embeds a workload cluster's own Grafana (internal/render/grafana.go) in an
 // iframe, through cmd/apiserver's /grafana-proxy/<cluster>/ reverse proxy
-// (internal/api/grafana_proxy.go). Unlike the Headlamp plugin's GrafanaPage,
-// this app is served by cmd/apiserver itself, so the proxy is same-origin: no
-// NodePort and no extra port-forward.
+// (internal/api/grafana_proxy.go). This app is served by cmd/apiserver
+// itself, so the proxy is same-origin: no NodePort and no extra port-forward.
 //
 // The whole Grafana UI is embedded as-is - no dashboard picker or kiosk mode.
 import { Link, useNavigate, useParams } from 'react-router';

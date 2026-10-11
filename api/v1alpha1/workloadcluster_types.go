@@ -210,7 +210,7 @@ type WorkloadClusterStatus struct {
 	// management cluster* - a node's InternalIP plus the fixed NodePort
 	// render.GrafanaNodePort exposes. cmd/apiserver's own reverse proxy
 	// (internal/api/grafana_proxy.go) connects to this to embed a
-	// dashboard in Headlamp's Grafana tab.
+	// dashboard in the web UI's Grafana page.
 	// +optional
 	GrafanaURL string `json:"grafanaURL,omitempty"`
 

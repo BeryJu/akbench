@@ -99,7 +99,7 @@ Implemented so far:
   - **`kubectl` shell**: the UI's centerpiece - real shells on a PTY
     (`internal/api/shell.go`) bridged to xterm.js over a WebSocket, with
     `KUBECONFIG` pointed at a per-session copy of the merged kubeconfig
-    `HeadlampKubeconfigReconciler` maintains, so every context (the
+    `ShellKubeconfigReconciler` maintains, so every context (the
     management cluster plus each Ready `WorkloadCluster`) is one tab away.
     It replaces generic resource browsing: pages link into it with the
     relevant command typed at the prompt (never run until you press Enter).
@@ -112,9 +112,6 @@ Implemented so far:
     `BENCH_OIDC_REQUIRED_GROUP`) and/or a static bearer token
     (`BENCH_API_TOKEN`/`--token-secret`). Register `<origin>/auth/callback`
     and `<origin>/auth/silent` as redirect URIs on the provider.
-  - The previous UI, [Headlamp](https://headlamp.dev) plus
-    `web/headlamp-plugin` (`make headlamp`, `make headlamp-plugin`), is still
-    in the tree until the new one is verified against a live cluster.
 
 The original plan's central, mTLS-secured metrics receiver was superseded by
 the per-workload-cluster observability stack described above once it became

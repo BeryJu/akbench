@@ -47,7 +47,7 @@ func mustEmbeddedScript(name string) string {
 // defaultTestCaseTemplates seeds the operator's own built-in k6 test
 // templates from the exact same embedded scripts (k6/scripts/*.ts) this
 // binary already carries, so a fresh install has working, immediately
-// editable-in-Headlamp TestCaseTemplate objects without anyone hand-authoring
+// editable TestCaseTemplate objects without anyone hand-authoring
 // them first.
 //
 // "saml" is deliberately not seeded yet - see internal/testtemplate's own
@@ -77,7 +77,7 @@ func defaultTestCaseTemplates(namespace string) []benchv1alpha1.TestCaseTemplate
 
 // SeedDefaultTestCaseTemplates creates the operator's built-in templates if
 // they don't already exist yet - create-only, never overwritten, so editing
-// one via Headlamp (or plain kubectl) is never clobbered by a later operator
+// one via the web UI (or plain kubectl) is never clobbered by a later operator
 // restart/upgrade picking up a newer embedded script. Called once at manager
 // startup, before the manager's own cache starts, with a plain uncached
 // client - so any failure here (e.g. the CRD not installed yet) surfaces

@@ -32,13 +32,12 @@ import (
 // WorkloadClusterReconciler's ensureGrafana - see render.GrafanaObjects'
 // own doc comment for the full story of why this exists at all: the k8s
 // API server's own service-proxy subresource content-rewrites absolute
-// HTML paths in a way that's fundamentally incompatible with Headlamp's
-// outer /clusters/<name>/ routing layer, so the browser has to reach this
-// route directly instead of through that mechanism).
+// HTML paths in a way that breaks Grafana's own, so the browser has to
+// reach this route directly instead of through that mechanism).
 //
 // Deliberately registered outside the /api/v1 route group (see Router,
 // alongside /healthz and /readyz): an <iframe src=> can't attach the
-// X-Bench-Api-Token header s.requireToken demands, so this route carries
+// Authorization header s.requireToken demands, so this route carries
 // no auth at all. That's consistent with, not a regression from, this
 // project's existing dev-scale security posture - Grafana itself already
 // runs with anonymous Admin auth, and every other per-workload-cluster

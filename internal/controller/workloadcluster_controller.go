@@ -221,8 +221,7 @@ func (r *WorkloadClusterReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		// Best-effort/idempotent for the same reason as ensureCNI/
 		// ensureCSIIncus: without it, there's no metrics.k8s.io API on this
 		// cluster at all (kubeadm doesn't install it any more than it
-		// installs a CNI), so `kubectl top` and Headlamp's own per-node/
-		// per-pod usage graphs have nothing to read from.
+		// installs a CNI), so `kubectl top` has nothing to read from.
 		if err := r.ensureMetricsServer(ctx, &wc); err != nil {
 			log.Error(err, "failed to ensure metrics-server on workload cluster")
 			r.Recorder.Eventf(&wc, corev1.EventTypeWarning, "AddonFailed", "failed to ensure metrics-server: %v", err)
@@ -535,7 +534,7 @@ func (r *WorkloadClusterReconciler) ensureTempo(ctx context.Context, wc *benchv1
 // datasources and this project's own 5 dashboards (see
 // render.GrafanaObjects). Unlike Pyroscope/Tempo, this does need a
 // cross-cluster URL recorded: cmd/apiserver's own reverse proxy
-// (internal/api/grafana_proxy.go) is what Headlamp's Grafana tab actually
+// (internal/api/grafana_proxy.go) is what the web UI's Grafana page actually
 // embeds, and it connects to Grafana via this NodePort URL, mirroring
 // ensurePrometheus exactly.
 func (r *WorkloadClusterReconciler) ensureGrafana(ctx context.Context, wc *benchv1alpha1.WorkloadCluster) error {

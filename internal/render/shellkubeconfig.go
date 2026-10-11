@@ -25,17 +25,15 @@ import (
 )
 
 // managementContextName names the synthesized management-cluster entry
-// HeadlampKubeconfig adds alongside every workload cluster's own.
+// ShellKubeconfig adds alongside every workload cluster's own.
 const managementContextName = "management"
 
 // The management cluster's own API server/CA/token, referenced by path
 // rather than embedded: every pod (including whichever one actually reads
-// this kubeconfig - Headlamp's) has its own copy of these at the same,
+// this kubeconfig - cmd/apiserver's) has its own copy of these at the same,
 // well-known, standard paths, kept fresh by kubelet as the token rotates.
-// This is exactly what Headlamp's own config.inCluster: true does
-// internally - synthesizing it into the merged kubeconfig instead means
-// Headlamp can run in plain kubeconfig mode and still see the management
-// cluster as just another entry, alongside every WorkloadCluster.
+// Synthesizing them into the merged kubeconfig means the management
+// cluster is just another entry, alongside every WorkloadCluster.
 const (
 	inClusterAPIServer  = "https://kubernetes.default.svc"
 	inClusterCACertPath = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
@@ -49,17 +47,17 @@ type WorkloadClusterKubeconfig struct {
 	Bytes []byte
 }
 
-// HeadlampKubeconfig merges the management cluster's own (synthesized,
+// ShellKubeconfig merges the management cluster's own (synthesized,
 // see above) context with every given WorkloadCluster's own kubeconfig into
-// one kubeconfig Headlamp can be pointed at via KUBECONFIG, so its cluster
-// switcher shows all of them without per-cluster Deployment changes as
+// one kubeconfig the in-browser kubectl shell is pointed at via KUBECONFIG,
+// so every context is available without per-cluster Deployment changes as
 // WorkloadClusters come and go - only this rendered Secret's content does.
 //
 // No renaming/prefixing of cluster/context/user names: CAPI's own
 // kubeconfig Secrets already key everything by the WorkloadCluster's own
 // object name (verified against a live one), which is unique within its
 // namespace - the same uniqueness this merge relies on.
-func HeadlampKubeconfig(workloadClusters []WorkloadClusterKubeconfig) ([]byte, error) {
+func ShellKubeconfig(workloadClusters []WorkloadClusterKubeconfig) ([]byte, error) {
 	merged := clientcmdapi.NewConfig()
 	merged.Clusters[managementContextName] = &clientcmdapi.Cluster{
 		Server:               inClusterAPIServer,

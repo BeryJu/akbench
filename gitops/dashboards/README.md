@@ -5,8 +5,8 @@ Five Grafana dashboards, embedded verbatim into
 outside its own package tree, so this is a byte-identical vendored copy, not
 a symlink) and provisioned into every workload cluster's own Grafana by
 `internal/render/grafana.go`. The two copies are kept in sync by
-`TestDashboardsMatchRenderEmbeds` (`internal/api/dashboards_test.go`). The
-Headlamp plugin's Grafana tab embeds them by UID through `cmd/apiserver`'s
+`TestDashboardsMatchRenderEmbeds` (`internal/api/dashboards_test.go`). The web
+UI's Grafana page embeds them by UID through `cmd/apiserver`'s
 `/grafana-proxy/{cluster}/...` reverse proxy (`internal/api/grafana_proxy.go`) -
 not the older, since-deleted `internal/api` embed-URL allowlist this doc used
 to reference, from before Grafana moved to a per-workload-cluster install.
