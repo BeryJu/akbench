@@ -21,7 +21,40 @@ const (
 	// This one adds only what the generic rules can't know: alerts specific
 	// to this project's own authentik/postgres/k6 metrics.
 	DefaultAlertRulesName = "authentik-bench-default-alerts"
+
+	// The two severities this project's own alert rules use.
+	severityWarning  = "warning"
+	severityCritical = "critical"
 )
+
+// alertRule is one Prometheus alerting rule, in the shape every rule this
+// file defines shares (a plain expr/for/severity/summary/description - none
+// need anything richer, e.g. extra labels). toMap is the one place
+// PrometheusRule's own field names (alert/expr/for/labels/annotations/...)
+// are spelled out, rather than repeating them in every rule literal below.
+type alertRule struct {
+	name        string
+	expr        string
+	forDuration string
+	severity    string
+	summary     string
+	description string
+}
+
+func (ar alertRule) toMap() map[string]any {
+	return map[string]any{
+		"alert": ar.name,
+		"expr":  ar.expr,
+		"for":   ar.forDuration,
+		"labels": map[string]any{
+			"severity": ar.severity,
+		},
+		"annotations": map[string]any{
+			"summary":     ar.summary,
+			"description": ar.description,
+		},
+	}
+}
 
 // DefaultAlertRules builds the PrometheusRule this project ships by default,
 // applied directly by WorkloadClusterReconciler.ensurePrometheus (not
@@ -71,56 +104,44 @@ const (
 // kube-prometheus-stack's own default rules already cover once Alertmanager
 // exists to receive them.
 func DefaultAlertRules() *unstructured.Unstructured {
-	rules := []any{
-		map[string]any{
-			"alert": "AuthentikBenchServiceScrapeDown",
-			"expr":  `up{job=~".+-metrics"} == 0`,
-			"for":   "10m",
-			"labels": map[string]any{
-				"severity": "warning",
-			},
-			"annotations": map[string]any{
-				"summary":     "{{ $labels.job }} on {{ $labels.instance }} has been unreachable for 10m",
-				"description": "Prometheus can't scrape {{ $labels.job }} ({{ $labels.instance }}) - the pod may be down, crash-looping, or its /metrics port unreachable.",
-			},
+	ruleDefs := []alertRule{
+		{
+			name:        "AuthentikBenchServiceScrapeDown",
+			expr:        `up{job=~".+-metrics"} == 0`,
+			forDuration: "10m",
+			severity:    severityWarning,
+			summary:     "{{ $labels.job }} on {{ $labels.instance }} has been unreachable for 10m",
+			description: "Prometheus can't scrape {{ $labels.job }} ({{ $labels.instance }}) - the pod may be down, crash-looping, or its /metrics port unreachable.",
 		},
-		map[string]any{
-			"alert": "AuthentikBenchPostgresDown",
-			"expr":  `pg_up == 0`,
-			"for":   "5m",
-			"labels": map[string]any{
-				"severity": "critical",
-			},
-			"annotations": map[string]any{
-				"summary":     "postgres_exporter on {{ $labels.instance }} reports Postgres is down",
-				"description": "pg_up == 0 for 5m: postgres_exporter reached its target but Postgres itself isn't accepting connections.",
-			},
+		{
+			name:        "AuthentikBenchPostgresDown",
+			expr:        `pg_up == 0`,
+			forDuration: "5m",
+			severity:    severityCritical,
+			summary:     "postgres_exporter on {{ $labels.instance }} reports Postgres is down",
+			description: "pg_up == 0 for 5m: postgres_exporter reached its target but Postgres itself isn't accepting connections.",
 		},
-		map[string]any{
-			"alert": "AuthentikBenchHighRequestFailureRate",
-			"expr": `sum by (testid, target, profile) (rate(k6_http_reqs_total{expected_response="false"}[5m]))` +
+		{
+			name: "AuthentikBenchHighRequestFailureRate",
+			expr: `sum by (testid, target, profile) (rate(k6_http_reqs_total{expected_response="false"}[5m]))` +
 				` / sum by (testid, target, profile) (rate(k6_http_reqs_total[5m])) > 0.05`,
-			"for": "5m",
-			"labels": map[string]any{
-				"severity": "warning",
-			},
-			"annotations": map[string]any{
-				"summary":     "test {{ $labels.testid }} against {{ $labels.target }} has a >5% HTTP failure rate",
-				"description": "More than 5% of requests failed over the last 5m on testid={{ $labels.testid }} target={{ $labels.target }} profile={{ $labels.profile }}, weighted by actual request volume (not an average across k6's own per-status series).",
-			},
+			forDuration: "5m",
+			severity:    severityWarning,
+			summary:     "test {{ $labels.testid }} against {{ $labels.target }} has a >5% HTTP failure rate",
+			description: "More than 5% of requests failed over the last 5m on testid={{ $labels.testid }} target={{ $labels.target }} profile={{ $labels.profile }}, weighted by actual request volume (not an average across k6's own per-status series).",
 		},
-		map[string]any{
-			"alert": "AuthentikBenchWorkerTaskErrors",
-			"expr":  `increase(authentik_tasks_errors_total[15m]) > 0`,
-			"for":   "5m",
-			"labels": map[string]any{
-				"severity": "warning",
-			},
-			"annotations": map[string]any{
-				"summary":     "authentik worker on {{ $labels.instance }} is recording background task errors",
-				"description": "authentik_tasks_errors_total increased in the last 15m on {{ $labels.instance }} - check that pod's own worker logs for the failing task.",
-			},
+		{
+			name:        "AuthentikBenchWorkerTaskErrors",
+			expr:        `increase(authentik_tasks_errors_total[15m]) > 0`,
+			forDuration: "5m",
+			severity:    severityWarning,
+			summary:     "authentik worker on {{ $labels.instance }} is recording background task errors",
+			description: "authentik_tasks_errors_total increased in the last 15m on {{ $labels.instance }} - check that pod's own worker logs for the failing task.",
 		},
+	}
+	rules := make([]any, len(ruleDefs))
+	for i, rd := range ruleDefs {
+		rules[i] = rd.toMap()
 	}
 
 	u := &unstructured.Unstructured{}

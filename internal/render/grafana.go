@@ -44,7 +44,7 @@ const (
 )
 
 func grafanaLabels() map[string]string {
-	return map[string]string{"app": GrafanaServiceName}
+	return map[string]string{labelKeyApp: GrafanaServiceName}
 }
 
 // GrafanaProxyPathPrefix is cmd/apiserver's own fixed mount for this
@@ -161,21 +161,21 @@ func GrafanaObjects(wc *benchv1alpha1.WorkloadCluster) []client.Object {
 	rootURL := GrafanaProxyPathPrefix(wc)
 	return []client.Object{
 		&corev1.Namespace{
-			Kind: "Namespace", APIVersion: "v1",
+			Kind: kindNamespace, APIVersion: apiVersionV1,
 			Name: ObservabilityNamespace,
 		},
 		&corev1.ConfigMap{
-			Kind: "ConfigMap", APIVersion: "v1",
+			Kind: kindConfigMap, APIVersion: apiVersionV1,
 			Name: grafanaDatasourcesConfigMapName, Namespace: ObservabilityNamespace,
 			Data: map[string]string{"datasources.yaml": grafanaDatasources()},
 		},
 		&corev1.ConfigMap{
-			Kind: "ConfigMap", APIVersion: "v1",
+			Kind: kindConfigMap, APIVersion: apiVersionV1,
 			Name: grafanaProvidersConfigMapName, Namespace: ObservabilityNamespace,
 			Data: map[string]string{"dashboards.yaml": grafanaDashboardProvider},
 		},
 		&corev1.ConfigMap{
-			Kind: "ConfigMap", APIVersion: "v1",
+			Kind: kindConfigMap, APIVersion: apiVersionV1,
 			Name: grafanaDashboardsConfigMapName, Namespace: ObservabilityNamespace,
 			Data: map[string]string{
 				"compare-tests.json": string(grafanaDashboardCompareTests),
@@ -186,7 +186,7 @@ func GrafanaObjects(wc *benchv1alpha1.WorkloadCluster) []client.Object {
 			},
 		},
 		&appsv1.Deployment{
-			Kind: "Deployment", APIVersion: "apps/v1",
+			Kind: kindDeployment, APIVersion: apiVersionAppsV1,
 			Name: GrafanaServiceName, Namespace: ObservabilityNamespace, Labels: labels,
 			Spec: appsv1.DeploymentSpec{
 				Replicas: new(int32(1)),
@@ -226,7 +226,7 @@ func GrafanaObjects(wc *benchv1alpha1.WorkloadCluster) []client.Object {
 									// tweak; see this file's own package doc comment.
 									{Name: "GF_SERVER_SERVE_FROM_SUB_PATH", Value: "true"},
 								},
-								Ports: []corev1.ContainerPort{{Name: "http", ContainerPort: GrafanaPort}},
+								Ports: []corev1.ContainerPort{{Name: portNameHTTP, ContainerPort: GrafanaPort}},
 								VolumeMounts: []corev1.VolumeMount{
 									{Name: "datasources", MountPath: "/etc/grafana/provisioning/datasources"},
 									{Name: "providers", MountPath: "/etc/grafana/provisioning/dashboards"},
@@ -259,21 +259,21 @@ func GrafanaObjects(wc *benchv1alpha1.WorkloadCluster) []client.Object {
 			},
 		},
 		&corev1.Service{
-			Kind: "Service", APIVersion: "v1",
+			Kind: kindService, APIVersion: apiVersionV1,
 			Name: GrafanaServiceName, Namespace: ObservabilityNamespace, Labels: labels,
 			Spec: corev1.ServiceSpec{
 				Selector: labels,
-				Ports:    []corev1.ServicePort{{Name: "http", Port: GrafanaPort, TargetPort: intstr.FromInt32(GrafanaPort)}},
+				Ports:    []corev1.ServicePort{{Name: portNameHTTP, Port: GrafanaPort, TargetPort: intstr.FromInt32(GrafanaPort)}},
 			},
 		},
 		&corev1.Service{
-			Kind: "Service", APIVersion: "v1",
+			Kind: kindService, APIVersion: apiVersionV1,
 			Name: GrafanaNodePortServiceName, Namespace: ObservabilityNamespace,
 			Spec: corev1.ServiceSpec{
 				Type:     corev1.ServiceTypeNodePort,
 				Selector: labels,
 				Ports: []corev1.ServicePort{
-					{Name: "http", Port: GrafanaPort, TargetPort: intstr.FromInt32(GrafanaPort), NodePort: int32(GrafanaNodePort)},
+					{Name: portNameHTTP, Port: GrafanaPort, TargetPort: intstr.FromInt32(GrafanaPort), NodePort: int32(GrafanaNodePort)},
 				},
 			},
 		},
@@ -283,6 +283,6 @@ func GrafanaObjects(wc *benchv1alpha1.WorkloadCluster) []client.Object {
 		// series). Selects the plain ClusterIP Service above (it carries
 		// these same labels); the NodePort twin isn't labeled, so it's
 		// skipped rather than scraped twice.
-		newServiceMonitor(GrafanaServiceName, ObservabilityNamespace, labels, "http"),
+		newServiceMonitor(GrafanaServiceName, labels, portNameHTTP),
 	}
 }

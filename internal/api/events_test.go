@@ -56,8 +56,7 @@ func TestEventsBroadcastsResourceChanges(t *testing.T) {
 	httpSrv := httptest.NewServer(s.Router())
 	defer httpSrv.Close()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	s.RunEventWatchers(ctx)
 
 	rec := do(t, s, http.MethodPost, "/api/v1/events/sessions", nil)

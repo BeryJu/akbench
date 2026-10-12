@@ -20,7 +20,7 @@ const (
 )
 
 func pyroscopeLabels() map[string]string {
-	return map[string]string{"app": PyroscopeServiceName}
+	return map[string]string{labelKeyApp: PyroscopeServiceName}
 }
 
 // PyroscopeObjects returns the single-replica, no-HA Grafana Pyroscope
@@ -38,11 +38,11 @@ func PyroscopeObjects() []client.Object {
 	labels := pyroscopeLabels()
 	return []client.Object{
 		&corev1.Namespace{
-			Kind: "Namespace", APIVersion: "v1",
+			Kind: kindNamespace, APIVersion: apiVersionV1,
 			Name: ObservabilityNamespace,
 		},
 		&appsv1.Deployment{
-			Kind: "Deployment", APIVersion: "apps/v1",
+			Kind: kindDeployment, APIVersion: apiVersionAppsV1,
 			Name: PyroscopeServiceName, Namespace: ObservabilityNamespace, Labels: labels,
 			Spec: appsv1.DeploymentSpec{
 				Replicas: new(int32(1)),
@@ -54,7 +54,7 @@ func PyroscopeObjects() []client.Object {
 							{
 								Name:  "pyroscope",
 								Image: "grafana/pyroscope:1.8.0",
-								Ports: []corev1.ContainerPort{{Name: "http", ContainerPort: PyroscopePort}},
+								Ports: []corev1.ContainerPort{{Name: portNameHTTP, ContainerPort: PyroscopePort}},
 							},
 						},
 					},
@@ -62,12 +62,12 @@ func PyroscopeObjects() []client.Object {
 			},
 		},
 		&corev1.Service{
-			Kind: "Service", APIVersion: "v1",
+			Kind: kindService, APIVersion: apiVersionV1,
 			Name: PyroscopeServiceName, Namespace: ObservabilityNamespace, Labels: labels,
 			Spec: corev1.ServiceSpec{
 				Selector: labels,
 				Ports: []corev1.ServicePort{
-					{Name: "http", Port: PyroscopePort, TargetPort: intstr.FromInt32(PyroscopePort)},
+					{Name: portNameHTTP, Port: PyroscopePort, TargetPort: intstr.FromInt32(PyroscopePort)},
 				},
 			},
 		},
@@ -75,6 +75,6 @@ func PyroscopeObjects() []client.Object {
 		// "http" port everything else uses - confirmed live (docker run
 		// grafana/pyroscope:1.8.0, curl :4040/metrics returns real
 		// counter_*/go_* series), not a separate port.
-		newServiceMonitor(PyroscopeServiceName, ObservabilityNamespace, labels, "http"),
+		newServiceMonitor(PyroscopeServiceName, labels, portNameHTTP),
 	}
 }

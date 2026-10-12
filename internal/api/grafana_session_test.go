@@ -87,6 +87,12 @@ func TestGrafanaProxyStripsOwnCredentials(t *testing.T) {
 	if c, err := forwarded.Cookie("grafana_session"); err != nil || c.Value != "keep-me" {
 		t.Errorf("Grafana's own cookie not forwarded: %v %v", c, err)
 	}
+	// The whole point of this proxy (see grafana_proxy.go's own doc comment):
+	// Grafana's GF_SERVER_SERVE_FROM_SUB_PATH expects the "/grafana-proxy/<cluster>"
+	// prefix left on, not stripped like a typical reverse proxy would.
+	if forwarded.URL.Path != "/grafana-proxy/bench/api/health" {
+		t.Errorf("proxy stripped/rewrote the path: %q", forwarded.URL.Path)
+	}
 }
 
 func TestGrafanaSessionRejectsExpiredOrForged(t *testing.T) {

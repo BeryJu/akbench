@@ -60,7 +60,7 @@ func (s *Server) listClusters(w http.ResponseWriter, r *http.Request) {
 			clusters = append(clusters, capiCluster(&list.Items[i]))
 		}
 	}
-	writeJSON(w, r, http.StatusOK, map[string]any{"items": clusters})
+	writeItems(w, r, clusters)
 }
 
 func (s *Server) getCluster(w http.ResponseWriter, r *http.Request) {

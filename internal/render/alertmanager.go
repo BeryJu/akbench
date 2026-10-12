@@ -48,8 +48,8 @@ const (
 // applies to the Prometheus CR.
 func alertmanagerPodLabels() map[string]string {
 	return map[string]string{
-		"app.kubernetes.io/name":     "alertmanager",
-		"app.kubernetes.io/instance": kubePrometheusStackFullname,
+		"app.kubernetes.io/name": "alertmanager",
+		labelAppInstance:         kubePrometheusStackFullname,
 	}
 }
 
@@ -61,23 +61,23 @@ func alertmanagerPodLabels() map[string]string {
 func alertmanagerCompatServices() []map[string]any {
 	labels := alertmanagerPodLabels()
 	clusterIP := &corev1.Service{
-		Kind: "Service", APIVersion: "v1",
+		Kind: kindService, APIVersion: apiVersionV1,
 		Name: AlertmanagerServiceName, Namespace: ObservabilityNamespace,
 		Spec: corev1.ServiceSpec{
 			Selector: labels,
 			Ports: []corev1.ServicePort{
-				{Name: "http", Port: AlertmanagerPort, TargetPort: intstr.FromInt32(AlertmanagerPort)},
+				{Name: portNameHTTP, Port: AlertmanagerPort, TargetPort: intstr.FromInt32(AlertmanagerPort)},
 			},
 		},
 	}
 	nodePort := &corev1.Service{
-		Kind: "Service", APIVersion: "v1",
+		Kind: kindService, APIVersion: apiVersionV1,
 		Name: AlertmanagerNodePortServiceName, Namespace: ObservabilityNamespace,
 		Spec: corev1.ServiceSpec{
 			Type:     corev1.ServiceTypeNodePort,
 			Selector: labels,
 			Ports: []corev1.ServicePort{
-				{Name: "http", Port: AlertmanagerPort, TargetPort: intstr.FromInt32(AlertmanagerPort), NodePort: AlertmanagerNodePort},
+				{Name: portNameHTTP, Port: AlertmanagerPort, TargetPort: intstr.FromInt32(AlertmanagerPort), NodePort: AlertmanagerNodePort},
 			},
 		},
 	}

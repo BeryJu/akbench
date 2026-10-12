@@ -28,7 +28,7 @@ func TestPodTemplateNeverSharesNodeWithItsDeployment(t *testing.T) {
 	}
 	tmpl := p.PodTemplate()
 
-	if got := tmpl.ObjectMeta.Labels[benchv1alpha1.LabelDeployment]; got != "topo-a" {
+	if got := tmpl.Labels[benchv1alpha1.LabelDeployment]; got != "topo-a" {
 		t.Errorf("pod template deployment label = %q, want topo-a", got)
 	}
 	if tmpl.Spec.Affinity == nil || tmpl.Spec.Affinity.PodAntiAffinity == nil {

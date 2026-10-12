@@ -208,7 +208,7 @@ func (s *Server) listShellContexts(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusServiceUnavailable, err.Error())
 		return
 	}
-	writeJSON(w, r, http.StatusOK, map[string]any{"items": contexts})
+	writeItems(w, r, contexts)
 }
 
 func (s *Server) createShellSession(w http.ResponseWriter, r *http.Request) {
@@ -240,8 +240,8 @@ func (s *Server) createShellSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, r, http.StatusCreated, map[string]any{
-		"ticket":    ticket,
-		"expiresAt": now.Add(shellTicketTTL).UTC().Format(time.RFC3339),
+		"ticket":     ticket,
+		expiresAtKey: now.Add(shellTicketTTL).UTC().Format(time.RFC3339),
 	})
 }
 

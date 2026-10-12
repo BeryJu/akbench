@@ -35,6 +35,22 @@ linters:
           deny:
             - pkg: sort
               desc: Should be replaced with slices package
+    goconst:
+      # These are generic map keys/values this package's render.* functions
+      # build dozens of distinct external schemas with (Helm chart values
+      # for N different charts, raw Alertmanager/PrometheusRule/Secret
+      # payloads) - each occurrence is a coincidence of two unrelated
+      # external contracts happening to use the same common word, not a
+      # real internal duplication. A shared constant here would be actively
+      # misleading (implying they're the same concept) rather than useful;
+      # a genuinely shared, meaningful literal (e.g. the "http" port-name
+      # convention, the kubernetes.io/hostname topology key) already has its
+      # own real constant in internal/render instead of being excluded here.
+      ignore-string-values:
+        - "^true$"
+        - "^enabled$"
+        - "^config$"
+        - "^name$"
     revive:
       rules:
         - name: comment-spacings
@@ -59,6 +75,19 @@ linters:
         # Repeated fixture literals ("authentik-1", "replicas", "True", ...)
         # are the point in tests - a shared const would trade readability at
         # each call site for less duplication that was never the risk here.
+      - linters:
+          - staticcheck
+        path: cmd/main\.go
+        text: "GetEventRecorderFor is deprecated"
+        # The replacement, GetEventRecorder, returns client-go's *new*
+        # events.EventRecorder (events.k8s.io/v1), a different interface
+        # (Eventf(regarding, related runtime.Object, eventtype, reason,
+        # action, note string, args ...any)) from the old
+        # record.EventRecorder every Reconciler's own Recorder field,
+        # conditions.go's shared setCondition helper, and every controller's
+        # event-emitting call site are built against. Worth migrating, but
+        # as its own deliberate pass across all six affected files - not
+        # bundled into an unrelated lint-cleanup commit.
     paths:
       - third_party$
       - builtin$

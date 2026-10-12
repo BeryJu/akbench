@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 
@@ -77,8 +77,8 @@ func (s *Server) listAlerts(w http.ResponseWriter, r *http.Request) {
 	}
 	// Newest first - an alert that just started firing is the one worth
 	// seeing without scrolling.
-	sort.Slice(alerts, func(i, j int) bool { return alerts[i].StartsAt > alerts[j].StartsAt })
-	writeJSON(w, r, http.StatusOK, map[string]any{"items": alerts})
+	slices.SortFunc(alerts, func(a, b Alert) int { return strings.Compare(b.StartsAt, a.StartsAt) })
+	writeItems(w, r, alerts)
 }
 
 func (s *Server) fetchAlerts(ctx context.Context, cluster, baseURL string) ([]Alert, error) {
@@ -92,7 +92,7 @@ func (s *Server) fetchAlerts(ctx context.Context, cluster, baseURL string) ([]Al
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("alertmanager at %s returned %d", baseURL, resp.StatusCode)
 	}

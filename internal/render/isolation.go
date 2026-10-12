@@ -36,7 +36,7 @@ func crossDeploymentAntiAffinityTerm(deploymentName string) corev1.PodAffinityTe
 				{Key: benchv1alpha1.LabelDeployment, Operator: metav1.LabelSelectorOpNotIn, Values: []string{deploymentName}},
 			},
 		},
-		TopologyKey: "kubernetes.io/hostname",
+		TopologyKey: topologyKeyHostname,
 	}
 }
 
@@ -50,6 +50,6 @@ func sameDeploymentAntiAffinityTerm(deploymentName string) corev1.PodAffinityTer
 		LabelSelector: &metav1.LabelSelector{
 			MatchLabels: DeploymentLabels(deploymentName),
 		},
-		TopologyKey: "kubernetes.io/hostname",
+		TopologyKey: topologyKeyHostname,
 	}
 }

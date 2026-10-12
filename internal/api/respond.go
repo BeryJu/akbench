@@ -14,6 +14,18 @@ type errorBody struct {
 	Error string `json:"error"`
 }
 
+// expiresAtKey is the one response field every ticket-minting endpoint
+// (shell.go, events.go) and the Grafana session endpoint share - the same
+// concept (when this credential stops working), always spelled the same way.
+const expiresAtKey = "expiresAt"
+
+// writeItems answers a list endpoint with {"items": ...} - the shape every
+// GET /api/v1/<kind> (and the ad hoc alerts/shell-contexts lists) shares,
+// mirroring what Kubernetes' own List types marshal their slice field as.
+func writeItems(w http.ResponseWriter, r *http.Request, items any) {
+	writeJSON(w, r, http.StatusOK, map[string]any{"items": items})
+}
+
 func writeJSON(w http.ResponseWriter, r *http.Request, status int, body any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)

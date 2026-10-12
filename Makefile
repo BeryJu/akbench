@@ -251,7 +251,13 @@ ENVTEST_K8S_VERSION ?= $(shell v='$(call gomodver,k8s.io/api)'; \
   [ -n "$$v" ] || { echo "Set ENVTEST_K8S_VERSION manually (k8s.io/api replace has no tag)" >&2; exit 1; }; \
   printf '%s\n' "$$v" | sed -E 's/^v?[0-9]+\.([0-9]+).*/1.\1/')
 
-GOLANGCI_LINT_VERSION ?= v2.12.2
+# v2.12.2's bundled staticcheck (honnef.co/go/tools v0.7.0) panics building
+# the IR for net/internal/poll on Go 1.27+: its own stdlib now uses direct
+# references to embedded fields in struct initializers, a language feature
+# that IR builder predates. Fixed upstream in staticcheck v0.8.0 (bundled
+# from golangci-lint v2.13.2) - confirmed against this exact panic, not
+# guessed.
+GOLANGCI_LINT_VERSION ?= v2.13.2
 .PHONY: kustomize
 kustomize: $(KUSTOMIZE) ## Download kustomize locally if necessary.
 $(KUSTOMIZE): $(LOCALBIN)

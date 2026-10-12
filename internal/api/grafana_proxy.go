@@ -57,12 +57,17 @@ func (s *Server) grafanaProxy(w http.ResponseWriter, r *http.Request) {
 	}
 
 	proxy := &httputil.ReverseProxy{
-		Director: func(req *http.Request) {
-			req.URL.Scheme = target.Scheme
-			req.URL.Host = target.Host
-			req.Host = target.Host
-			stripProxyCredentials(req)
-			// req.URL.Path is left as-is (not stripped of its
+		// Rewrite, not the deprecated Director: ProxyRequest.SetURL also
+		// joins target's own path onto the outbound request's, which isn't
+		// what's wanted here (see doc comment above) - Out's fields are set
+		// directly instead, the same as the old Director did to req
+		// directly.
+		Rewrite: func(pr *httputil.ProxyRequest) {
+			pr.Out.URL.Scheme = target.Scheme
+			pr.Out.URL.Host = target.Host
+			pr.Out.Host = target.Host
+			stripProxyCredentials(pr.Out)
+			// pr.Out.URL.Path is left as-is (not stripped of its
 			// "/grafana-proxy/<cluster>" prefix) - see doc comment above.
 		},
 	}

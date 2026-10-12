@@ -45,7 +45,7 @@ func OIDCTestClientRootURL(tc *benchv1alpha1.TestCase, deploymentName, namespace
 }
 
 func oidcTestClientLabels(tc *benchv1alpha1.TestCase, deploymentName string) map[string]string {
-	return map[string]string{"app": OIDCTestClientName(tc, deploymentName)}
+	return map[string]string{labelKeyApp: OIDCTestClientName(tc, deploymentName)}
 }
 
 // OIDCTestClientDeployment renders the oidc-test-client Deployment for one
@@ -58,7 +58,7 @@ func OIDCTestClientDeployment(tc *benchv1alpha1.TestCase, deploymentName, namesp
 	name := OIDCTestClientName(tc, deploymentName)
 	labels := oidcTestClientLabels(tc, deploymentName)
 	return &appsv1.Deployment{
-		Kind: "Deployment", APIVersion: "apps/v1",
+		Kind: kindDeployment, APIVersion: apiVersionAppsV1,
 		Name: name, Namespace: namespace, Labels: labels,
 		Spec: appsv1.DeploymentSpec{
 			Replicas: new(int32(1)),
@@ -76,7 +76,7 @@ func OIDCTestClientDeployment(tc *benchv1alpha1.TestCase, deploymentName, namesp
 							{Name: "OIDC_ROOT_URL", Value: OIDCTestClientRootURL(tc, deploymentName, namespace)},
 							{Name: "OIDC_BIND", Value: fmt.Sprintf("0.0.0.0:%d", OIDCTestClientPort)},
 						},
-						Ports: []corev1.ContainerPort{{Name: "http", ContainerPort: OIDCTestClientPort}},
+						Ports: []corev1.ContainerPort{{Name: portNameHTTP, ContainerPort: OIDCTestClientPort}},
 						ReadinessProbe: &corev1.Probe{
 							HTTPGet: &corev1.HTTPGetAction{Path: "/health", Port: intstr.FromInt32(OIDCTestClientPort)},
 						},
@@ -92,12 +92,12 @@ func OIDCTestClientDeployment(tc *benchv1alpha1.TestCase, deploymentName, namesp
 func OIDCTestClientService(tc *benchv1alpha1.TestCase, deploymentName, namespace string) *corev1.Service {
 	name := OIDCTestClientName(tc, deploymentName)
 	return &corev1.Service{
-		Kind: "Service", APIVersion: "v1",
+		Kind: kindService, APIVersion: apiVersionV1,
 		Name: name, Namespace: namespace,
 		Spec: corev1.ServiceSpec{
 			Selector: oidcTestClientLabels(tc, deploymentName),
 			Ports: []corev1.ServicePort{
-				{Name: "http", Port: OIDCTestClientPort, TargetPort: intstr.FromInt32(OIDCTestClientPort)},
+				{Name: portNameHTTP, Port: OIDCTestClientPort, TargetPort: intstr.FromInt32(OIDCTestClientPort)},
 			},
 		},
 	}

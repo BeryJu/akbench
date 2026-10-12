@@ -65,7 +65,7 @@ func (s *Server) listResource(k resourceKind) http.HandlerFunc {
 			writeAPIError(w, r, err)
 			return
 		}
-		writeJSON(w, r, http.StatusOK, map[string]any{"items": list.Items})
+		writeItems(w, r, list.Items)
 	}
 }
 

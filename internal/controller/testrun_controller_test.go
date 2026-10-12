@@ -22,7 +22,7 @@ var _ = Describe("TestRun Controller", func() {
 	var tc *benchv1alpha1.TestCase
 
 	BeforeEach(func() {
-		topo = createReadyDeployment(context.Background(), "testrun-deployment", "authentik-1", "authentik-1-server.ns.svc.cluster.local", 80)
+		topo = createReadyDeployment(context.Background(), "testrun-deployment", "authentik-1", "authentik-1-server.ns.svc.cluster.local")
 		tc = &benchv1alpha1.TestCase{
 			Name: "quick-login", Namespace: "default",
 			Spec: benchv1alpha1.TestCaseSpec{
@@ -91,8 +91,8 @@ var _ = Describe("TestRun Controller, multi-deployment TestCase", func() {
 	var tc *benchv1alpha1.TestCase
 
 	BeforeEach(func() {
-		topoA = createReadyDeployment(context.Background(), "testrun-multi-a", "target-a", "a.ns.svc.cluster.local", 80)
-		topoB = createReadyDeployment(context.Background(), "testrun-multi-b", "target-b", "b.ns.svc.cluster.local", 80)
+		topoA = createReadyDeployment(context.Background(), "testrun-multi-a", "target-a", "a.ns.svc.cluster.local")
+		topoB = createReadyDeployment(context.Background(), "testrun-multi-b", "target-b", "b.ns.svc.cluster.local")
 		tc = &benchv1alpha1.TestCase{
 			Name: "quick-login-multi", Namespace: "default",
 			Spec: benchv1alpha1.TestCaseSpec{

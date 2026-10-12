@@ -124,11 +124,11 @@ func (r *TestCaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		}
 	}
 
-	// One pass per target deployment - everything below (readiness,
-	// runner-cluster resolution, script/fixtures mirroring, OAuth
-	// provisioning, the k6 workload itself) is independently resolved per
-	// target, since two targets can legitimately be on different clusters
-	// (resolveRunnerClient only defaults to a *shared* cluster when
+	// One pass per target deployment - everything in reconcileTarget
+	// (readiness, runner-cluster resolution, script/fixtures mirroring,
+	// OAuth provisioning, the k6 workload itself) is independently resolved
+	// per target, since two targets can legitimately be on different
+	// clusters (resolveRunnerClient only defaults to a *shared* cluster when
 	// spec.runnerClusterRef pins one explicitly for the whole TestCase).
 	var statuses []benchv1alpha1.TestCaseDeploymentStatus
 	var notReadyMessages []string
@@ -141,92 +141,25 @@ func (r *TestCaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	runnerClients := map[string]client.Client{}
 
 	for _, ref := range refs {
-		status := benchv1alpha1.TestCaseDeploymentStatus{Name: ref.Name}
-
-		topo, targetName, host, port, err := resolveReadyDeployment(ctx, r.Client, tc.Namespace, ref.Name)
+		result, err := r.reconcileTarget(ctx, &tc, tmpl, ref)
 		if err != nil {
+			return ctrl.Result{}, err
+		}
+		statuses = append(statuses, result.status)
+		if result.runnerClient != nil {
+			runnerClients[result.runnerCluster] = result.runnerClient
+		}
+		if !result.ready {
 			allReady = false
-			switch {
-			case apierrors.IsNotFound(err):
-				notReadyMessages = append(notReadyMessages, fmt.Sprintf("%s: AuthentikDeployment not found", ref.Name))
-			case errors.Is(err, errDeploymentNotReady):
-				notReadyMessages = append(notReadyMessages, fmt.Sprintf("%s: not Ready yet", ref.Name))
-			default:
-				return ctrl.Result{}, fmt.Errorf("resolve deployment %q: %w", ref.Name, err)
-			}
-			statuses = append(statuses, status)
-			continue
+			needsRequeue = needsRequeue || result.requeue
+			notReadyMessages = append(notReadyMessages, result.notReadyMsg)
 		}
-
-		rc, remote, err := resolveRunnerClient(ctx, r.Tracker, r.Client, tc.Namespace, tc.Spec.RunnerClusterRef, topo.Spec.ClusterRef)
-		if err != nil {
-			allReady = false
-			needsRequeue = true
-			notReadyMessages = append(notReadyMessages, fmt.Sprintf("%s: runner cluster unreachable: %v", ref.Name, err))
-			statuses = append(statuses, status)
-			continue
-		}
-		runnerClients[runnerClusterName(&tc, topo)] = rc
-		if remote {
-			if err := ensureNamespace(ctx, rc, tc.Namespace); err != nil {
-				return ctrl.Result{}, fmt.Errorf("ensure runner namespace for %q: %w", ref.Name, err)
-			}
-		}
-
-		scriptCM, err := r.ensureScriptConfigMap(ctx, rc, remote, &tc, tmpl)
-		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("ensure script configmap for %q: %w", ref.Name, err)
-		}
-		if err := ensureFixturesSecret(ctx, r.Client, rc, tc.Namespace); err != nil {
-			return ctrl.Result{}, fmt.Errorf("ensure fixtures secret for %q: %w", ref.Name, err)
-		}
-
-		var oauthHost string
-		var oauthPort int32
-		if tmpl != nil && tmpl.Spec.RequiresOAuthClient {
-			oauthHost, oauthPort, err = r.ensureOAuthClient(ctx, rc, remote, &tc, ref.Name, topo, host, port)
-			if err != nil {
-				allReady = false
-				notReadyMessages = append(notReadyMessages, fmt.Sprintf("%s: %v", ref.Name, err))
-				statuses = append(statuses, status)
-				continue
-			}
-		}
-
-		params := render.K6WorkloadParams{
-			TestCase:            &tc,
-			DeploymentName:      ref.Name,
-			TargetName:          targetName,
-			BenchHost:           host,
-			BenchPort:           port,
-			RemoteWriteURL:      defaultRemoteWriteURL,
-			ScriptConfigMapName: scriptCM,
-			FixturesSecretName:  fixturesSecretName,
-			OAuthTestClientHost: oauthHost,
-			OAuthTestClientPort: oauthPort,
-		}
-
-		switch tc.Spec.Profile {
-		case benchv1alpha1.ProfileBurn:
-			name, err := r.reconcileBurn(ctx, rc, remote, &tc, ref.Name, params)
-			if err != nil {
-				return ctrl.Result{}, fmt.Errorf("reconcile burn deployment for %q: %w", ref.Name, err)
-			}
-			status.BurnWorkloadRef = &corev1.LocalObjectReference{Name: name}
-		case benchv1alpha1.ProfileQuick:
-			// Execution is a TestRun's job - nothing to reconcile
-			// continuously here; keepBurnNames being empty cleans up any
-			// stale Burn Deployment below if the profile was switched from
-			// Burn to Quick.
-		default:
-			setCondition(r.Recorder, &tc, &tc.Status.Conditions, tc.Generation, benchv1alpha1.ConditionReady, metav1.ConditionFalse,
-				benchv1alpha1.ReasonReconcileError, fmt.Sprintf("unknown profile %q", tc.Spec.Profile))
-			tc.Status.Phase = benchv1alpha1.PhaseFor(tc.Status.Conditions)
-			return ctrl.Result{}, r.Status().Update(ctx, &tc)
-		}
-
-		status.Ready = true
-		statuses = append(statuses, status)
+	}
+	if tc.Spec.Profile != benchv1alpha1.ProfileBurn && tc.Spec.Profile != benchv1alpha1.ProfileQuick {
+		setCondition(r.Recorder, &tc, &tc.Status.Conditions, tc.Generation, benchv1alpha1.ConditionReady, metav1.ConditionFalse,
+			benchv1alpha1.ReasonReconcileError, fmt.Sprintf("unknown profile %q", tc.Spec.Profile))
+		tc.Status.Phase = benchv1alpha1.PhaseFor(tc.Status.Conditions)
+		return ctrl.Result{}, r.Status().Update(ctx, &tc)
 	}
 
 	// Cleans up a target that's been removed from DeploymentRefs (or every
@@ -276,6 +209,105 @@ func (r *TestCaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	}
 	log.Info("reconciled TestCase", "profile", tc.Spec.Profile, "deployments", len(refs))
 	return ctrl.Result{}, nil
+}
+
+// targetResult is one target deployment's own outcome from reconcileTarget.
+// runnerClient is non-nil whenever resolveRunnerClient itself succeeded,
+// even if a later step for this same target (e.g. OAuth provisioning) still
+// failed - that runner cluster was genuinely visited and still needs its
+// stale Burn Deployments cleaned up by the caller.
+type targetResult struct {
+	status        benchv1alpha1.TestCaseDeploymentStatus
+	runnerCluster string
+	runnerClient  client.Client
+	ready         bool
+	requeue       bool
+	notReadyMsg   string
+}
+
+// reconcileTarget resolves and reconciles everything one target deployment
+// of a TestCase needs: deployment readiness, the runner cluster, mirrored
+// script/fixtures, OAuth client provisioning, and the k6 workload itself
+// (Burn only - Quick execution is a TestRun's job). A returned error aborts
+// the whole TestCase reconcile; a not-ready target instead reports itself
+// via the returned result so its siblings still get their own chance to
+// reconcile.
+func (r *TestCaseReconciler) reconcileTarget(ctx context.Context, tc *benchv1alpha1.TestCase, tmpl *benchv1alpha1.TestCaseTemplate, ref corev1.LocalObjectReference) (targetResult, error) {
+	result := targetResult{status: benchv1alpha1.TestCaseDeploymentStatus{Name: ref.Name}}
+
+	topo, targetName, host, port, err := resolveReadyDeployment(ctx, r.Client, tc.Namespace, ref.Name)
+	if err != nil {
+		switch {
+		case apierrors.IsNotFound(err):
+			result.notReadyMsg = fmt.Sprintf("%s: AuthentikDeployment not found", ref.Name)
+		case errors.Is(err, errDeploymentNotReady):
+			result.notReadyMsg = fmt.Sprintf("%s: not Ready yet", ref.Name)
+		default:
+			return targetResult{}, fmt.Errorf("resolve deployment %q: %w", ref.Name, err)
+		}
+		return result, nil
+	}
+
+	rc, remote, err := resolveRunnerClient(ctx, r.Tracker, r.Client, tc.Namespace, tc.Spec.RunnerClusterRef, topo.Spec.ClusterRef)
+	if err != nil {
+		result.requeue = true
+		result.notReadyMsg = fmt.Sprintf("%s: runner cluster unreachable: %v", ref.Name, err)
+		return result, nil
+	}
+	result.runnerCluster = runnerClusterName(tc, topo)
+	result.runnerClient = rc
+	if remote {
+		if err := ensureNamespace(ctx, rc, tc.Namespace); err != nil {
+			return targetResult{}, fmt.Errorf("ensure runner namespace for %q: %w", ref.Name, err)
+		}
+	}
+
+	scriptCM, err := r.ensureScriptConfigMap(ctx, rc, remote, tc, tmpl)
+	if err != nil {
+		return targetResult{}, fmt.Errorf("ensure script configmap for %q: %w", ref.Name, err)
+	}
+	if err := ensureFixturesSecret(ctx, r.Client, rc, tc.Namespace); err != nil {
+		return targetResult{}, fmt.Errorf("ensure fixtures secret for %q: %w", ref.Name, err)
+	}
+
+	var oauthHost string
+	var oauthPort int32
+	if tmpl != nil && tmpl.Spec.RequiresOAuthClient {
+		oauthHost, oauthPort, err = r.ensureOAuthClient(ctx, rc, remote, tc, ref.Name, topo, host, port)
+		if err != nil {
+			result.notReadyMsg = fmt.Sprintf("%s: %v", ref.Name, err)
+			return result, nil
+		}
+	}
+
+	params := render.K6WorkloadParams{
+		TestCase:            tc,
+		DeploymentName:      ref.Name,
+		TargetName:          targetName,
+		BenchHost:           host,
+		BenchPort:           port,
+		RemoteWriteURL:      defaultRemoteWriteURL,
+		ScriptConfigMapName: scriptCM,
+		FixturesSecretName:  fixturesSecretName,
+		OAuthTestClientHost: oauthHost,
+		OAuthTestClientPort: oauthPort,
+	}
+
+	if tc.Spec.Profile == benchv1alpha1.ProfileBurn {
+		name, err := r.reconcileBurn(ctx, rc, remote, tc, ref.Name, params)
+		if err != nil {
+			return targetResult{}, fmt.Errorf("reconcile burn deployment for %q: %w", ref.Name, err)
+		}
+		result.status.BurnWorkloadRef = &corev1.LocalObjectReference{Name: name}
+	}
+	// Quick: execution is a TestRun's job, nothing to reconcile continuously
+	// here. An unrecognized profile is likewise a no-op - Reconcile checks
+	// Spec.Profile's validity itself once, rather than re-deriving the same
+	// TestCase-level verdict for every target.
+
+	result.status.Ready = true
+	result.ready = true
+	return result, nil
 }
 
 func (r *TestCaseReconciler) reconcileDelete(ctx context.Context, tc *benchv1alpha1.TestCase) (ctrl.Result, error) {

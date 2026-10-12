@@ -45,7 +45,7 @@ import (
 // Packed still reach the bundled postgres pod too, not just server/worker.
 func ServerWorkerAffinity(spec benchv1alpha1.PlacementSpec, releaseName, deploymentName string) *corev1.Affinity {
 	ownReleaseSelector := &metav1.LabelSelector{
-		MatchLabels: map[string]string{"app.kubernetes.io/instance": releaseName},
+		MatchLabels: map[string]string{labelAppInstance: releaseName},
 	}
 	aff := &corev1.Affinity{
 		PodAntiAffinity: &corev1.PodAntiAffinity{
@@ -58,12 +58,12 @@ func ServerWorkerAffinity(spec benchv1alpha1.PlacementSpec, releaseName, deploym
 	case benchv1alpha1.PlacementDedicated:
 		aff.PodAntiAffinity.RequiredDuringSchedulingIgnoredDuringExecution = append(
 			aff.PodAntiAffinity.RequiredDuringSchedulingIgnoredDuringExecution,
-			corev1.PodAffinityTerm{LabelSelector: ownReleaseSelector, TopologyKey: "kubernetes.io/hostname"},
+			corev1.PodAffinityTerm{LabelSelector: ownReleaseSelector, TopologyKey: topologyKeyHostname},
 		)
 	case benchv1alpha1.PlacementPacked:
 		aff.PodAffinity = &corev1.PodAffinity{
 			RequiredDuringSchedulingIgnoredDuringExecution: []corev1.PodAffinityTerm{
-				{LabelSelector: ownReleaseSelector, TopologyKey: "kubernetes.io/hostname"},
+				{LabelSelector: ownReleaseSelector, TopologyKey: topologyKeyHostname},
 			},
 		}
 	}

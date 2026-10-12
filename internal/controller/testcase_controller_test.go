@@ -21,7 +21,7 @@ var _ = Describe("TestCase Controller", func() {
 	var topo *benchv1alpha1.AuthentikDeployment
 
 	BeforeEach(func() {
-		topo = createReadyDeployment(context.Background(), "testcase-deployment", "authentik-1", "authentik-1-server.ns.svc.cluster.local", 80)
+		topo = createReadyDeployment(context.Background(), "testcase-deployment", "authentik-1", "authentik-1-server.ns.svc.cluster.local")
 	})
 
 	AfterEach(func() {
@@ -205,7 +205,7 @@ var _ = Describe("TestCase Controller", func() {
 		var topoB *benchv1alpha1.AuthentikDeployment
 
 		BeforeEach(func() {
-			topoB = createReadyDeployment(context.Background(), "testcase-deployment-b", "authentik-2", "authentik-2-server.ns.svc.cluster.local", 80)
+			topoB = createReadyDeployment(context.Background(), "testcase-deployment-b", "authentik-2", "authentik-2-server.ns.svc.cluster.local")
 			tc := &benchv1alpha1.TestCase{
 				Name: resourceName, Namespace: "default",
 				Spec: benchv1alpha1.TestCaseSpec{

@@ -84,7 +84,7 @@ func (s *Server) createGrafanaSession(w http.ResponseWriter, r *http.Request) {
 		Secure:   r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https"),
 		SameSite: http.SameSiteStrictMode,
 	})
-	writeJSON(w, r, http.StatusOK, map[string]string{"expiresAt": expires.UTC().Format(time.RFC3339)})
+	writeJSON(w, r, http.StatusOK, map[string]string{expiresAtKey: expires.UTC().Format(time.RFC3339)})
 }
 
 // grafanaAuthorized accepts either the session cookie (the iframe) or a

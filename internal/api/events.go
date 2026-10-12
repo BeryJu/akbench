@@ -141,8 +141,8 @@ func (s *Server) createEventsSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, r, http.StatusCreated, map[string]any{
-		"ticket":    ticket,
-		"expiresAt": now.Add(eventsTicketTTL).UTC().Format(time.RFC3339),
+		"ticket":     ticket,
+		expiresAtKey: now.Add(eventsTicketTTL).UTC().Format(time.RFC3339),
 	})
 }
 

@@ -25,12 +25,12 @@ const (
 // install sets serviceMonitorSelectorNilUsesHelmValues: false (see
 // KubePrometheusStackHelmValues), so its Prometheus already watches every
 // ServiceMonitor in every namespace regardless of label.
-func newServiceMonitor(name, namespace string, serviceLabels map[string]string, portName string) *unstructured.Unstructured {
+func newServiceMonitor(name string, serviceLabels map[string]string, portName string) *unstructured.Unstructured {
 	u := &unstructured.Unstructured{}
 	u.SetAPIVersion(serviceMonitorAPIVersion)
 	u.SetKind(serviceMonitorKind)
 	u.SetName(name)
-	u.SetNamespace(namespace)
+	u.SetNamespace(ObservabilityNamespace)
 	_ = unstructured.SetNestedStringMap(u.Object, serviceLabels, "spec", "selector", "matchLabels")
 	_ = unstructured.SetNestedSlice(u.Object, []any{
 		map[string]any{"port": portName, "path": "/metrics", "interval": "30s"},

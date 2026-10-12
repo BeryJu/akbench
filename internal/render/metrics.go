@@ -94,8 +94,8 @@ func KubePrometheusStackHelmRepository(namespace string) *sourcev1.HelmRepositor
 // rather than fullname + "-prometheus".
 func prometheusPodLabels() map[string]string {
 	return map[string]string{
-		"app.kubernetes.io/name":     "prometheus",
-		"app.kubernetes.io/instance": kubePrometheusStackFullname,
+		"app.kubernetes.io/name": "prometheus",
+		labelAppInstance:         kubePrometheusStackFullname,
 	}
 }
 
@@ -107,24 +107,24 @@ func prometheusPodLabels() map[string]string {
 func prometheusCompatServices() []map[string]any {
 	labels := prometheusPodLabels()
 	clusterIP := &corev1.Service{
-		Kind: "Service", APIVersion: "v1",
+		Kind: kindService, APIVersion: apiVersionV1,
 		Name: PrometheusServiceName, Namespace: ObservabilityNamespace,
 		Spec: corev1.ServiceSpec{
 			Selector: labels,
 			Ports: []corev1.ServicePort{
-				{Name: "http", Port: 80, TargetPort: intstr.FromInt32(PrometheusPort)},
+				{Name: portNameHTTP, Port: 80, TargetPort: intstr.FromInt32(PrometheusPort)},
 				{Name: "prom-native", Port: PrometheusPort, TargetPort: intstr.FromInt32(PrometheusPort)},
 			},
 		},
 	}
 	nodePort := &corev1.Service{
-		Kind: "Service", APIVersion: "v1",
+		Kind: kindService, APIVersion: apiVersionV1,
 		Name: PrometheusNodePortServiceName, Namespace: ObservabilityNamespace,
 		Spec: corev1.ServiceSpec{
 			Type:     corev1.ServiceTypeNodePort,
 			Selector: labels,
 			Ports: []corev1.ServicePort{
-				{Name: "http", Port: PrometheusPort, TargetPort: intstr.FromInt32(PrometheusPort), NodePort: PrometheusNodePort},
+				{Name: portNameHTTP, Port: PrometheusPort, TargetPort: intstr.FromInt32(PrometheusPort), NodePort: PrometheusNodePort},
 			},
 		},
 	}

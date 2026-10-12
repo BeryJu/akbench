@@ -8,7 +8,7 @@ import (
 
 func TestNewServiceMonitor(t *testing.T) {
 	labels := map[string]string{"app": "widget"}
-	sm := newServiceMonitor("widget", "bench-system", labels, "http")
+	sm := newServiceMonitor("widget", labels, "http")
 
 	if sm.GetAPIVersion() != serviceMonitorAPIVersion {
 		t.Errorf("apiVersion = %q, want %q", sm.GetAPIVersion(), serviceMonitorAPIVersion)

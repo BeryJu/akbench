@@ -44,7 +44,8 @@ func forceDelete(ctx context.Context, obj client.Object) {
 // exercising the real AuthentikDeploymentReconciler (which needs a live
 // helm-controller to ever reach Ready) belongs to authentikdeployment_controller_test.go
 // alone.
-func createReadyDeployment(ctx context.Context, name, targetName, host string, port int32) *benchv1alpha1.AuthentikDeployment {
+func createReadyDeployment(ctx context.Context, name, targetName, host string) *benchv1alpha1.AuthentikDeployment {
+	const port = 80
 	topo := &benchv1alpha1.AuthentikDeployment{
 		Name: name, Namespace: "default",
 		Spec: benchv1alpha1.AuthentikDeploymentSpec{

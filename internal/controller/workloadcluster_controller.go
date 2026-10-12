@@ -174,80 +174,7 @@ func (r *WorkloadClusterReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 
 	if wc.Status.ControlPlaneReady {
 		wc.Status.KubeconfigSecretRef = &corev1.LocalObjectReference{Name: render.KubeconfigSecretName(&wc)}
-		// kubeadm doesn't install a CNI itself - without one, kubelet reports
-		// "cni plugin not initialized" and every Node stays NotReady forever,
-		// so nothing can ever schedule. Best-effort and idempotent (plain
-		// Create, ignore AlreadyExists): logged rather than failing the whole
-		// reconcile, since a transient failure here (e.g. the API server
-		// mid-cert-rotation) shouldn't block updating the rest of this
-		// object's status, and the next reconcile just retries it.
-		if err := r.ensureCNI(ctx, &wc); err != nil {
-			log.Error(err, "failed to ensure CNI on workload cluster")
-			r.Recorder.Eventf(&wc, corev1.EventTypeWarning, "AddonFailed", "failed to ensure CNI: %v", err)
-		}
-		// Same reasoning as ensureCNI: without a default StorageClass, any
-		// PVC left without an explicit storageClassName (the authentik
-		// chart's bundled postgresql, notably) stays Pending forever with
-		// "unbound immediate PersistentVolumeClaims", so any Helm install
-		// waiting on it times out. Installs csi-incus (github.com/BeryJu/
-		// csi-incus) and makes its StorageClass the cluster default (see
-		// CSIIncusStorageClass) - real Incus-backed, resizable,
-		// snapshot-capable volumes, the only StorageClass a workload cluster
-		// gets now (local-path-provisioner was dropped once this became
-		// available). Best-effort/idempotent for the same reason as the
-		// other addons; Incus-specific, so a no-op when spec.incus isn't set
-		// (guarded inside ensureCSIIncus itself, same as the provider check
-		// earlier in this function).
-		if err := r.ensureCSIIncus(ctx, &wc); err != nil {
-			log.Error(err, "failed to ensure csi-incus on workload cluster")
-			r.Recorder.Eventf(&wc, corev1.EventTypeWarning, "AddonFailed", "failed to ensure csi-incus: %v", err)
-		}
-		// Best-effort/idempotent for the same reason as ensureCNI/
-		// ensureCSIIncus: without it, there's no metrics.k8s.io API on this
-		// cluster at all (kubeadm doesn't install it any more than it
-		// installs a CNI), so `kubectl top` has nothing to read from.
-		if err := r.ensureMetricsServer(ctx, &wc); err != nil {
-			log.Error(err, "failed to ensure metrics-server on workload cluster")
-			r.Recorder.Eventf(&wc, corev1.EventTypeWarning, "AddonFailed", "failed to ensure metrics-server: %v", err)
-		}
-		// Same best-effort/idempotent reasoning as the addons above. Unlike
-		// them, this one also resolves a URL cmd/apiserver (on the
-		// management cluster) can reach: a management-cluster pod can reach
-		// a workload cluster's node IPs directly (confirmed live - the
-		// reverse can't), which is what makes the NodePort ensurePrometheus
-		// creates actually useful cross-cluster.
-		if err := r.ensurePrometheus(ctx, &wc); err != nil {
-			log.Error(err, "failed to ensure Prometheus on workload cluster")
-			r.Recorder.Eventf(&wc, corev1.EventTypeWarning, "AddonFailed", "failed to ensure Prometheus: %v", err)
-		}
-		// Best-effort/idempotent, and a no-op unless at least one worker
-		// pool actually sets spec.autoscaling - installing an always-on
-		// cluster-autoscaler for every WorkloadCluster regardless of whether
-		// anything asked for it would be pure waste, the same reasoning
-		// ensureCSIIncus already applies to spec.incus being unset.
-		if err := r.ensureClusterAutoscaler(ctx, &wc); err != nil {
-			log.Error(err, "failed to ensure cluster-autoscaler on workload cluster")
-			r.Recorder.Eventf(&wc, corev1.EventTypeWarning, "AddonFailed", "failed to ensure cluster-autoscaler: %v", err)
-		}
-		// Best-effort/idempotent for the same reason: without these,
-		// authentik's own AUTHENTIK_PYROSCOPE_HOST/
-		// AUTHENTIK_ERROR_REPORTING__OTEL_ENDPOINT env vars
-		// (internal/render/helmrelease.go) point at nothing.
-		if err := r.ensurePyroscope(ctx, &wc); err != nil {
-			log.Error(err, "failed to ensure Pyroscope on workload cluster")
-			r.Recorder.Eventf(&wc, corev1.EventTypeWarning, "AddonFailed", "failed to ensure Pyroscope: %v", err)
-		}
-		if err := r.ensureTempo(ctx, &wc); err != nil {
-			log.Error(err, "failed to ensure Tempo on workload cluster")
-			r.Recorder.Eventf(&wc, corev1.EventTypeWarning, "AddonFailed", "failed to ensure Tempo: %v", err)
-		}
-		// Best-effort/idempotent for the same reason as the other addons -
-		// pre-wired with datasources for all three above, so it's useful the
-		// moment it comes up.
-		if err := r.ensureGrafana(ctx, &wc); err != nil {
-			log.Error(err, "failed to ensure Grafana on workload cluster")
-			r.Recorder.Eventf(&wc, corev1.EventTypeWarning, "AddonFailed", "failed to ensure Grafana: %v", err)
-		}
+		r.ensureAddons(ctx, &wc)
 	}
 
 	ready := metav1.ConditionFalse
@@ -266,6 +193,71 @@ func (r *WorkloadClusterReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	}
 	log.Info("reconciled WorkloadCluster", "phase", wc.Status.Phase, "ready", ready)
 	return ctrl.Result{}, nil
+}
+
+// ensureAddons installs every best-effort, idempotent addon a Ready control
+// plane needs, once its own ensure* method is implemented the same way
+// (plain Create, ignore AlreadyExists). Each addon's failure is logged and
+// reported as an Event rather than failing the whole reconcile: a
+// transient failure here (e.g. the API server mid-cert-rotation) shouldn't
+// block updating the rest of this object's status, and the next reconcile
+// just retries it.
+//
+//   - CNI (ensureCNI): kubeadm doesn't install one itself - without it,
+//     kubelet reports "cni plugin not initialized" and every Node stays
+//     NotReady forever, so nothing can ever schedule.
+//   - csi-incus (ensureCSIIncus): without a default StorageClass, any PVC
+//     left without an explicit storageClassName (the authentik chart's
+//     bundled postgresql, notably) stays Pending forever with "unbound
+//     immediate PersistentVolumeClaims", so any Helm install waiting on it
+//     times out. Installs csi-incus (github.com/BeryJu/csi-incus) and makes
+//     its StorageClass the cluster default (see CSIIncusStorageClass) - real
+//     Incus-backed, resizable, snapshot-capable volumes, the only
+//     StorageClass a workload cluster gets now (local-path-provisioner was
+//     dropped once this became available). Incus-specific, so a no-op when
+//     spec.incus isn't set (guarded inside ensureCSIIncus itself, same as
+//     the provider check earlier in Reconcile).
+//   - metrics-server (ensureMetricsServer): without it, there's no
+//     metrics.k8s.io API on this cluster at all (kubeadm doesn't install it
+//     any more than it installs a CNI), so `kubectl top` has nothing to read
+//     from.
+//   - Prometheus (ensurePrometheus): unlike the addons above, this one also
+//     resolves a URL cmd/apiserver (on the management cluster) can reach: a
+//     management-cluster pod can reach a workload cluster's node IPs
+//     directly (confirmed live - the reverse can't), which is what makes the
+//     NodePort ensurePrometheus creates actually useful cross-cluster.
+//   - cluster-autoscaler (ensureClusterAutoscaler): a no-op unless at least
+//     one worker pool actually sets spec.autoscaling - installing an
+//     always-on cluster-autoscaler for every WorkloadCluster regardless of
+//     whether anything asked for it would be pure waste, the same reasoning
+//     ensureCSIIncus already applies to spec.incus being unset.
+//   - Pyroscope/Tempo (ensurePyroscope/ensureTempo): without these,
+//     authentik's own AUTHENTIK_PYROSCOPE_HOST/
+//     AUTHENTIK_ERROR_REPORTING__OTEL_ENDPOINT env vars
+//     (internal/render/helmrelease.go) point at nothing.
+//   - Grafana (ensureGrafana): pre-wired with datasources for all three
+//     above, so it's useful the moment it comes up.
+func (r *WorkloadClusterReconciler) ensureAddons(ctx context.Context, wc *benchv1alpha1.WorkloadCluster) {
+	log := logf.FromContext(ctx)
+	addons := []struct {
+		name   string
+		ensure func(context.Context, *benchv1alpha1.WorkloadCluster) error
+	}{
+		{"CNI", r.ensureCNI},
+		{"csi-incus", r.ensureCSIIncus},
+		{"metrics-server", r.ensureMetricsServer},
+		{"Prometheus", r.ensurePrometheus},
+		{"cluster-autoscaler", r.ensureClusterAutoscaler},
+		{"Pyroscope", r.ensurePyroscope},
+		{"Tempo", r.ensureTempo},
+		{"Grafana", r.ensureGrafana},
+	}
+	for _, addon := range addons {
+		if err := addon.ensure(ctx, wc); err != nil {
+			log.Error(err, "failed to ensure addon on workload cluster", "addon", addon.name)
+			r.Recorder.Eventf(wc, corev1.EventTypeWarning, "AddonFailed", "failed to ensure %s: %v", addon.name, err)
+		}
+	}
 }
 
 // remoteAddonClient builds a one-off client directly from the

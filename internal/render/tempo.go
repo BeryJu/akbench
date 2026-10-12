@@ -39,7 +39,7 @@ func tempoConfigChecksum() string {
 }
 
 func tempoLabels() map[string]string {
-	return map[string]string{"app": TempoServiceName}
+	return map[string]string{labelKeyApp: TempoServiceName}
 }
 
 // tempoConfig is a minimal single-binary config: OTLP receivers only (no
@@ -94,16 +94,16 @@ func TempoObjects() []client.Object {
 	labels := tempoLabels()
 	return []client.Object{
 		&corev1.Namespace{
-			Kind: "Namespace", APIVersion: "v1",
+			Kind: kindNamespace, APIVersion: apiVersionV1,
 			Name: ObservabilityNamespace,
 		},
 		&corev1.ConfigMap{
-			Kind: "ConfigMap", APIVersion: "v1",
+			Kind: kindConfigMap, APIVersion: apiVersionV1,
 			Name: tempoConfigMapName, Namespace: ObservabilityNamespace,
 			Data: map[string]string{"tempo.yaml": tempoConfig},
 		},
 		&appsv1.Deployment{
-			Kind: "Deployment", APIVersion: "apps/v1",
+			Kind: kindDeployment, APIVersion: apiVersionAppsV1,
 			Name: TempoServiceName, Namespace: ObservabilityNamespace, Labels: labels,
 			Spec: appsv1.DeploymentSpec{
 				Replicas: new(int32(1)),
@@ -148,7 +148,7 @@ func TempoObjects() []client.Object {
 			},
 		},
 		&corev1.Service{
-			Kind: "Service", APIVersion: "v1",
+			Kind: kindService, APIVersion: apiVersionV1,
 			Name: TempoServiceName, Namespace: ObservabilityNamespace, Labels: labels,
 			Spec: corev1.ServiceSpec{
 				Selector: labels,
@@ -163,6 +163,6 @@ func TempoObjects() []client.Object {
 		// above), not the OTLP ingest port - confirmed live (docker run
 		// grafana/tempo:2.6.1, curl :3200/metrics returns real go_*/
 		// deprecated_flags_inuse_total series).
-		newServiceMonitor(TempoServiceName, ObservabilityNamespace, labels, "tempo-query"),
+		newServiceMonitor(TempoServiceName, labels, "tempo-query"),
 	}
 }
