@@ -180,6 +180,12 @@ func TestRenderStack(t *testing.T) {
 	if tag, _, _ := unstructured.NestedString(docs["HelmRelease/authentik-bench-operator"].Object, "spec", "values", "controllerManager", "manager", "image", "tag"); tag != "1.2.3" {
 		t.Errorf("operator image tag = %q, want 1.2.3", tag)
 	}
+	if ns, _, _ := unstructured.NestedString(docs["HelmRelease/authentik-bench-operator"].Object, "spec", "values", "controllerManager", "manager", "env", "benchNamespace"); ns != "bench" {
+		t.Errorf("operator BENCH_NAMESPACE = %q, want bench", ns)
+	}
+	if _, found, _ := unstructured.NestedFieldNoCopy(docs["HelmRelease/authentik-bench-operator"].Object, "spec", "postRenderers"); found {
+		t.Error("postRenderers set - kustomize rejects the chart's duplicate label keys")
+	}
 
 	containers, _, _ := unstructured.NestedSlice(docs["Deployment/apiserver"].Object, "spec", "template", "spec", "containers")
 	c := containers[0].(map[string]any)

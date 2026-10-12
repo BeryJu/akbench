@@ -58,6 +58,10 @@ spec:
         image:
           repository: {{ toJSON .Config.OperatorImage }}
           tag: {{ toJSON .Config.Version }}
+        # Where the operator seeds the built-in TestCaseTemplates; must match
+        # the apiserver's BENCH_NAMESPACE below.
+        env:
+          benchNamespace: {{ toJSON .Config.Namespace }}
         resources:
           limits:
             cpu: "1"
@@ -65,20 +69,6 @@ spec:
           requests:
             cpu: 50m
             memory: 128Mi
-  # The chart has no env passthrough; BENCH_NAMESPACE is where the operator
-  # seeds the built-in TestCaseTemplates and must match the apiserver's.
-  postRenderers:
-    - kustomize:
-        patches:
-          - target:
-              kind: Deployment
-              name: authentik-bench-operator-controller-manager
-            patch: |
-              - op: add
-                path: /spec/template/spec/containers/0/env/-
-                value:
-                  name: BENCH_NAMESPACE
-                  value: {{ toJSON .Config.Namespace }}
 ---
 apiVersion: v1
 kind: ServiceAccount

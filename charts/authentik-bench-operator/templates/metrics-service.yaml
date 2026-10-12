@@ -8,7 +8,6 @@ metadata:
 spec:
   type: {{ .Values.metricsService.type }}
   selector:
-    app.kubernetes.io/name: authentik-bench
     control-plane: controller-manager
     {{- include "authentik-bench-operator.selectorLabels" . | nindent 4 }}
   ports:

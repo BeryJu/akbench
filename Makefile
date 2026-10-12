@@ -194,6 +194,14 @@ build-installer: manifests generate kustomize ## Generate a consolidated YAML wi
 .PHONY: helm-chart
 helm-chart: manifests generate kustomize helmify ## (Re)generate the operator Helm chart in $(HELM_CHART_DIR) from config/default.
 	"$(KUSTOMIZE)" build config/default | "$(HELMIFY)" $(HELM_CHART_DIR)
+	# helmify keeps config/manager's own app.kubernetes.io/name label next to
+	# the selectorLabels it adds, rendering the key twice in the Deployment's
+	# and metrics Service's selectors. Kubernetes keeps the last one (the
+	# chart's), but Flux's post-renderer rejects duplicate keys outright -
+	# so drop the first, which leaves every effective (immutable) selector
+	# unchanged.
+	sed -i.bak '/^ *app\.kubernetes\.io\/name: authentik-bench$$/d' $(HELM_CHART_DIR)/templates/*.yaml
+	rm -f $(HELM_CHART_DIR)/templates/*.yaml.bak
 
 ##@ Appliance
 

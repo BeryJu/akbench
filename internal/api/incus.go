@@ -67,11 +67,17 @@ type incusCredentialInput struct {
 }
 
 func (s *Server) incusUsers(r *http.Request) (map[string][]string, error) {
+	users := map[string][]string{}
 	var clusters benchv1alpha1.WorkloadClusterList
 	if err := s.client.List(r.Context(), &clusters, client.InNamespace(s.cfg.Namespace)); err != nil {
+		// Before the operator's CRDs are installed (e.g. an appliance still
+		// bootstrapping), no cluster can use a connection yet - which
+		// mustn't stop connections from being set up in the meantime.
+		if isNoMatch(err) {
+			return users, nil
+		}
 		return nil, err
 	}
-	users := map[string][]string{}
 	for _, wc := range clusters.Items {
 		if wc.Spec.Incus != nil && wc.Spec.Incus.LXCSecretRef.Name != "" {
 			users[wc.Spec.Incus.LXCSecretRef.Name] = append(users[wc.Spec.Incus.LXCSecretRef.Name], wc.Name)
