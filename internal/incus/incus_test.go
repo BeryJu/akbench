@@ -12,6 +12,9 @@ import (
 	corev1 "k8s.io/api/core/v1"
 )
 
+// trustToken is the only token fakeIncus accepts for POST /1.0/certificates.
+const trustToken = "tok"
+
 // writeSync/writeError answer in the Incus REST API's own envelopes, which
 // the official client decodes.
 func writeSync(w http.ResponseWriter, metadata any) {
@@ -31,7 +34,7 @@ func writeError(w http.ResponseWriter, code int, msg string) {
 // "trusted" only for a client certificate whose fingerprint has been added
 // to its trust store, which POST /1.0/certificates with the right token
 // does; instance state comes from states, keyed "<name>@<project>".
-func fakeIncus(t *testing.T, token string, states map[string]any) *httptest.Server {
+func fakeIncus(t *testing.T, states map[string]any) *httptest.Server {
 	t.Helper()
 	trusted := map[string]bool{}
 	clientFingerprint := func(r *http.Request) string {
@@ -56,7 +59,7 @@ func fakeIncus(t *testing.T, token string, states map[string]any) *httptest.Serv
 				TrustToken string `json:"trust_token"`
 			}
 			_ = json.NewDecoder(r.Body).Decode(&body)
-			if body.TrustToken != token {
+			if body.TrustToken != trustToken {
 				writeError(w, http.StatusForbidden, "Invalid trust token")
 				return
 			}
@@ -94,7 +97,7 @@ func serverCertPEM(srv *httptest.Server) string {
 }
 
 func TestProbeUnverifiedServerReturnsItsCertificate(t *testing.T) {
-	srv := fakeIncus(t, "tok", nil)
+	srv := fakeIncus(t, nil)
 	res := Probe(t.Context(), newConnection(t, srv.URL))
 	if res.Reachable || res.ServerCert == "" || res.ServerCertFingerprint != Fingerprint(serverCertPEM(srv)) {
 		t.Fatalf("unexpected result: %+v", res)
@@ -105,7 +108,7 @@ func TestProbeUnverifiedServerReturnsItsCertificate(t *testing.T) {
 }
 
 func TestProbePinnedThenTrustWithToken(t *testing.T) {
-	srv := fakeIncus(t, "tok", nil)
+	srv := fakeIncus(t, nil)
 	c := newConnection(t, srv.URL)
 	c.ServerCert = serverCertPEM(srv)
 
@@ -125,7 +128,7 @@ func TestProbePinnedThenTrustWithToken(t *testing.T) {
 }
 
 func TestProbeRejectsMismatchedPin(t *testing.T) {
-	srv := fakeIncus(t, "tok", nil)
+	srv := fakeIncus(t, nil)
 	c := newConnection(t, srv.URL)
 	// Every httptest server shares one built-in certificate, so pin an
 	// unrelated one instead of another server's.
@@ -137,7 +140,7 @@ func TestProbeRejectsMismatchedPin(t *testing.T) {
 }
 
 func TestProbeInsecureSkipVerify(t *testing.T) {
-	srv := fakeIncus(t, "tok", nil)
+	srv := fakeIncus(t, nil)
 	c := newConnection(t, srv.URL)
 	c.InsecureSkipVerify = true
 	if res := Probe(t.Context(), c); !res.Reachable || res.ServerCertFingerprint == "" {
@@ -146,7 +149,7 @@ func TestProbeInsecureSkipVerify(t *testing.T) {
 }
 
 func TestProbeUnreachable(t *testing.T) {
-	srv := fakeIncus(t, "tok", nil)
+	srv := fakeIncus(t, nil)
 	url := srv.URL
 	srv.Close()
 	res := Probe(t.Context(), newConnection(t, url))
@@ -156,7 +159,7 @@ func TestProbeUnreachable(t *testing.T) {
 }
 
 func TestInstanceAddresses(t *testing.T) {
-	srv := fakeIncus(t, "tok", map[string]any{
+	srv := fakeIncus(t, map[string]any{
 		"c1-abcde-lb@bench": map[string]any{"network": map[string]any{
 			"lo":   map[string]any{"type": "loopback", "addresses": []any{map[string]any{"family": "inet", "address": "127.0.0.1", "netmask": "8", "scope": "local"}}},
 			"cni0": map[string]any{"type": "broadcast", "addresses": []any{map[string]any{"family": "inet", "address": "10.244.0.1", "netmask": "24", "scope": "global"}}},

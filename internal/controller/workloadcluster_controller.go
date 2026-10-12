@@ -132,40 +132,12 @@ func (r *WorkloadClusterReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		return ctrl.Result{}, r.Status().Update(ctx, &wc)
 	}
 
-	// KubeadmControlPlane/MachineDeployment must not be created until the
-	// Cluster's controlPlaneEndpoint is populated (copied up from
-	// LXCCluster.status once Incus provisions the load balancer): the
-	// kubeadm bootstrap provider bakes controlPlaneEndpoint into the very
-	// first control-plane machine's ClusterConfiguration, which is also what
-	// tells kubeadm to add it as an apiserver certificate SAN. Created
-	// before that, the machine boots with a cert that's only valid for its
-	// own IP, and every client going through the load balancer's IP/DNS -
-	// including this operator's own multicluster tracker - fails TLS
-	// verification permanently for that machine's lifetime.
-	if existing.Spec.ControlPlaneEndpoint.Host == "" {
+	if waiting, requeue, err := r.ensureControlPlane(ctx, &wc, &existing); err != nil {
+		return ctrl.Result{}, err
+	} else if waiting != "" {
 		setCondition(r.Recorder, &wc, &wc.Status.Conditions, wc.Generation, benchv1alpha1.ConditionReady, metav1.ConditionFalse,
-			benchv1alpha1.ReasonReconciling, "waiting for the load balancer's controlPlaneEndpoint before creating the control plane")
-		return ctrl.Result{RequeueAfter: 2 * time.Second}, r.Status().Update(ctx, &wc)
-	}
-	// Only before the control plane exists - see preferIPv4Endpoint.
-	var kcp controlplanev1.KubeadmControlPlane
-	kcpKey := client.ObjectKeyFromObject(render.KubeadmControlPlane(&wc))
-	if err := r.Get(ctx, kcpKey, &kcp); apierrors.IsNotFound(err) {
-		wait, err := r.preferIPv4Endpoint(ctx, &wc, &existing)
-		if err != nil {
-			return ctrl.Result{}, err
-		}
-		if wait {
-			setCondition(r.Recorder, &wc, &wc.Status.Conditions, wc.Generation, benchv1alpha1.ConditionReady, metav1.ConditionFalse,
-				benchv1alpha1.ReasonReconciling, "waiting for the load balancer's IPv4 address before creating the control plane")
-			return ctrl.Result{RequeueAfter: 5 * time.Second}, r.Status().Update(ctx, &wc)
-		}
-	} else if err != nil {
-		return ctrl.Result{}, fmt.Errorf("get KubeadmControlPlane: %w", err)
-	}
-
-	if err := applyCreateOnly(ctx, r.Client, r.Scheme, &wc, render.KubeadmControlPlane(&wc)); err != nil {
-		return ctrl.Result{}, fmt.Errorf("apply KubeadmControlPlane: %w", err)
+			benchv1alpha1.ReasonReconciling, waiting)
+		return ctrl.Result{RequeueAfter: requeue}, r.Status().Update(ctx, &wc)
 	}
 	// MachineDeployments are applied only once the Cluster exists - CAPI's
 	// own webhook/validation rejects a MachineDeployment naming a Cluster
@@ -628,6 +600,46 @@ func createIfMissing(ctx context.Context, c client.Client, obj client.Object) er
 		return nil
 	}
 	return fmt.Errorf("create %s %s/%s: %w", gvk.Kind, key.Namespace, key.Name, err)
+}
+
+// ensureControlPlane creates the KubeadmControlPlane once it is safe to.
+// A non-empty waiting message means it isn't yet: the caller reports it as
+// the Ready condition and requeues after requeue.
+//
+// KubeadmControlPlane/MachineDeployment must not be created until the
+// Cluster's controlPlaneEndpoint is populated (copied up from
+// LXCCluster.status once Incus provisions the load balancer): the
+// kubeadm bootstrap provider bakes controlPlaneEndpoint into the very
+// first control-plane machine's ClusterConfiguration, which is also what
+// tells kubeadm to add it as an apiserver certificate SAN. Created
+// before that, the machine boots with a cert that's only valid for its
+// own IP, and every client going through the load balancer's IP/DNS -
+// including this operator's own multicluster tracker - fails TLS
+// verification permanently for that machine's lifetime. For the same
+// reason, an IPv6 endpoint is swapped for IPv4 here, before the control
+// plane exists - see preferIPv4Endpoint.
+func (r *WorkloadClusterReconciler) ensureControlPlane(ctx context.Context, wc *benchv1alpha1.WorkloadCluster, cluster *clusterv1.Cluster) (waiting string, requeue time.Duration, err error) {
+	if cluster.Spec.ControlPlaneEndpoint.Host == "" {
+		return "waiting for the load balancer's controlPlaneEndpoint before creating the control plane", 2 * time.Second, nil
+	}
+	kcp := render.KubeadmControlPlane(wc)
+	var existing controlplanev1.KubeadmControlPlane
+	switch err := r.Get(ctx, client.ObjectKeyFromObject(kcp), &existing); {
+	case apierrors.IsNotFound(err):
+		wait, err := r.preferIPv4Endpoint(ctx, wc, cluster)
+		if err != nil {
+			return "", 0, err
+		}
+		if wait {
+			return "waiting for the load balancer's IPv4 address before creating the control plane", 5 * time.Second, nil
+		}
+	case err != nil:
+		return "", 0, fmt.Errorf("get KubeadmControlPlane: %w", err)
+	}
+	if err := applyCreateOnly(ctx, r.Client, r.Scheme, wc, kcp); err != nil {
+		return "", 0, fmt.Errorf("apply KubeadmControlPlane: %w", err)
+	}
+	return "", 0, nil
 }
 
 // deleteRemovedWorkerPools deletes the MachineDeployment (and, via CAPI's own

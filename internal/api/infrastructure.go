@@ -10,7 +10,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -192,8 +191,8 @@ func (s *Server) enableInfrastructureProvider(w http.ResponseWriter, r *http.Req
 		switch err := s.client.Get(r.Context(), key, &cm); {
 		case apierrors.IsNotFound(err):
 			cm = corev1.ConfigMap{
-				ObjectMeta: metav1.ObjectMeta{Name: key.Name, Namespace: key.Namespace},
-				Data:       map[string]string{appliance.ProvidersKeyInfrastructure: value},
+				Name: key.Name, Namespace: key.Namespace,
+				Data: map[string]string{appliance.ProvidersKeyInfrastructure: value},
 			}
 			err = s.client.Create(r.Context(), &cm)
 			if err != nil {

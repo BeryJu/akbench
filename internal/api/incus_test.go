@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 
 	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
@@ -15,7 +14,7 @@ import (
 
 func incusCluster(name, secret string) *benchv1alpha1.WorkloadCluster {
 	return &benchv1alpha1.WorkloadCluster{
-		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: testNamespace},
+		Name: name, Namespace: testNamespace,
 		Spec: benchv1alpha1.WorkloadClusterSpec{
 			Provider: benchv1alpha1.InfrastructureIncus,
 			Incus:    &benchv1alpha1.IncusProviderSpec{LXCSecretRef: corev1.LocalObjectReference{Name: secret}},
@@ -99,12 +98,12 @@ func TestIncusCredentialsIncludeReferencedSecrets(t *testing.T) {
 	// A Secret created by hand on a `main`-era setup: no label, but a
 	// WorkloadCluster uses it - listed, and protected from deletion.
 	migrated := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: "lxc-secret", Namespace: testNamespace},
-		Data:       incus.Connection{Server: "https://incus:8443", ClientCert: cert, ClientKey: key}.SecretData(),
+		Name: "lxc-secret", Namespace: testNamespace,
+		Data: incus.Connection{Server: "https://incus:8443", ClientCert: cert, ClientKey: key}.SecretData(),
 	}
 	unrelated := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: "db-password", Namespace: testNamespace},
-		Data:       map[string][]byte{"password": []byte("hunter2")},
+		Name: "db-password", Namespace: testNamespace,
+		Data: map[string][]byte{"password": []byte("hunter2")},
 	}
 	s, _ := newServer(t, Config{}, migrated, unrelated, incusCluster("wc1", "lxc-secret"))
 

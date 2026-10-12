@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
@@ -17,7 +16,7 @@ import (
 
 func applianceStatus(shipped string) *corev1.ConfigMap {
 	return &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{Name: appliance.StatusConfigMap, Namespace: appliance.SystemNamespace},
+		Name: appliance.StatusConfigMap, Namespace: appliance.SystemNamespace,
 		Data: map[string]string{
 			appliance.StatusKeyShipped:  shipped,
 			appliance.StatusKeyError:    "",

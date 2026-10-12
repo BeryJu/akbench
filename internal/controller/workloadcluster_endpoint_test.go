@@ -32,21 +32,21 @@ func endpointFixture(t *testing.T, host string, created time.Time) (*WorkloadClu
 	scheme.AddKnownTypeWithName(gvk.GroupVersion().WithKind(gvk.Kind+"List"), &unstructured.UnstructuredList{})
 
 	wc := &benchv1alpha1.WorkloadCluster{
-		ObjectMeta: metav1.ObjectMeta{Name: "c1", Namespace: "default"},
+		Name: "c1", Namespace: "default",
 		Spec: benchv1alpha1.WorkloadClusterSpec{
 			Provider: benchv1alpha1.InfrastructureIncus,
 			Incus:    &benchv1alpha1.IncusProviderSpec{LXCSecretRef: corev1.LocalObjectReference{Name: "lab"}},
 		},
 	}
 	cluster := &clusterv1.Cluster{
-		ObjectMeta: metav1.ObjectMeta{Name: "c1", Namespace: "default", CreationTimestamp: metav1.NewTime(created)},
-		Spec:       clusterv1.ClusterSpec{ControlPlaneEndpoint: clusterv1.APIEndpoint{Host: host, Port: 6443}},
+		Name: "c1", Namespace: "default", CreationTimestamp: metav1.NewTime(created),
+		Spec: clusterv1.ClusterSpec{ControlPlaneEndpoint: clusterv1.APIEndpoint{Host: host, Port: 6443}},
 	}
 	lxcCluster := render.LXCCluster(wc)
 	_ = unstructured.SetNestedField(lxcCluster.Object, host, "spec", "controlPlaneEndpoint", "host")
 	secret := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: "lab", Namespace: "default"},
-		Data:       incus.Connection{Server: "https://incus:8443"}.SecretData(),
+		Name: "lab", Namespace: "default",
+		Data: incus.Connection{Server: "https://incus:8443"}.SecretData(),
 	}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(wc, cluster, lxcCluster, secret).Build()
 	return &WorkloadClusterReconciler{Client: c, Scheme: scheme}, wc, cluster

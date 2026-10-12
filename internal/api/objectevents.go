@@ -2,7 +2,7 @@ package api
 
 import (
 	"net/http"
-	"sort"
+	"slices"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -62,7 +62,7 @@ func (s *Server) listObjectEvents(k resourceKind) http.HandlerFunc {
 				last: last,
 			})
 		}
-		sort.SliceStable(matched, func(i, j int) bool { return matched[i].last.After(matched[j].last) })
+		slices.SortStableFunc(matched, func(a, b sortable) int { return b.last.Compare(a.last) })
 		items := make([]ObjectEvent, len(matched))
 		for i, m := range matched {
 			items[i] = m.event

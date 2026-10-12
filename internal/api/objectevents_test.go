@@ -11,7 +11,7 @@ import (
 
 func testEvent(name, kind, object, reason string, last time.Time) *corev1.Event {
 	return &corev1.Event{
-		ObjectMeta:     metav1.ObjectMeta{Name: name, Namespace: testNamespace},
+		Name: name, Namespace: testNamespace,
 		InvolvedObject: corev1.ObjectReference{Kind: kind, Name: object, Namespace: testNamespace},
 		Type:           corev1.EventTypeNormal,
 		Reason:         reason,

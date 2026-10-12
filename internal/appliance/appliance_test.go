@@ -385,8 +385,7 @@ func TestServeStartsProviderLoopBeforeBootstrapFinishes(t *testing.T) {
 		}
 		return f.run(ctx, stdin, name, args...)
 	}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	go func() { _ = b.Serve(ctx) }()
 	select {
 	case <-installed:

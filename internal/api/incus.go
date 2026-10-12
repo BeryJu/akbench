@@ -10,7 +10,6 @@ import (
 	"github.com/go-chi/chi/v5"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/validation"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -228,12 +227,10 @@ func (s *Server) createIncusCredential(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	secret := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: in.Name, Namespace: s.cfg.Namespace,
-			Labels: map[string]string{credentialsLabel: incusProviderID},
-		},
-		Type: corev1.SecretTypeOpaque,
-		Data: conn.SecretData(),
+		Name: in.Name, Namespace: s.cfg.Namespace,
+		Labels: map[string]string{credentialsLabel: incusProviderID},
+		Type:   corev1.SecretTypeOpaque,
+		Data:   conn.SecretData(),
 	}
 	if err := s.client.Create(r.Context(), secret); err != nil {
 		writeAPIError(w, r, err)
