@@ -218,3 +218,13 @@ func TestMachineDeploymentAutoscalingAnnotations(t *testing.T) {
 		t.Errorf("non-autoscaled pool got the min-size annotation anyway: %v", fixedMD.Annotations)
 	}
 }
+
+func TestLoadBalancerInstanceName(t *testing.T) {
+	// Pinned against cluster-api-provider-incus's own
+	// LXCCluster.GetLoadBalancerInstanceName for namespace "default".
+	wc := &benchv1alpha1.WorkloadCluster{}
+	wc.Name, wc.Namespace = "bench-prod-incus", "default"
+	if got := LoadBalancerInstanceName(wc); got != "bench-prod-incus-37a8e-lb" {
+		t.Errorf("got %q", got)
+	}
+}

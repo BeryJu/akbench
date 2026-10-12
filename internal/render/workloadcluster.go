@@ -1,12 +1,15 @@
 package render
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"hash/fnv"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	bootstrapv1 "sigs.k8s.io/cluster-api/api/bootstrap/kubeadm/v1beta2"
 	controlplanev1 "sigs.k8s.io/cluster-api/api/controlplane/kubeadm/v1beta2"
@@ -236,6 +239,21 @@ func LXCCluster(wc *benchv1alpha1.WorkloadCluster) *unstructured.Unstructured {
 	_ = unstructured.SetNestedField(u.Object, incus.LXCSecretRef.Name, "spec", "secretRef", "name")
 	_ = unstructured.SetNestedField(u.Object, dualStackHAProxyConfigTemplate, "spec", "loadBalancer", "lxc", "customHAProxyConfigTemplate")
 	return u
+}
+
+// LoadBalancerInstanceName is the Incus instance name cluster-api-provider-
+// incus gives the LXCCluster's load balancer container - mirrored from its
+// LXCCluster.GetLoadBalancerInstanceName (api/v1alpha2/lxccluster_types.go),
+// which derives it from the LXCCluster's own name and namespace rather than
+// recording it anywhere this operator could read it back.
+func LoadBalancerInstanceName(wc *benchv1alpha1.WorkloadCluster) string {
+	hash := sha256.Sum256([]byte(wc.Namespace))
+	return fmt.Sprintf("%s-%s-lb", wc.Name, hex.EncodeToString(hash[:3])[:5])
+}
+
+// LXCClusterGVK identifies the LXCCluster kind for unstructured reads.
+func LXCClusterGVK() schema.GroupVersionKind {
+	return schema.FromAPIVersionAndKind(lxcInfraAPIVersion, lxcClusterKind)
 }
 
 // lxcMachineTemplateObject builds one LXCMachineTemplate - the same shape for

@@ -146,3 +146,31 @@ func TestConnectionRoundTripAndValidate(t *testing.T) {
 		}
 	}
 }
+
+func TestInstanceAddresses(t *testing.T) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/1.0/instances/c1-abcde-lb/state" || r.URL.Query().Get("project") != "bench" {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = w.Write([]byte(`{"metadata":{"network":{
+			"lo":{"type":"loopback","host_name":"","addresses":[{"family":"inet","address":"127.0.0.1","netmask":"8","scope":"local"}]},
+			"cni0":{"type":"broadcast","host_name":"","addresses":[{"family":"inet","address":"10.244.0.1","netmask":"24","scope":"global"}]},
+			"eth0":{"type":"broadcast","host_name":"veth1","addresses":[
+				{"family":"inet6","address":"fd42::5","netmask":"64","scope":"global"},
+				{"family":"inet6","address":"fe80::5","netmask":"64","scope":"link"},
+				{"family":"inet","address":"10.28.104.7","netmask":"24","scope":"global"},
+				{"family":"inet","address":"10.28.104.200","netmask":"32","scope":"global"}]}}}}`))
+	}))
+	t.Cleanup(srv.Close)
+	c := newConnection(t, srv.URL)
+	c.Project = "bench"
+	c.InsecureSkipVerify = true
+	v4, v6, err := InstanceAddresses(t.Context(), c, "c1-abcde-lb")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(v4, ",") != "10.28.104.7" || strings.Join(v6, ",") != "fd42::5" {
+		t.Errorf("v4 %v v6 %v", v4, v6)
+	}
+}

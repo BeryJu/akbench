@@ -26,6 +26,7 @@ import (
 	"math/big"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
@@ -339,4 +340,49 @@ func (c Connection) do(ctx context.Context, method, path string, payload []byte)
 		return body, presented, &apiError{status: resp.StatusCode, message: e.Error}
 	}
 	return body, presented, nil
+}
+
+// InstanceAddresses returns an instance's host-facing addresses split by
+// family, filtered the way cluster-api-provider-incus itself picks an
+// instance's addresses (internal/lxc.ParseHostAddresses there): only NICs
+// with a host-side interface, only global scope, no /32 or /128 VIPs.
+func InstanceAddresses(ctx context.Context, c Connection, name string) (ipv4, ipv6 []string, err error) {
+	body, _, err := c.do(ctx, http.MethodGet, "/1.0/instances/"+url.PathEscape(name)+"/state", nil)
+	if err != nil {
+		return nil, nil, err
+	}
+	var state struct {
+		Metadata struct {
+			Network map[string]struct {
+				Type      string `json:"type"`
+				HostName  string `json:"host_name"`
+				Addresses []struct {
+					Family  string `json:"family"`
+					Address string `json:"address"`
+					Netmask string `json:"netmask"`
+					Scope   string `json:"scope"`
+				} `json:"addresses"`
+			} `json:"network"`
+		} `json:"metadata"`
+	}
+	if err := json.Unmarshal(body, &state); err != nil {
+		return nil, nil, fmt.Errorf("decode state of instance %s: %w", name, err)
+	}
+	for _, nic := range state.Metadata.Network {
+		if nic.Type == "loopback" || nic.HostName == "" {
+			continue
+		}
+		for _, a := range nic.Addresses {
+			switch {
+			case a.Scope != "global":
+			case a.Family == "inet" && a.Netmask != "32":
+				ipv4 = append(ipv4, a.Address)
+			case a.Family == "inet6" && a.Netmask != "128":
+				ipv6 = append(ipv6, a.Address)
+			}
+		}
+	}
+	slices.Sort(ipv4)
+	slices.Sort(ipv6)
+	return ipv4, ipv6, nil
 }

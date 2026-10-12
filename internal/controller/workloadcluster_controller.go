@@ -19,6 +19,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
+	controlplanev1 "sigs.k8s.io/cluster-api/api/controlplane/kubeadm/v1beta2"
 	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 	capikubeconfig "sigs.k8s.io/cluster-api/util/kubeconfig"
 
@@ -145,6 +146,22 @@ func (r *WorkloadClusterReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		setCondition(r.Recorder, &wc, &wc.Status.Conditions, wc.Generation, benchv1alpha1.ConditionReady, metav1.ConditionFalse,
 			benchv1alpha1.ReasonReconciling, "waiting for the load balancer's controlPlaneEndpoint before creating the control plane")
 		return ctrl.Result{RequeueAfter: 2 * time.Second}, r.Status().Update(ctx, &wc)
+	}
+	// Only before the control plane exists - see preferIPv4Endpoint.
+	var kcp controlplanev1.KubeadmControlPlane
+	kcpKey := client.ObjectKeyFromObject(render.KubeadmControlPlane(&wc))
+	if err := r.Get(ctx, kcpKey, &kcp); apierrors.IsNotFound(err) {
+		wait, err := r.preferIPv4Endpoint(ctx, &wc, &existing)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+		if wait {
+			setCondition(r.Recorder, &wc, &wc.Status.Conditions, wc.Generation, benchv1alpha1.ConditionReady, metav1.ConditionFalse,
+				benchv1alpha1.ReasonReconciling, "waiting for the load balancer's IPv4 address before creating the control plane")
+			return ctrl.Result{RequeueAfter: 5 * time.Second}, r.Status().Update(ctx, &wc)
+		}
+	} else if err != nil {
+		return ctrl.Result{}, fmt.Errorf("get KubeadmControlPlane: %w", err)
 	}
 
 	if err := applyCreateOnly(ctx, r.Client, r.Scheme, &wc, render.KubeadmControlPlane(&wc)); err != nil {
