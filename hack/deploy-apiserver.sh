@@ -22,7 +22,10 @@ if ! git -C "$ROOT" diff --quiet 2>/dev/null || ! git -C "$ROOT" diff --cached -
 fi
 IMAGE="${BENCH_APISERVER_IMAGE_REPO:-authentik-bench-apiserver}:$TAG"
 
-docker build -f "$ROOT/Dockerfile.apiserver" -t "$IMAGE" "$ROOT"
+docker build -f "$ROOT/Dockerfile.apiserver" \
+    --build-arg VERSION="$TAG" \
+    --build-arg COMMIT="$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || true)" \
+    -t "$IMAGE" "$ROOT"
 minikube image load "$IMAGE"
 
 sed "s|authentik-bench-apiserver:dev|$IMAGE|" "$ROOT/hack/dev-apiserver.yaml" | kubectl apply -f -

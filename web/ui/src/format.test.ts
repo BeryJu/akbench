@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  buildLabel,
   colorFor,
   formatDuration,
   formatMetricValue,
@@ -157,5 +158,23 @@ describe('readableTextOn', () => {
   it('uses white on dark colors and ink on light ones', () => {
     expect(readableTextOn('#0066cc')).toBe('#ffffff');
     expect(readableTextOn('#f0ab00')).toBe('#151515');
+  });
+});
+
+describe('buildLabel', () => {
+  it('appends the short commit to a release version', () => {
+    expect(buildLabel({ version: '2026.10.1', commit: '0123456789abcdef' })).toBe('2026.10.1 · 0123456');
+  });
+
+  it('does not repeat a commit the version already carries', () => {
+    expect(buildLabel({ version: '0.0.0-main.0123456', commit: '0123456789abcdef' })).toBe('0.0.0-main.0123456');
+  });
+
+  it('marks a build from a tree with local changes', () => {
+    expect(buildLabel({ version: 'dev', commit: '0123456789abcdef', dirty: true })).toBe('dev · 0123456-dirty');
+  });
+
+  it('shows just the version without a commit', () => {
+    expect(buildLabel({ version: 'dev' })).toBe('dev');
   });
 });

@@ -21,7 +21,14 @@ RUN go mod download
 
 COPY . .
 
-RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o apiserver ./cmd/apiserver
+# VERSION/COMMIT identify the build in the UI's sidebar (internal/api/version.go).
+# CI passes the release version and the commit; a local build gets "dev".
+ARG VERSION=dev
+ARG COMMIT=
+RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a \
+    -ldflags "-X github.com/goauthentik/authentik-bench/internal/api.Version=${VERSION} \
+              -X github.com/goauthentik/authentik-bench/internal/api.Commit=${COMMIT}" \
+    -o apiserver ./cmd/apiserver
 
 # kubectl from the official release, checksum-verified. Kept within one
 # minor version of the clusters it talks to (kubectl's supported skew) -

@@ -117,6 +117,7 @@ jobs:
           build-args: |
             VERSION=${{ needs.meta.outputs.version }}
             IMAGE_REPO=${{ needs.meta.outputs.image }}
+            COMMIT=${{ github.sha }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha,scope=${{ matrix.name }}

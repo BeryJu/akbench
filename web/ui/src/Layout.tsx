@@ -1,6 +1,9 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router';
+import { api } from './api';
+import { buildLabel } from './format';
 import { useAuth } from './auth';
+import { useResource } from './useResource';
 
 // xterm.js only loads once the shell is first opened.
 const ShellWorkspace = lazy(async () => ({ default: (await import('./shell/ShellWorkspace')).ShellWorkspace }));
@@ -40,6 +43,30 @@ const infraSection: NavSection = {
     { to: '/shell', label: 'Shell' },
   ],
 };
+
+const REPO_URL = 'https://github.com/BeryJu/akbench';
+
+/** BuildBadge identifies the running build, so a screenshot or bug report
+ * always says which one it came from. Links to the commit when known. */
+function BuildBadge() {
+  const build = useResource(() => api.version(), [], 0);
+  const info = build.data;
+  if (!info) {
+    return null;
+  }
+  const title = [info.commit && `Commit ${info.commit}`, info.goVersion && `Built with ${info.goVersion}`]
+    .filter(Boolean)
+    .join('\n');
+  return info.commit ? (
+    <a className="build-badge" href={`${REPO_URL}/commit/${info.commit}`} target="_blank" rel="noreferrer" title={title}>
+      {buildLabel(info)}
+    </a>
+  ) : (
+    <span className="build-badge" title={title || undefined}>
+      {buildLabel(info)}
+    </span>
+  );
+}
 
 function NavSectionLinks({ section }: { section: NavSection }) {
   return (
@@ -81,6 +108,7 @@ export function Layout() {
           <NavSectionLinks section={infraSection} />
         </div>
         <div className="sidebar-foot">
+          <BuildBadge />
           {identity && <span>Signed in as {identity}</span>}
           <button className="small" onClick={() => void logout()}>
             Sign out

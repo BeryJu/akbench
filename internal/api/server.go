@@ -146,6 +146,7 @@ func (s *Server) Router() http.Handler {
 
 			r.Post("/grafana/session", s.createGrafanaSession)
 			r.Get("/traces/breakdown", s.traceBreakdown)
+			r.Get("/version", s.getVersion)
 			r.Get("/clusters", s.listClusters)
 			r.Post("/clusters", s.registerCluster)
 			r.Get("/clusters/{name}", s.getCluster)

@@ -102,6 +102,13 @@ export interface AuthConfig {
   oidc?: { issuer: string; clientId: string; scopes: string[] };
 }
 
+export interface BuildInfo {
+  version: string;
+  commit?: string;
+  dirty?: boolean;
+  goVersion?: string;
+}
+
 export interface ShellContext {
   name: string;
   cluster: string;
@@ -109,6 +116,8 @@ export interface ShellContext {
 
 export const api = {
   authConfig: () => request<AuthConfig>('/api/v1/auth/config'),
+  // The running apiserver build (internal/api/version.go).
+  version: () => request<BuildInfo>('/api/v1/version'),
 
   // -- Clusters: internal/api/clusters.go's convenience endpoints - the
   // management cluster plus every CAPI Cluster (for pickers);

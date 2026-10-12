@@ -145,3 +145,14 @@ export function metricsAnchorFromRuns(
   const rangeSeconds = Math.max(900, endSeconds - startSeconds + 120);
   return { endSeconds, rangeSeconds };
 }
+
+/** buildLabel shows the version, plus the short commit unless the version
+ * already carries it (main builds are versioned 0.0.0-main.<sha>). */
+export function buildLabel(info: { version: string; commit?: string; dirty?: boolean }): string {
+  const short = info.commit?.slice(0, 7);
+  let label = info.version;
+  if (short && !label.includes(short)) {
+    label = `${label} · ${short}`;
+  }
+  return info.dirty ? `${label}-dirty` : label;
+}
