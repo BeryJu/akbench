@@ -227,6 +227,23 @@ func KubePrometheusStackHelmValues(wc *benchv1alpha1.WorkloadCluster) (*apiexten
 			m["nodeSelector"] = poolSelector
 			m["tolerations"] = poolTolerations
 		}
+		// admissionWebhooks.patch is a separate one-shot Job (not the
+		// operator Deployment itself) the chart runs as a Helm hook to
+		// provision the operator's webhook cert - its own nodeSelector/
+		// tolerations keys, confirmed against the chart's own values.yaml,
+		// are nested here rather than inherited from prometheusOperator's
+		// top-level ones above. Missed this the first time a live cluster
+		// had every node tainted across all three pools: with no
+		// toleration of its own, this hook Job couldn't land anywhere at
+		// all ("0/N nodes are available: N node(s) had untolerated
+		// taint(s)"), blocking the whole HelmRelease upgrade until its own
+		// 15-minute timeout.
+		prometheusOperator["admissionWebhooks"] = map[string]any{
+			"patch": map[string]any{
+				"nodeSelector": poolSelector,
+				"tolerations":  poolTolerations,
+			},
+		}
 	}
 
 	raw, err := json.Marshal(map[string]any{

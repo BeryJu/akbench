@@ -40,6 +40,12 @@ func TestKubePrometheusStackHelmValuesTargetsMonitoringPool(t *testing.T) {
 	assertPoolSelector("alertmanager", "alertmanagerSpec")
 	assertPoolSelector("prometheusOperator")
 	assertPoolSelector("kube-state-metrics")
+	// The admission-webhook cert patch is a separate one-shot Helm-hook Job,
+	// not the operator Deployment itself - a real live-cluster regression
+	// once every node in a cluster carries one of the three pool taints:
+	// with no toleration of its own, this hook couldn't schedule anywhere
+	// at all, blocking the whole HelmRelease upgrade.
+	assertPoolSelector("prometheusOperator", "admissionWebhooks", "patch")
 
 	if _, ok := values["prometheus-node-exporter"]; ok {
 		t.Error(`"prometheus-node-exporter" values were set - it must stay untouched (chart defaults), since it has to report every node's metrics regardless of pool`)
