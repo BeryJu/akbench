@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"hash/fnv"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -239,6 +240,23 @@ func LXCCluster(wc *benchv1alpha1.WorkloadCluster) *unstructured.Unstructured {
 	_ = unstructured.SetNestedField(u.Object, incus.LXCSecretRef.Name, "spec", "secretRef", "name")
 	_ = unstructured.SetNestedField(u.Object, dualStackHAProxyConfigTemplate, "spec", "loadBalancer", "lxc", "customHAProxyConfigTemplate")
 	return u
+}
+
+// AddonHelmReleaseName is the HelmRelease object name for one of wc's
+// add-ons (base being the add-on's fixed Helm release name, e.g.
+// CNIHelmReleaseName). Every WorkloadCluster's add-on HelmReleases live in
+// its own namespace on the management cluster, so a fixed object name would
+// have two clusters in one namespace share - and keep overwriting - one
+// HelmRelease. Only the object is per-cluster: spec.releaseName stays base,
+// so the Helm release on the workload cluster itself keeps its name.
+// Truncated with a hash suffix to stay within the 63-character limit.
+func AddonHelmReleaseName(wc *benchv1alpha1.WorkloadCluster, base string) string {
+	name := base + "-" + wc.Name
+	if len(name) <= 63 {
+		return name
+	}
+	sum := sha256.Sum256([]byte(wc.Name))
+	return strings.TrimRight(name[:54], "-") + "-" + hex.EncodeToString(sum[:])[:8]
 }
 
 // LoadBalancerInstanceName is the Incus instance name cluster-api-provider-

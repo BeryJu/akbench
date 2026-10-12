@@ -95,12 +95,12 @@ func DeschedulerHelmValues(wc *benchv1alpha1.WorkloadCluster) (*apiextensionsv1.
 }
 
 // DeschedulerHelmRelease builds the Flux HelmRelease that installs
-// descheduler onto a workload cluster remotely - kubeConfigSecretName is the
-// "<cluster>-kubeconfig" Secret CAPI writes (see render.KubeconfigSecretName).
-func DeschedulerHelmRelease(namespace, kubeConfigSecretName string, values *apiextensionsv1.JSON) *helmv2.HelmRelease {
+// descheduler onto a workload cluster remotely, through wc's "<cluster>-kubeconfig" Secret CAPI writes (see
+// KubeconfigSecretName). Its object name is per-cluster (AddonHelmReleaseName).
+func DeschedulerHelmRelease(wc *benchv1alpha1.WorkloadCluster, values *apiextensionsv1.JSON) *helmv2.HelmRelease {
 	return &helmv2.HelmRelease{
-		Name:      DeschedulerHelmReleaseName,
-		Namespace: namespace,
+		Name:      AddonHelmReleaseName(wc, DeschedulerHelmReleaseName),
+		Namespace: wc.Namespace,
 		Spec: helmv2.HelmReleaseSpec{
 			Interval:    metav1.Duration{Duration: helmRepoInterval},
 			Timeout:     &metav1.Duration{Duration: helmInstallTimeout},
@@ -112,14 +112,14 @@ func DeschedulerHelmRelease(namespace, kubeConfigSecretName string, values *apie
 					SourceRef: helmv2.CrossNamespaceObjectReference{
 						Kind:      sourcev1.HelmRepositoryKind,
 						Name:      DeschedulerHelmRepositoryName,
-						Namespace: namespace,
+						Namespace: wc.Namespace,
 					},
 				},
 			},
 			TargetNamespace: DeschedulerNamespace,
 			Values:          values,
 			KubeConfig: &fluxmeta.KubeConfigReference{
-				SecretRef: &fluxmeta.SecretKeyReference{Name: kubeConfigSecretName},
+				SecretRef: &fluxmeta.SecretKeyReference{Name: KubeconfigSecretName(wc)},
 			},
 		},
 	}

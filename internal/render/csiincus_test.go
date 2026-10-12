@@ -103,10 +103,10 @@ func TestCSIIncusHelmRelease(t *testing.T) {
 		t.Fatalf("CSIIncusHelmValues: %v", err)
 	}
 
-	hr := CSIIncusHelmRelease("default", "my-cluster-kubeconfig", values)
+	hr := CSIIncusHelmRelease(addonTestCluster("my-cluster"), values)
 
-	if hr.Name != CSIIncusHelmReleaseName {
-		t.Errorf("name = %q, want %q", hr.Name, CSIIncusHelmReleaseName)
+	if hr.Name != "csi-incus-my-cluster" || hr.Spec.ReleaseName != CSIIncusHelmReleaseName {
+		t.Errorf("name = %q / releaseName = %q, want a per-cluster name and releaseName %q", hr.Name, hr.Spec.ReleaseName, CSIIncusHelmReleaseName)
 	}
 	if hr.Namespace != "default" {
 		t.Errorf("namespace = %q, want default", hr.Namespace)

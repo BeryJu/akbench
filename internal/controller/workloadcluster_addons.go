@@ -10,8 +10,11 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
+	"github.com/goauthentik/authentik-bench/internal/render"
 )
 
 // addonState works out an add-on's status after its ensure func ran: the
@@ -95,4 +98,44 @@ func setAddonStatus(wc *benchv1alpha1.WorkloadCluster, name string, state benchv
 	wc.Status.Addons = append(wc.Status.Addons, benchv1alpha1.AddonStatus{
 		Name: name, State: state, Message: message, LastTransitionTime: metav1.Now(),
 	})
+}
+
+// migrateLegacyAddonHelmRelease removes the HelmRelease an older operator
+// created for one of wc's add-ons under a fixed name (e.g. "flannel"), now
+// that each add-on's HelmRelease is named per cluster
+// (render.AddonHelmReleaseName) - without uninstalling the Helm release it
+// manages. The per-cluster HelmRelease keeps the same spec.releaseName and
+// storage namespace, so helm-controller finds the existing release in
+// storage, treats it as unmanaged and upgrades it in place rather than
+// installing it again. The old object is suspended first: helm-controller
+// only uninstalls a deleted HelmRelease's release when it isn't suspended.
+// A fixed-name HelmRelease controlled by anything else (another cluster in
+// the same namespace, from before the rename) is left alone.
+func (r *WorkloadClusterReconciler) migrateLegacyAddonHelmRelease(ctx context.Context, wc *benchv1alpha1.WorkloadCluster, name string) error {
+	if name == "" || name == render.AddonHelmReleaseName(wc, name) {
+		return nil
+	}
+	var hr helmv2.HelmRelease
+	err := r.Get(ctx, types.NamespacedName{Namespace: wc.Namespace, Name: name}, &hr)
+	if apierrors.IsNotFound(err) || (err == nil && !metav1.IsControlledBy(&hr, wc)) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("get legacy HelmRelease %s: %w", name, err)
+	}
+	if !hr.Spec.Suspend {
+		patch := client.MergeFrom(hr.DeepCopy())
+		hr.Spec.Suspend = true
+		if err := r.Patch(ctx, &hr, patch); err != nil {
+			return fmt.Errorf("suspend legacy HelmRelease %s: %w", name, err)
+		}
+	}
+	if hr.DeletionTimestamp.IsZero() {
+		if err := r.Delete(ctx, &hr); err != nil && !apierrors.IsNotFound(err) {
+			return fmt.Errorf("delete legacy HelmRelease %s: %w", name, err)
+		}
+		logf.FromContext(ctx).Info("Replaced legacy add-on HelmRelease with a per-cluster one, keeping its Helm release",
+			"legacy", name, "new", render.AddonHelmReleaseName(wc, name))
+	}
+	return nil
 }

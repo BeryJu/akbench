@@ -228,3 +228,24 @@ func TestLoadBalancerInstanceName(t *testing.T) {
 		t.Errorf("got %q", got)
 	}
 }
+
+// addonTestCluster is a WorkloadCluster in "default", whose kubeconfig
+// Secret is "<name>-kubeconfig".
+func addonTestCluster(name string) *benchv1alpha1.WorkloadCluster {
+	return &benchv1alpha1.WorkloadCluster{Name: name, Namespace: "default"}
+}
+
+func TestAddonHelmReleaseName(t *testing.T) {
+	if got := AddonHelmReleaseName(addonTestCluster("c1"), CNIHelmReleaseName); got != "flannel-c1" {
+		t.Errorf("got %q", got)
+	}
+	long := addonTestCluster(strings.Repeat("a", 50))
+	other := addonTestCluster(strings.Repeat("a", 49) + "b")
+	got := AddonHelmReleaseName(long, KubePrometheusStackHelmReleaseName)
+	if len(got) > 63 || !strings.HasPrefix(got, "kube-prometheus-stack-") {
+		t.Errorf("long name %q (%d chars)", got, len(got))
+	}
+	if got == AddonHelmReleaseName(other, KubePrometheusStackHelmReleaseName) {
+		t.Error("truncated names of different clusters collide")
+	}
+}

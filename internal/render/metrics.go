@@ -308,10 +308,10 @@ func KubePrometheusStackHelmValues(wc *benchv1alpha1.WorkloadCluster) (*apiexten
 // install exists to provide, and bumping kubePrometheusStackChartVersion
 // later should actually update them rather than silently stay on whatever
 // version first got installed.
-func KubePrometheusStackHelmRelease(namespace, kubeConfigSecretName string, values *apiextensionsv1.JSON) *helmv2.HelmRelease {
+func KubePrometheusStackHelmRelease(wc *benchv1alpha1.WorkloadCluster, values *apiextensionsv1.JSON) *helmv2.HelmRelease {
 	return &helmv2.HelmRelease{
-		Name:      KubePrometheusStackHelmReleaseName,
-		Namespace: namespace,
+		Name:      AddonHelmReleaseName(wc, KubePrometheusStackHelmReleaseName),
+		Namespace: wc.Namespace,
 		Spec: helmv2.HelmReleaseSpec{
 			Interval:    metav1.Duration{Duration: helmRepoInterval},
 			Timeout:     &metav1.Duration{Duration: helmInstallTimeout},
@@ -323,7 +323,7 @@ func KubePrometheusStackHelmRelease(namespace, kubeConfigSecretName string, valu
 					SourceRef: helmv2.CrossNamespaceObjectReference{
 						Kind:      sourcev1.HelmRepositoryKind,
 						Name:      kubePrometheusStackHelmRepositoryName,
-						Namespace: namespace,
+						Namespace: wc.Namespace,
 					},
 				},
 			},
@@ -332,7 +332,7 @@ func KubePrometheusStackHelmRelease(namespace, kubeConfigSecretName string, valu
 			Upgrade:         &helmv2.Upgrade{CRDs: helmv2.CreateReplace},
 			Values:          values,
 			KubeConfig: &fluxmeta.KubeConfigReference{
-				SecretRef: &fluxmeta.SecretKeyReference{Name: kubeConfigSecretName},
+				SecretRef: &fluxmeta.SecretKeyReference{Name: KubeconfigSecretName(wc)},
 			},
 		},
 	}

@@ -5,6 +5,8 @@ import (
 	fluxmeta "github.com/fluxcd/pkg/apis/meta"
 	sourcev1 "github.com/fluxcd/source-controller/api/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
 )
 
 // Flannel is installed via its own official Helm chart now (flannel-io.github.io/flannel),
@@ -42,14 +44,14 @@ func CNIHelmRepository(namespace string) *sourcev1.HelmRepository {
 }
 
 // CNIHelmRelease builds the Flux HelmRelease that installs Flannel onto a
-// workload cluster remotely - kubeConfigSecretName is the
-// "<cluster>-kubeconfig" Secret CAPI writes (see render.KubeconfigSecretName).
+// workload cluster remotely, through wc's "<cluster>-kubeconfig" Secret CAPI writes (see
+// KubeconfigSecretName). Its object name is per-cluster (AddonHelmReleaseName).
 // CreateNamespace is set since, unlike csi-incus's kube-system, kube-flannel
 // doesn't already exist on a fresh kubeadm cluster.
-func CNIHelmRelease(namespace, kubeConfigSecretName string) *helmv2.HelmRelease {
+func CNIHelmRelease(wc *benchv1alpha1.WorkloadCluster) *helmv2.HelmRelease {
 	return &helmv2.HelmRelease{
-		Name:      CNIHelmReleaseName,
-		Namespace: namespace,
+		Name:      AddonHelmReleaseName(wc, CNIHelmReleaseName),
+		Namespace: wc.Namespace,
 		Spec: helmv2.HelmReleaseSpec{
 			Interval:    metav1.Duration{Duration: helmRepoInterval},
 			Timeout:     &metav1.Duration{Duration: helmInstallTimeout},
@@ -61,14 +63,14 @@ func CNIHelmRelease(namespace, kubeConfigSecretName string) *helmv2.HelmRelease 
 					SourceRef: helmv2.CrossNamespaceObjectReference{
 						Kind:      sourcev1.HelmRepositoryKind,
 						Name:      CNIHelmRepositoryName,
-						Namespace: namespace,
+						Namespace: wc.Namespace,
 					},
 				},
 			},
 			TargetNamespace: CNINamespace,
 			Install:         &helmv2.Install{CreateNamespace: true},
 			KubeConfig: &fluxmeta.KubeConfigReference{
-				SecretRef: &fluxmeta.SecretKeyReference{Name: kubeConfigSecretName},
+				SecretRef: &fluxmeta.SecretKeyReference{Name: KubeconfigSecretName(wc)},
 			},
 		},
 	}

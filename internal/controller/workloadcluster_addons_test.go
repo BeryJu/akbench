@@ -114,3 +114,44 @@ func TestSetAddonStatusKeepsTransitionTime(t *testing.T) {
 		t.Errorf("addons = %+v", wc.Status.Addons)
 	}
 }
+
+func TestMigrateLegacyAddonHelmRelease(t *testing.T) {
+	// Owned by this cluster: suspended (so helm-controller won't uninstall
+	// the release) and deleted. A finalizer stands in for helm-controller's
+	// own, keeping the object around to inspect.
+	legacy := func(wc *benchv1alpha1.WorkloadCluster, scheme *runtime.Scheme) client.Object {
+		hr := helmRelease("flannel", true, 1, 1, nil)(wc, scheme)
+		hr.SetFinalizers([]string{helmv2.HelmReleaseFinalizer})
+		return hr
+	}
+	r, wc := addonFixture(t, legacy)
+	if err := r.migrateLegacyAddonHelmRelease(t.Context(), wc, "flannel"); err != nil {
+		t.Fatal(err)
+	}
+	var hr helmv2.HelmRelease
+	if err := r.Get(t.Context(), client.ObjectKey{Namespace: "default", Name: "flannel"}, &hr); err != nil {
+		t.Fatal(err)
+	}
+	if !hr.Spec.Suspend || hr.DeletionTimestamp.IsZero() {
+		t.Errorf("legacy HelmRelease: suspend %v, deleting %v - want both", hr.Spec.Suspend, !hr.DeletionTimestamp.IsZero())
+	}
+	// Idempotent while helm-controller is still finalizing it.
+	if err := r.migrateLegacyAddonHelmRelease(t.Context(), wc, "flannel"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Another cluster's (or anything else's): untouched.
+	r, wc = addonFixture(t, helmRelease("flannel", false, 1, 1, nil))
+	if err := r.migrateLegacyAddonHelmRelease(t.Context(), wc, "flannel"); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Get(t.Context(), client.ObjectKey{Namespace: "default", Name: "flannel"}, &hr); err != nil || hr.Spec.Suspend {
+		t.Errorf("foreign HelmRelease touched: err %v suspend %v", err, hr.Spec.Suspend)
+	}
+
+	// Nothing to migrate.
+	r, wc = addonFixture(t)
+	if err := r.migrateLegacyAddonHelmRelease(t.Context(), wc, "flannel"); err != nil {
+		t.Fatal(err)
+	}
+}

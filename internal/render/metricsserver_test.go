@@ -42,10 +42,10 @@ func TestMetricsServerHelmRelease(t *testing.T) {
 		t.Fatalf("MetricsServerHelmValues: %v", err)
 	}
 
-	hr := MetricsServerHelmRelease("default", "my-cluster-kubeconfig", values)
+	hr := MetricsServerHelmRelease(addonTestCluster("my-cluster"), values)
 
-	if hr.Name != MetricsServerHelmReleaseName {
-		t.Errorf("name = %q, want %q", hr.Name, MetricsServerHelmReleaseName)
+	if hr.Name != "metrics-server-my-cluster" || hr.Spec.ReleaseName != MetricsServerHelmReleaseName {
+		t.Errorf("name = %q / releaseName = %q, want a per-cluster name and releaseName %q", hr.Name, hr.Spec.ReleaseName, MetricsServerHelmReleaseName)
 	}
 	if hr.Spec.Chart.Spec.Chart != metricsServerChartName {
 		t.Errorf("chart = %q, want %q", hr.Spec.Chart.Spec.Chart, metricsServerChartName)

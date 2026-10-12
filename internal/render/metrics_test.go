@@ -264,10 +264,10 @@ func TestKubePrometheusStackHelmRelease(t *testing.T) {
 		t.Fatalf("KubePrometheusStackHelmValues: %v", err)
 	}
 
-	hr := KubePrometheusStackHelmRelease("default", "my-cluster-kubeconfig", values)
+	hr := KubePrometheusStackHelmRelease(addonTestCluster("my-cluster"), values)
 
-	if hr.Name != KubePrometheusStackHelmReleaseName {
-		t.Errorf("name = %q, want %q", hr.Name, KubePrometheusStackHelmReleaseName)
+	if hr.Name != "kube-prometheus-stack-my-cluster" || hr.Spec.ReleaseName != KubePrometheusStackHelmReleaseName {
+		t.Errorf("name = %q / releaseName = %q, want a per-cluster name and releaseName %q", hr.Name, hr.Spec.ReleaseName, KubePrometheusStackHelmReleaseName)
 	}
 	if hr.Spec.Chart.Spec.Chart != kubePrometheusStackChartName {
 		t.Errorf("chart = %q, want %q", hr.Spec.Chart.Spec.Chart, kubePrometheusStackChartName)

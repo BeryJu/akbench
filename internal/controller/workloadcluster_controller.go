@@ -244,27 +244,36 @@ func (r *WorkloadClusterReconciler) ensureAddons(ctx context.Context, wc *benchv
 		// namespace), which its state is read from; empty for add-ons
 		// applied directly.
 		helmRelease string
+		// legacyHelmRelease is the fixed, cluster-unscoped name an older
+		// operator gave that HelmRelease - see migrateLegacyAddonHelmRelease.
+		legacyHelmRelease string
+	}
+	helmAddon := func(name string, ensure func(context.Context, *benchv1alpha1.WorkloadCluster) error, release string) addon {
+		return addon{name, ensure, render.AddonHelmReleaseName(wc, release), release}
 	}
 	addons := []addon{
-		{"CNI", r.ensureCNI, render.CNIHelmReleaseName},
-		{"metrics-server", r.ensureMetricsServer, render.MetricsServerHelmReleaseName},
-		{"Prometheus", r.ensurePrometheus, render.KubePrometheusStackHelmReleaseName},
-		{"cluster-autoscaler", r.ensureClusterAutoscaler, render.ClusterAutoscalerHelmReleaseName(wc)},
-		{"Pyroscope", r.ensurePyroscope, ""},
-		{"Tempo", r.ensureTempo, ""},
-		{"Grafana", r.ensureGrafana, ""},
-		{"descheduler", r.ensureDescheduler, render.DeschedulerHelmReleaseName},
+		helmAddon("CNI", r.ensureCNI, render.CNIHelmReleaseName),
+		helmAddon("metrics-server", r.ensureMetricsServer, render.MetricsServerHelmReleaseName),
+		helmAddon("Prometheus", r.ensurePrometheus, render.KubePrometheusStackHelmReleaseName),
+		{name: "cluster-autoscaler", ensure: r.ensureClusterAutoscaler, helmRelease: render.ClusterAutoscalerHelmReleaseName(wc)},
+		{name: "Pyroscope", ensure: r.ensurePyroscope},
+		{name: "Tempo", ensure: r.ensureTempo},
+		{name: "Grafana", ensure: r.ensureGrafana},
+		helmAddon("descheduler", r.ensureDescheduler, render.DeschedulerHelmReleaseName),
 	}
 	// csi-incus is Incus-specific (and a no-op without spec.incus).
 	if wc.Spec.Incus != nil {
-		addons = slices.Insert(addons, 1, addon{"csi-incus", r.ensureCSIIncus, render.CSIIncusHelmReleaseName})
+		addons = slices.Insert(addons, 1, helmAddon("csi-incus", r.ensureCSIIncus, render.CSIIncusHelmReleaseName))
 	}
 	previous := map[string]benchv1alpha1.AddonState{}
 	for _, a := range wc.Status.Addons {
 		previous[a.Name] = a.State
 	}
 	for _, addon := range addons {
-		err := addon.ensure(ctx, wc)
+		err := r.migrateLegacyAddonHelmRelease(ctx, wc, addon.legacyHelmRelease)
+		if err == nil {
+			err = addon.ensure(ctx, wc)
+		}
 		state, message := r.addonState(ctx, wc, addon.helmRelease, err)
 		setAddonStatus(wc, addon.name, state, message)
 		switch {
@@ -311,7 +320,7 @@ func (r *WorkloadClusterReconciler) ensureCNI(ctx context.Context, wc *benchv1al
 	if err := applyOwned(ctx, r.Client, r.Scheme, wc, render.CNIHelmRepository(wc.Namespace)); err != nil {
 		return fmt.Errorf("apply CNI HelmRepository: %w", err)
 	}
-	hr := render.CNIHelmRelease(wc.Namespace, render.KubeconfigSecretName(wc))
+	hr := render.CNIHelmRelease(wc)
 	if err := applyOwned(ctx, r.Client, r.Scheme, wc, hr); err != nil {
 		return fmt.Errorf("apply CNI HelmRelease: %w", err)
 	}
@@ -346,7 +355,7 @@ func (r *WorkloadClusterReconciler) ensureCSIIncus(ctx context.Context, wc *benc
 	if err := applyOwned(ctx, r.Client, r.Scheme, wc, render.CSIIncusHelmRepository(wc.Namespace)); err != nil {
 		return fmt.Errorf("apply csi-incus HelmRepository: %w", err)
 	}
-	hr := render.CSIIncusHelmRelease(wc.Namespace, render.KubeconfigSecretName(wc), values)
+	hr := render.CSIIncusHelmRelease(wc, values)
 	if err := applyOwned(ctx, r.Client, r.Scheme, wc, hr); err != nil {
 		return fmt.Errorf("apply csi-incus HelmRelease: %w", err)
 	}
@@ -366,7 +375,7 @@ func (r *WorkloadClusterReconciler) ensureDescheduler(ctx context.Context, wc *b
 	if err := applyOwned(ctx, r.Client, r.Scheme, wc, render.DeschedulerHelmRepository(wc.Namespace)); err != nil {
 		return fmt.Errorf("apply descheduler HelmRepository: %w", err)
 	}
-	hr := render.DeschedulerHelmRelease(wc.Namespace, render.KubeconfigSecretName(wc), values)
+	hr := render.DeschedulerHelmRelease(wc, values)
 	if err := applyOwned(ctx, r.Client, r.Scheme, wc, hr); err != nil {
 		return fmt.Errorf("apply descheduler HelmRelease: %w", err)
 	}
@@ -384,7 +393,7 @@ func (r *WorkloadClusterReconciler) ensureMetricsServer(ctx context.Context, wc 
 	if err := applyOwned(ctx, r.Client, r.Scheme, wc, render.MetricsServerHelmRepository(wc.Namespace)); err != nil {
 		return fmt.Errorf("apply metrics-server HelmRepository: %w", err)
 	}
-	hr := render.MetricsServerHelmRelease(wc.Namespace, render.KubeconfigSecretName(wc), values)
+	hr := render.MetricsServerHelmRelease(wc, values)
 	if err := applyOwned(ctx, r.Client, r.Scheme, wc, hr); err != nil {
 		return fmt.Errorf("apply metrics-server HelmRelease: %w", err)
 	}
@@ -452,7 +461,7 @@ func (r *WorkloadClusterReconciler) ensurePrometheus(ctx context.Context, wc *be
 	if err := applyOwned(ctx, r.Client, r.Scheme, wc, render.KubePrometheusStackHelmRepository(wc.Namespace)); err != nil {
 		return fmt.Errorf("apply kube-prometheus-stack HelmRepository: %w", err)
 	}
-	hr := render.KubePrometheusStackHelmRelease(wc.Namespace, render.KubeconfigSecretName(wc), values)
+	hr := render.KubePrometheusStackHelmRelease(wc, values)
 	if err := applyOwned(ctx, r.Client, r.Scheme, wc, hr); err != nil {
 		return fmt.Errorf("apply kube-prometheus-stack HelmRelease: %w", err)
 	}

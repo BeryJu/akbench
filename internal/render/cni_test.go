@@ -17,10 +17,10 @@ func TestCNIHelmRepository(t *testing.T) {
 }
 
 func TestCNIHelmRelease(t *testing.T) {
-	hr := CNIHelmRelease("default", "my-cluster-kubeconfig")
+	hr := CNIHelmRelease(addonTestCluster("my-cluster"))
 
-	if hr.Name != CNIHelmReleaseName {
-		t.Errorf("name = %q, want %q", hr.Name, CNIHelmReleaseName)
+	if hr.Name != "flannel-my-cluster" || hr.Spec.ReleaseName != CNIHelmReleaseName {
+		t.Errorf("name = %q / releaseName = %q, want a per-cluster name and releaseName %q", hr.Name, hr.Spec.ReleaseName, CNIHelmReleaseName)
 	}
 	if hr.Spec.Chart.Spec.Chart != cniChartName {
 		t.Errorf("chart = %q, want %q", hr.Spec.Chart.Spec.Chart, cniChartName)

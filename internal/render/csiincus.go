@@ -147,12 +147,12 @@ func CSIIncusHelmValues(source *corev1.Secret, wc *benchv1alpha1.WorkloadCluster
 }
 
 // CSIIncusHelmRelease builds the Flux HelmRelease that installs csi-incus
-// onto a workload cluster remotely - kubeConfigSecretName is the
-// "<cluster>-kubeconfig" Secret CAPI writes (see render.KubeconfigSecretName).
-func CSIIncusHelmRelease(namespace, kubeConfigSecretName string, values *apiextensionsv1.JSON) *helmv2.HelmRelease {
+// onto a workload cluster remotely, through wc's "<cluster>-kubeconfig" Secret CAPI writes (see
+// KubeconfigSecretName). Its object name is per-cluster (AddonHelmReleaseName).
+func CSIIncusHelmRelease(wc *benchv1alpha1.WorkloadCluster, values *apiextensionsv1.JSON) *helmv2.HelmRelease {
 	return &helmv2.HelmRelease{
-		Name:      CSIIncusHelmReleaseName,
-		Namespace: namespace,
+		Name:      AddonHelmReleaseName(wc, CSIIncusHelmReleaseName),
+		Namespace: wc.Namespace,
 		Spec: helmv2.HelmReleaseSpec{
 			Interval:    metav1.Duration{Duration: helmRepoInterval},
 			Timeout:     &metav1.Duration{Duration: helmInstallTimeout},
@@ -164,14 +164,14 @@ func CSIIncusHelmRelease(namespace, kubeConfigSecretName string, values *apiexte
 					SourceRef: helmv2.CrossNamespaceObjectReference{
 						Kind:      sourcev1.HelmRepositoryKind,
 						Name:      CSIIncusHelmRepositoryName,
-						Namespace: namespace,
+						Namespace: wc.Namespace,
 					},
 				},
 			},
 			TargetNamespace: CSIIncusNamespace,
 			Values:          values,
 			KubeConfig: &fluxmeta.KubeConfigReference{
-				SecretRef: &fluxmeta.SecretKeyReference{Name: kubeConfigSecretName},
+				SecretRef: &fluxmeta.SecretKeyReference{Name: KubeconfigSecretName(wc)},
 			},
 		},
 	}

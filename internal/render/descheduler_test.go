@@ -50,7 +50,7 @@ func TestDeschedulerHelmRelease(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DeschedulerHelmValues: %v", err)
 	}
-	hr := DeschedulerHelmRelease("default", "wc-1-kubeconfig", values)
+	hr := DeschedulerHelmRelease(addonTestCluster("wc-1"), values)
 	if hr.Spec.TargetNamespace != DeschedulerNamespace {
 		t.Errorf("targetNamespace = %q, want %q", hr.Spec.TargetNamespace, DeschedulerNamespace)
 	}

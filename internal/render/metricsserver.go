@@ -80,10 +80,10 @@ func MetricsServerHelmValues(wc *benchv1alpha1.WorkloadCluster) (*apiextensionsv
 // metrics-server onto a workload cluster remotely - kubeConfigSecretName is
 // the "<cluster>-kubeconfig" Secret CAPI writes (see
 // render.KubeconfigSecretName).
-func MetricsServerHelmRelease(namespace, kubeConfigSecretName string, values *apiextensionsv1.JSON) *helmv2.HelmRelease {
+func MetricsServerHelmRelease(wc *benchv1alpha1.WorkloadCluster, values *apiextensionsv1.JSON) *helmv2.HelmRelease {
 	return &helmv2.HelmRelease{
-		Name:      MetricsServerHelmReleaseName,
-		Namespace: namespace,
+		Name:      AddonHelmReleaseName(wc, MetricsServerHelmReleaseName),
+		Namespace: wc.Namespace,
 		Spec: helmv2.HelmReleaseSpec{
 			Interval:    metav1.Duration{Duration: helmRepoInterval},
 			Timeout:     &metav1.Duration{Duration: helmInstallTimeout},
@@ -95,14 +95,14 @@ func MetricsServerHelmRelease(namespace, kubeConfigSecretName string, values *ap
 					SourceRef: helmv2.CrossNamespaceObjectReference{
 						Kind:      sourcev1.HelmRepositoryKind,
 						Name:      MetricsServerHelmRepositoryName,
-						Namespace: namespace,
+						Namespace: wc.Namespace,
 					},
 				},
 			},
 			TargetNamespace: MetricsServerNamespace,
 			Values:          values,
 			KubeConfig: &fluxmeta.KubeConfigReference{
-				SecretRef: &fluxmeta.SecretKeyReference{Name: kubeConfigSecretName},
+				SecretRef: &fluxmeta.SecretKeyReference{Name: KubeconfigSecretName(wc)},
 			},
 		},
 	}
