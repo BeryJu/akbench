@@ -17,6 +17,7 @@ import {
   TestCase,
   TestCaseSpec,
   TestCaseTemplate,
+  ObjectEvent,
   TestCaseTemplateSpec,
   TestRun,
   TraceBreakdown,
@@ -92,6 +93,10 @@ interface ObjectInput<Spec> {
 
 const json = (method: string, body: unknown): RequestInit => ({ method, body: JSON.stringify(body) });
 const seg = encodeURIComponent;
+
+/** ResourcePath is a bench kind's /api/v1/<path> segment
+ * (internal/api/resources.go's resourceKinds). */
+export type ResourcePath = 'deployments' | 'testcases' | 'testcasetemplates' | 'testruns' | 'workloadclusters';
 
 export interface AuthConfig {
   oidc?: { issuer: string; clientId: string; scopes: string[] };
@@ -220,6 +225,11 @@ export const api = {
   // target, from each target's own workload cluster Tempo.
   traceBreakdown: (testid: string, window: string) =>
     request<TraceBreakdown>(`/api/v1/traces/breakdown?testid=${seg(testid)}&window=${seg(window)}`),
+
+  // -- Kubernetes Events about one bench object, newest first
+  // (internal/api/objectevents.go).
+  objectEvents: (path: ResourcePath, name: string) =>
+    request<List<ObjectEvent>>(`/api/v1/${path}/${seg(name)}/events`).then(r => r.items ?? []),
 
   // -- Alerts (internal/api/alerts.go) - aggregated across every workload
   // cluster's own Alertmanager, there is no central instance.

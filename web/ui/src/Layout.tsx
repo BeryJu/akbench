@@ -5,24 +5,24 @@ import { useAuth } from './auth';
 // xterm.js only loads once the shell is first opened.
 const ShellWorkspace = lazy(async () => ({ default: (await import('./shell/ShellWorkspace')).ShellWorkspace }));
 
-// Grouped by what you're doing with it, not alphabetically or by when it
-// was added: overview first, then the things you define/configure, then the
-// things that show what already happened. Shell stays separate below a
-// divider - it's a tool, not a resource view.
-const navSections: { label?: string; items: { to: string; label: string; end?: boolean }[] }[] = [
+// Grouped by what you're doing with it: overview first, then setting up
+// and running load tests, then reading their results. Infrastructure -
+// clusters and the machines under them, set up once and rarely touched -
+// sits apart at the bottom of the sidebar, with the shell.
+type NavSection = { label?: string; items: { to: string; label: string; end?: boolean }[] };
+
+const navSections: NavSection[] = [
   { items: [{ to: '/', label: 'Dashboard', end: true }] },
   {
-    label: 'Configure',
+    label: 'Load tests',
     items: [
-      { to: '/infrastructure', label: 'Infrastructure' },
-      { to: '/clusters', label: 'Clusters' },
-      { to: '/deployments', label: 'Deployments' },
       { to: '/testcases', label: 'Test cases' },
+      { to: '/deployments', label: 'Deployments' },
       { to: '/testcasetemplates', label: 'Test case templates' },
     ],
   },
   {
-    label: 'Activity',
+    label: 'Results',
     items: [
       { to: '/testruns', label: 'Test runs' },
       { to: '/compare', label: 'Compare' },
@@ -31,6 +31,28 @@ const navSections: { label?: string; items: { to: string; label: string; end?: b
     ],
   },
 ];
+
+const infraSection: NavSection = {
+  label: 'Infrastructure',
+  items: [
+    { to: '/infrastructure', label: 'Providers' },
+    { to: '/clusters', label: 'Clusters' },
+    { to: '/shell', label: 'Shell' },
+  ],
+};
+
+function NavSectionLinks({ section }: { section: NavSection }) {
+  return (
+    <div>
+      {section.label && <div className="nav-section-label">{section.label}</div>}
+      {section.items.map(item => (
+        <NavLink key={item.to} to={item.to} end={item.end} className="nav-link">
+          {item.label}
+        </NavLink>
+      ))}
+    </div>
+  );
+}
 
 export function Layout() {
   const { identity, logout } = useAuth();
@@ -53,19 +75,11 @@ export function Layout() {
           authentik bench
         </div>
         {navSections.map((section, i) => (
-          <div key={section.label ?? i}>
-            {section.label && <div className="nav-section-label">{section.label}</div>}
-            {section.items.map(item => (
-              <NavLink key={item.to} to={item.to} end={item.end} className="nav-link">
-                {item.label}
-              </NavLink>
-            ))}
-          </div>
+          <NavSectionLinks key={section.label ?? i} section={section} />
         ))}
-        <div className="nav-sep" />
-        <NavLink to="/shell" className="nav-link">
-          Shell
-        </NavLink>
+        <div className="nav-bottom">
+          <NavSectionLinks section={infraSection} />
+        </div>
         <div className="sidebar-foot">
           {identity && <span>Signed in as {identity}</span>}
           <button className="small" onClick={() => void logout()}>

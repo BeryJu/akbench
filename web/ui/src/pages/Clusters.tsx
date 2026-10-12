@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { api, MANAGEMENT_CLUSTER } from '../api';
 import { ObjectYaml } from '../components/ObjectYaml';
+import { ActivityLog } from '../components/ActivityLog';
 import { Badge, ConditionList, StatusBadge } from '../components/Status';
 import { Alert, confirmAndRun, errorMessage, Field, Page, Table } from '../components/ui';
 import { toast } from '../components/Toast';
@@ -555,6 +556,7 @@ export function ClusterViewPage() {
               <span className="muted">Kubernetes {wc.data.spec.kubernetesVersion}</span>
             </div>
             <ConditionList conditions={status?.conditions} />
+            <ActivityLog path="workloadclusters" name={name} />
           </div>
 
           <h2>Worker pools</h2>

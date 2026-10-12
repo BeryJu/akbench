@@ -4,6 +4,7 @@ import { Link, useParams } from 'react-router';
 import { api } from '../api';
 import { MetricsGrid } from '../components/MetricsChart';
 import { ObjectYaml } from '../components/ObjectYaml';
+import { ActivityLog } from '../components/ActivityLog';
 import { Badge, ConditionList } from '../components/Status';
 import { Alert, confirmAndRun, Empty, formatTimestamp, Page, Table } from '../components/ui';
 import { metricsAnchorFromRuns } from '../format';
@@ -154,6 +155,7 @@ export function TestRunViewPage() {
             )}
           </div>
           <ConditionList conditions={status?.conditions} />
+          <ActivityLog path="testruns" name={name} />
         </div>
       )}
       <h2>Metrics</h2>

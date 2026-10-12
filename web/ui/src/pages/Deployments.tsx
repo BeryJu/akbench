@@ -5,6 +5,7 @@ import { CodeEditor } from '../components/CodeEditor';
 import { MetricsGrid } from '../components/MetricsChart';
 import { ObjectYaml } from '../components/ObjectYaml';
 import { NodePlacement } from '../components/Placement';
+import { ActivityLog } from '../components/ActivityLog';
 import { ConditionList, StatusBadge } from '../components/Status';
 import { Alert, confirmAndRun, Empty, errorMessage, Field, Page, Table } from '../components/ui';
 import { toast } from '../components/Toast';
@@ -571,6 +572,7 @@ export function DeploymentViewPage() {
               )}
             </div>
             <ConditionList conditions={d.status?.conditions} />
+            <ActivityLog path="deployments" name={name} />
           </div>
 
           <h2>On the cluster</h2>

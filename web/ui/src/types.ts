@@ -35,6 +35,18 @@ export interface PodPlacement {
   pod: string;
 }
 
+// ObjectEvent is one Kubernetes Event about a bench object
+// (internal/api/objectevents.go).
+export interface ObjectEvent {
+  type: 'Normal' | 'Warning' | string;
+  reason: string;
+  message: string;
+  count: number;
+  firstSeen?: string;
+  lastSeen?: string;
+  source?: string;
+}
+
 export interface ObjectMeta {
   name: string;
   namespace?: string;

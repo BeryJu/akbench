@@ -4,6 +4,7 @@ import { api } from '../api';
 import { CodeEditor } from '../components/CodeEditor';
 import { MetricsGrid, ResourceCharts } from '../components/MetricsChart';
 import { ObjectYaml } from '../components/ObjectYaml';
+import { ActivityLog } from '../components/ActivityLog';
 import { Badge, ConditionList, StatusBadge } from '../components/Status';
 import { buildTargetRows, burningFor, TargetTable } from '../components/Targets';
 import { TraceBreakdownSection } from '../components/TraceBreakdown';
@@ -565,10 +566,13 @@ export function TestCaseViewPage() {
       />
 
       {tc && (
-        <details>
-          <summary>Conditions</summary>
-          <ConditionList conditions={tc.status?.conditions} />
-        </details>
+        <>
+          <h2>Status</h2>
+          <div className="panel">
+            <ConditionList conditions={tc.status?.conditions} />
+            <ActivityLog path="testcases" name={name} />
+          </div>
+        </>
       )}
       <ObjectYaml object={tc} />
     </Page>

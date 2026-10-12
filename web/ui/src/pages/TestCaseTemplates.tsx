@@ -1,3 +1,4 @@
+import { ActivityLog } from '../components/ActivityLog';
 import { FormEvent, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { api } from '../api';
@@ -178,6 +179,11 @@ export function TestCaseTemplateViewPage() {
         <div className="row" style={{ marginBottom: 8 }}>
           <StatusBadge kind="testcasetemplate" name={name} namespace={t.metadata.namespace} phase={t.status?.phase} conditions={t.status?.conditions} />
           {t.spec.requiresOAuthClient && <span className="muted">Provisions an OAuth client</span>}
+        </div>
+      )}
+      {t && (
+        <div className="panel">
+          <ActivityLog path="testcasetemplates" name={name} />
         </div>
       )}
       <h2>Used by</h2>
