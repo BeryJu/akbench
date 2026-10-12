@@ -12,10 +12,26 @@ import (
 	corev1 "k8s.io/api/core/v1"
 )
 
-// fakeIncus serves /1.0 the way an Incus daemon does: "trusted" only for a
-// client certificate whose fingerprint has been added to its trust store,
-// which POST /1.0/certificates with the right token does.
-func fakeIncus(t *testing.T, token string) (*httptest.Server, map[string]bool) {
+// writeSync/writeError answer in the Incus REST API's own envelopes, which
+// the official client decodes.
+func writeSync(w http.ResponseWriter, metadata any) {
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"type": "sync", "status": "Success", "status_code": 200, "metadata": metadata,
+	})
+}
+
+func writeError(w http.ResponseWriter, code int, msg string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	_ = json.NewEncoder(w).Encode(map[string]any{"type": "error", "error": msg, "error_code": code})
+}
+
+// fakeIncus serves enough of the Incus API for these tests: /1.0 reports
+// "trusted" only for a client certificate whose fingerprint has been added
+// to its trust store, which POST /1.0/certificates with the right token
+// does; instance state comes from states, keyed "<name>@<project>".
+func fakeIncus(t *testing.T, token string, states map[string]any) *httptest.Server {
 	t.Helper()
 	trusted := map[string]bool{}
 	clientFingerprint := func(r *http.Request) string {
@@ -31,34 +47,42 @@ func fakeIncus(t *testing.T, token string) (*httptest.Server, map[string]bool) {
 			if trusted[clientFingerprint(r)] {
 				auth = "trusted"
 			}
-			_ = json.NewEncoder(w).Encode(map[string]any{"metadata": map[string]any{
-				"auth": auth, "environment": map[string]any{"server_version": "6.5"},
-			}})
+			writeSync(w, map[string]any{
+				"api_version": "1.0", "auth": auth,
+				"environment": map[string]any{"server_version": "7.5.1"},
+			})
 		case r.Method == http.MethodPost && r.URL.Path == "/1.0/certificates":
 			var body struct {
 				TrustToken string `json:"trust_token"`
 			}
 			_ = json.NewDecoder(r.Body).Decode(&body)
 			if body.TrustToken != token {
-				w.WriteHeader(http.StatusForbidden)
-				_ = json.NewEncoder(w).Encode(map[string]any{"error": "Invalid trust token"})
+				writeError(w, http.StatusForbidden, "Invalid trust token")
 				return
 			}
 			trusted[clientFingerprint(r)] = true
-			_ = json.NewEncoder(w).Encode(map[string]any{"type": "sync"})
+			writeSync(w, nil)
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/1.0/instances/") && strings.HasSuffix(r.URL.Path, "/state"):
+			name := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/1.0/instances/"), "/state")
+			state, ok := states[name+"@"+r.URL.Query().Get("project")]
+			if !ok {
+				writeError(w, http.StatusNotFound, "Instance not found")
+				return
+			}
+			writeSync(w, state)
 		default:
-			http.NotFound(w, r)
+			writeError(w, http.StatusNotFound, "not found")
 		}
 	}))
 	srv.TLS = &tls.Config{ClientAuth: tls.RequestClientCert}
 	srv.StartTLS()
 	t.Cleanup(srv.Close)
-	return srv, trusted
+	return srv
 }
 
 func newConnection(t *testing.T, server string) Connection {
 	t.Helper()
-	cert, key, err := GenerateClientCert("test")
+	cert, key, err := GenerateClientCert()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +94,7 @@ func serverCertPEM(srv *httptest.Server) string {
 }
 
 func TestProbeUnverifiedServerReturnsItsCertificate(t *testing.T) {
-	srv, _ := fakeIncus(t, "tok")
+	srv := fakeIncus(t, "tok", nil)
 	res := Probe(t.Context(), newConnection(t, srv.URL))
 	if res.Reachable || res.ServerCert == "" || res.ServerCertFingerprint != Fingerprint(serverCertPEM(srv)) {
 		t.Fatalf("unexpected result: %+v", res)
@@ -81,12 +105,12 @@ func TestProbeUnverifiedServerReturnsItsCertificate(t *testing.T) {
 }
 
 func TestProbePinnedThenTrustWithToken(t *testing.T) {
-	srv, _ := fakeIncus(t, "tok")
+	srv := fakeIncus(t, "tok", nil)
 	c := newConnection(t, srv.URL)
 	c.ServerCert = serverCertPEM(srv)
 
 	res := Probe(t.Context(), c)
-	if !res.Reachable || res.Trusted || res.ServerVersion != "6.5" {
+	if !res.Reachable || res.Trusted || res.ServerVersion != "7.5.1" || res.ServerCert != "" {
 		t.Fatalf("before trust: %+v", res)
 	}
 	if err := TrustWithToken(t.Context(), c, "wrong"); err == nil || !strings.Contains(err.Error(), "Invalid trust token") {
@@ -101,22 +125,61 @@ func TestProbePinnedThenTrustWithToken(t *testing.T) {
 }
 
 func TestProbeRejectsMismatchedPin(t *testing.T) {
-	srv, _ := fakeIncus(t, "tok")
+	srv := fakeIncus(t, "tok", nil)
 	c := newConnection(t, srv.URL)
 	// Every httptest server shares one built-in certificate, so pin an
 	// unrelated one instead of another server's.
 	c.ServerCert = newConnection(t, "").ClientCert
-	if res := Probe(t.Context(), c); res.Reachable || !strings.Contains(res.Message, "doesn't match") {
+	res := Probe(t.Context(), c)
+	if res.Reachable || !strings.Contains(res.Message, "could not be verified") || res.ServerCertFingerprint == "" {
 		t.Fatalf("unexpected result: %+v", res)
 	}
 }
 
 func TestProbeInsecureSkipVerify(t *testing.T) {
-	srv, _ := fakeIncus(t, "tok")
+	srv := fakeIncus(t, "tok", nil)
 	c := newConnection(t, srv.URL)
 	c.InsecureSkipVerify = true
 	if res := Probe(t.Context(), c); !res.Reachable || res.ServerCertFingerprint == "" {
 		t.Fatalf("unexpected result: %+v", res)
+	}
+}
+
+func TestProbeUnreachable(t *testing.T) {
+	srv := fakeIncus(t, "tok", nil)
+	url := srv.URL
+	srv.Close()
+	res := Probe(t.Context(), newConnection(t, url))
+	if res.Reachable || res.ServerCert != "" || !strings.Contains(res.Message, "could not reach") {
+		t.Fatalf("unexpected result: %+v", res)
+	}
+}
+
+func TestInstanceAddresses(t *testing.T) {
+	srv := fakeIncus(t, "tok", map[string]any{
+		"c1-abcde-lb@bench": map[string]any{"network": map[string]any{
+			"lo":   map[string]any{"type": "loopback", "addresses": []any{map[string]any{"family": "inet", "address": "127.0.0.1", "netmask": "8", "scope": "local"}}},
+			"cni0": map[string]any{"type": "broadcast", "addresses": []any{map[string]any{"family": "inet", "address": "10.244.0.1", "netmask": "24", "scope": "global"}}},
+			"eth0": map[string]any{"type": "broadcast", "host_name": "veth1", "addresses": []any{
+				map[string]any{"family": "inet6", "address": "fd42::5", "netmask": "64", "scope": "global"},
+				map[string]any{"family": "inet6", "address": "fe80::5", "netmask": "64", "scope": "link"},
+				map[string]any{"family": "inet", "address": "10.28.104.7", "netmask": "24", "scope": "global"},
+				map[string]any{"family": "inet", "address": "10.28.104.200", "netmask": "32", "scope": "global"},
+			}},
+		}},
+	})
+	c := newConnection(t, srv.URL)
+	c.Project = "bench"
+	c.ServerCert = serverCertPEM(srv)
+	v4, v6, err := InstanceAddresses(t.Context(), c, "c1-abcde-lb")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(v4, ",") != "10.28.104.7" || strings.Join(v6, ",") != "fd42::5" {
+		t.Errorf("v4 %v v6 %v", v4, v6)
+	}
+	if _, _, err := InstanceAddresses(t.Context(), c, "missing"); err == nil {
+		t.Error("expected an error for a missing instance")
 	}
 }
 
@@ -144,33 +207,5 @@ func TestConnectionRoundTripAndValidate(t *testing.T) {
 		if err := bad.Validate(); err == nil {
 			t.Errorf("%s: expected an error", name)
 		}
-	}
-}
-
-func TestInstanceAddresses(t *testing.T) {
-	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/1.0/instances/c1-abcde-lb/state" || r.URL.Query().Get("project") != "bench" {
-			http.NotFound(w, r)
-			return
-		}
-		_, _ = w.Write([]byte(`{"metadata":{"network":{
-			"lo":{"type":"loopback","host_name":"","addresses":[{"family":"inet","address":"127.0.0.1","netmask":"8","scope":"local"}]},
-			"cni0":{"type":"broadcast","host_name":"","addresses":[{"family":"inet","address":"10.244.0.1","netmask":"24","scope":"global"}]},
-			"eth0":{"type":"broadcast","host_name":"veth1","addresses":[
-				{"family":"inet6","address":"fd42::5","netmask":"64","scope":"global"},
-				{"family":"inet6","address":"fe80::5","netmask":"64","scope":"link"},
-				{"family":"inet","address":"10.28.104.7","netmask":"24","scope":"global"},
-				{"family":"inet","address":"10.28.104.200","netmask":"32","scope":"global"}]}}}}`))
-	}))
-	t.Cleanup(srv.Close)
-	c := newConnection(t, srv.URL)
-	c.Project = "bench"
-	c.InsecureSkipVerify = true
-	v4, v6, err := InstanceAddresses(t.Context(), c, "c1-abcde-lb")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Join(v4, ",") != "10.28.104.7" || strings.Join(v6, ",") != "fd42::5" {
-		t.Errorf("v4 %v v6 %v", v4, v6)
 	}
 }

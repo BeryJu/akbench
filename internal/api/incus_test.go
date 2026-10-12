@@ -50,7 +50,7 @@ func TestIncusCredentialLifecycle(t *testing.T) {
 
 	// Update without a certificate keeps the stored one; pinning a server
 	// certificate and switching projects is applied.
-	serverCert, _, err := incus.GenerateClientCert("server")
+	serverCert, _, err := incus.GenerateClientCert()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +92,7 @@ func TestIncusCredentialValidation(t *testing.T) {
 }
 
 func TestIncusCredentialsIncludeReferencedSecrets(t *testing.T) {
-	cert, key, err := incus.GenerateClientCert("migrated")
+	cert, key, err := incus.GenerateClientCert()
 	if err != nil {
 		t.Fatal(err)
 	}

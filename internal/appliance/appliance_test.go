@@ -218,9 +218,11 @@ func TestPlanClusterctl(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := [][]string{{"init", "--wait-providers",
+	want := [][]string{{
+		"init", "--wait-providers",
 		"--core", "cluster-api:v1.14.3", "--bootstrap", "kubeadm:v1.14.3",
-		"--control-plane", "kubeadm:v1.14.3", "--infrastructure", "incus:v0.9.1"}}
+		"--control-plane", "kubeadm:v1.14.3", "--infrastructure", "incus:v0.9.1",
+	}}
 	if !reflect.DeepEqual(cmds, want) || len(skipped) != 0 {
 		t.Errorf("fresh install: cmds %v skipped %v", cmds, skipped)
 	}

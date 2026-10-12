@@ -196,7 +196,7 @@ func decodeIncusInput(w http.ResponseWriter, r *http.Request) (*incusCredentialI
 }
 
 // apply merges in over existing (nil on create) into a validated connection.
-func (in *incusCredentialInput) apply(name string, existing *incus.Connection) (incus.Connection, error) {
+func (in *incusCredentialInput) apply(existing *incus.Connection) (incus.Connection, error) {
 	c := incus.Connection{
 		Server: in.Server, Project: in.Project, ServerCert: in.ServerCert, InsecureSkipVerify: in.InsecureSkipVerify,
 		ClientCert: in.ClientCert, ClientKey: in.ClientKey,
@@ -206,7 +206,7 @@ func (in *incusCredentialInput) apply(name string, existing *incus.Connection) (
 	}
 	if c.ClientCert == "" {
 		var err error
-		if c.ClientCert, c.ClientKey, err = incus.GenerateClientCert("akbench-" + name); err != nil {
+		if c.ClientCert, c.ClientKey, err = incus.GenerateClientCert(); err != nil {
 			return c, err
 		}
 	}
@@ -222,7 +222,7 @@ func (s *Server) createIncusCredential(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusBadRequest, "invalid name: "+strings.Join(errs, "; "))
 		return
 	}
-	conn, err := in.apply(in.Name, nil)
+	conn, err := in.apply(nil)
 	if err != nil {
 		writeError(w, r, http.StatusBadRequest, err.Error())
 		return
@@ -258,7 +258,7 @@ func (s *Server) updateIncusCredential(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	existing := incus.FromSecret(secret)
-	conn, err := in.apply(secret.Name, &existing)
+	conn, err := in.apply(&existing)
 	if err != nil {
 		writeError(w, r, http.StatusBadRequest, err.Error())
 		return
