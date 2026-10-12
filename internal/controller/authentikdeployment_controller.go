@@ -220,7 +220,7 @@ func (r *AuthentikDeploymentReconciler) helmReleaseReadiness(ctx context.Context
 // the caller should requeue on a timer to retry a transient failure. A
 // deployment with no blueprint configured reports Ready with nothing done, so
 // it never blocks the overall Ready condition.
-func (r *AuthentikDeploymentReconciler) reconcileBlueprint(ctx context.Context, rc client.Client, topo *benchv1alpha1.AuthentikDeployment,
+func (r *AuthentikDeploymentReconciler) reconcileBlueprint(ctx context.Context, rc client.Client, topo *benchv1alpha1.AuthentikDeployment, wc *benchv1alpha1.WorkloadCluster,
 	hasBlueprint bool, helmReleaseReady metav1.ConditionStatus, content string,
 ) (metav1.ConditionStatus, string, bool) {
 	switch {
@@ -235,7 +235,7 @@ func (r *AuthentikDeploymentReconciler) reconcileBlueprint(ctx context.Context, 
 	err := rc.Get(ctx, types.NamespacedName{Name: name, Namespace: topo.Spec.Namespace}, &job)
 	switch {
 	case apierrors.IsNotFound(err):
-		newJob := render.BlueprintJob(topo, name, fixturesBlueprintConfigMapName, fixturesBlueprintKey)
+		newJob := render.BlueprintJob(topo, wc, name, fixturesBlueprintConfigMapName, fixturesBlueprintKey)
 		if err := rc.Create(ctx, newJob); err != nil && !apierrors.IsAlreadyExists(err) {
 			return metav1.ConditionFalse, fmt.Sprintf("create fixtures blueprint import job: %v", err), true
 		}
@@ -279,7 +279,7 @@ func (r *AuthentikDeploymentReconciler) reconcileBlueprint(ctx context.Context, 
 // AuthentikBenchPostgresDown alert), never the deployment's own actual
 // readiness, so a failure here is logged/eventer'd but never holds up the
 // overall Ready condition.
-func (r *AuthentikDeploymentReconciler) reconcilePostgresRoleFix(ctx context.Context, rc client.Client, topo *benchv1alpha1.AuthentikDeployment) {
+func (r *AuthentikDeploymentReconciler) reconcilePostgresRoleFix(ctx context.Context, rc client.Client, topo *benchv1alpha1.AuthentikDeployment, wc *benchv1alpha1.WorkloadCluster) {
 	if topo.Spec.Postgres.Mode != benchv1alpha1.PostgresEmbedded {
 		return
 	}
@@ -288,7 +288,7 @@ func (r *AuthentikDeploymentReconciler) reconcilePostgresRoleFix(ctx context.Con
 	if err := rc.Get(ctx, key, &sts); err != nil || sts.Status.ReadyReplicas < 1 {
 		return
 	}
-	job := render.PostgresRoleFixJob(topo)
+	job := render.PostgresRoleFixJob(topo, wc)
 	if err := rc.Create(ctx, job); err != nil && !apierrors.IsAlreadyExists(err) {
 		r.Recorder.Eventf(topo, corev1.EventTypeWarning, "PostgresRoleFixFailed", "failed to create postgres role-fix job: %v", err)
 	}
@@ -423,11 +423,11 @@ func (r *AuthentikDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.
 	topo.Status.ServiceEndpoint = render.ServiceEndpoint(&topo)
 	topo.Status.ObservedGeneration = topo.Generation
 
-	blueprintReady, blueprintMessage, requeueForBlueprint := r.reconcileBlueprint(ctx, rc, &topo, hasBlueprint, helmReleaseReady, blueprintContent)
+	blueprintReady, blueprintMessage, requeueForBlueprint := r.reconcileBlueprint(ctx, rc, &topo, wc, hasBlueprint, helmReleaseReady, blueprintContent)
 	setCondition(r.Recorder, &topo, &topo.Status.Conditions, topo.Generation, benchv1alpha1.ConditionBlueprintApplied, blueprintReady,
 		benchv1alpha1.ReasonReady, blueprintMessage)
 
-	r.reconcilePostgresRoleFix(ctx, rc, &topo)
+	r.reconcilePostgresRoleFix(ctx, rc, &topo, wc)
 
 	ready := helmReleaseReady == metav1.ConditionTrue && blueprintReady == metav1.ConditionTrue
 	if ready {

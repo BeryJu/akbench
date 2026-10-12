@@ -9,6 +9,24 @@ import (
 	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
 )
 
+// TestPostgresRoleFixJobTargetsAuthentikPool guards the same live-cluster bug
+// class as BlueprintJob: this Job connects to the embedded postgres Service
+// in the deployment's own namespace, so it needs the authentik pool's
+// nodeSelector/toleration just like server/worker/postgres do.
+func TestPostgresRoleFixJobTargetsAuthentikPool(t *testing.T) {
+	topo := exampleEmbeddedDeployment()
+	wc := &benchv1alpha1.WorkloadCluster{Spec: benchv1alpha1.WorkloadClusterSpec{
+		WorkerPools: []benchv1alpha1.WorkerPoolSpec{{Name: "ak", Role: benchv1alpha1.WorkerPoolRoleAuthentik}},
+	}}
+	job := PostgresRoleFixJob(topo, wc)
+	if job.Spec.Template.Spec.NodeSelector[NodePoolLabel] != "authentik" {
+		t.Errorf("nodeSelector[%s] = %v, want authentik", NodePoolLabel, job.Spec.Template.Spec.NodeSelector[NodePoolLabel])
+	}
+	if len(job.Spec.Template.Spec.Tolerations) != 1 {
+		t.Errorf("tolerations = %v, want exactly one", job.Spec.Template.Spec.Tolerations)
+	}
+}
+
 func exampleEmbeddedDeployment() *benchv1alpha1.AuthentikDeployment {
 	return &benchv1alpha1.AuthentikDeployment{
 		Name: "authentik-1",
@@ -27,7 +45,7 @@ func exampleEmbeddedDeployment() *benchv1alpha1.AuthentikDeployment {
 // confirmed live even on a genuinely fresh install.
 func TestPostgresRoleFixJob(t *testing.T) {
 	topo := exampleEmbeddedDeployment()
-	job := PostgresRoleFixJob(topo)
+	job := PostgresRoleFixJob(topo, nil)
 
 	if got, want := job.Name, "authentik-1-postgres-role-fix"; got != want {
 		t.Errorf("name = %q, want %q", got, want)

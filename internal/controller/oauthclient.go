@@ -199,7 +199,11 @@ func (r *TestCaseReconciler) ensureOAuthClient(ctx context.Context, rc client.Cl
 	var job batchv1.Job
 	switch err := deploymentClient.Get(ctx, types.NamespacedName{Name: jobName, Namespace: topo.Spec.Namespace}, &job); {
 	case apierrors.IsNotFound(err):
-		newJob := render.BlueprintJob(topo, jobName, blueprintCMName, oauthBlueprintKey)
+		// topo's own clusterRef, not the runner's (tc.Spec.RunnerClusterRef
+		// can differ) - this Job runs via deploymentClient, against the
+		// deployment's own namespace/pool, not the runner's.
+		wc := resolveWorkloadCluster(ctx, r.Client, topo.Namespace, topo.Spec.ClusterRef.Name)
+		newJob := render.BlueprintJob(topo, wc, jobName, blueprintCMName, oauthBlueprintKey)
 		if err := deploymentClient.Create(ctx, newJob); err != nil && !apierrors.IsAlreadyExists(err) {
 			return "", 0, fmt.Errorf("create oauth2 provider blueprint import job: %w", err)
 		}
