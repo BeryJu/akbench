@@ -3,14 +3,19 @@
 # in-browser kubectl shell (internal/api/shell.go). The shell is why this is
 # not distroless: it needs a real shell, kubectl and an init process.
 
-FROM node:26-alpine AS ui
+# The UI bundle is platform-independent, so it is built once, natively,
+# and shared by every target platform.
+FROM --platform=$BUILDPLATFORM node:26-alpine AS ui
 WORKDIR /ui
 COPY web/ui/package.json web/ui/package-lock.json ./
 RUN npm ci
 COPY web/ui/ ./
 RUN npm run build
 
-FROM golang:1.27 AS builder
+# Runs on the build host's own platform and cross-compiles for TARGETARCH
+# (CGO is off, so Go needs no target toolchain) - building under QEMU
+# emulation for the non-native platform is what made multi-arch builds slow.
+FROM --platform=$BUILDPLATFORM golang:1.27 AS builder
 ARG TARGETOS
 ARG TARGETARCH
 
@@ -25,7 +30,8 @@ COPY . .
 # CI passes the release version and the commit; a local build gets "dev".
 ARG VERSION=dev
 ARG COMMIT=
-RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a \
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build \
     -ldflags "-X github.com/goauthentik/authentik-bench/internal/api.Version=${VERSION} \
               -X github.com/goauthentik/authentik-bench/internal/api.Commit=${COMMIT}" \
     -o apiserver ./cmd/apiserver
@@ -33,7 +39,7 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a \
 # kubectl from the official release, checksum-verified. Kept within one
 # minor version of the clusters it talks to (kubectl's supported skew) -
 # bump alongside the Kubernetes versions ClusterForm offers.
-FROM alpine:3.24 AS kubectl
+FROM --platform=$BUILDPLATFORM alpine:3.24 AS kubectl
 ARG TARGETARCH
 ARG KUBECTL_VERSION=v1.36.5
 RUN apk add --no-cache curl \
@@ -48,7 +54,7 @@ RUN apk add --no-cache curl \
 # cluster/namespace is the common case here (the merged kubeconfig already
 # has every registered cluster as its own context), and typing a full
 # --context/-n flag every time is exactly the friction these exist to remove.
-FROM alpine:3.24 AS kubectx
+FROM --platform=$BUILDPLATFORM alpine:3.24 AS kubectx
 ARG TARGETARCH
 ARG KUBECTX_VERSION=v0.11.0
 RUN apk add --no-cache curl tar \

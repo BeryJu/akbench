@@ -13,7 +13,8 @@ ARG K3S_IMAGE=rancher/k3s:v1.36.5-k3s1@sha256:057cfd5a9d51b89f1f0ee139c28d5d5fdd
 
 # Every upstream file the appliance ships, checksum-verified against
 # appliance/assets.lock.
-FROM alpine:3.22 AS assets
+# Only downloads files for TARGETARCH, so it runs natively on the build host.
+FROM --platform=$BUILDPLATFORM alpine:3.22 AS assets
 ARG TARGETARCH
 RUN apk add --no-cache curl
 COPY appliance/assets.lock /assets.lock
@@ -29,7 +30,10 @@ RUN set -eu; \
     chmod 0755 /out/bin/clusterctl
 COPY appliance/clusterctl.yaml /out/clusterctl/clusterctl.yaml
 
-FROM golang:1.27 AS builder
+# Runs on the build host's own platform and cross-compiles for TARGETARCH
+# (CGO is off, so Go needs no target toolchain) - building under QEMU
+# emulation for the non-native platform is what made multi-arch builds slow.
+FROM --platform=$BUILDPLATFORM golang:1.27 AS builder
 ARG TARGETOS
 ARG TARGETARCH
 # VERSION is both the operator chart version and the operator/apiserver image
@@ -43,8 +47,9 @@ COPY go.mod go.mod
 COPY go.sum go.sum
 RUN go mod download
 COPY . .
-RUN pkg=github.com/goauthentik/authentik-bench/internal/appliance; \
-    CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a \
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    pkg=github.com/goauthentik/authentik-bench/internal/appliance; \
+    CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build \
     -ldflags "-X ${pkg}.Version=${VERSION} \
               -X ${pkg}.OperatorImage=${IMAGE_REPO} \
               -X ${pkg}.APIServerImage=${IMAGE_REPO}-apiserver \
