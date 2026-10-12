@@ -51,7 +51,12 @@ const (
 	// on default-dev-vm-incus. No live RBAC patch was applied as a
 	// stop-gap (would have needed explicit approval); this version bump is
 	// the real fix.
-	csiIncusChartVersion = "0.1.3"
+	// 0.1.4 added Incus project support (incus.project): without it the
+	// controller looked every instance and volume up in the "default"
+	// project, so attaching failed ("Failed to fetch instance ... in
+	// project \"default\": Instance not found") for any cluster whose
+	// connection Secret names another project.
+	csiIncusChartVersion = "0.1.4"
 
 	CSIIncusHelmReleaseName = "csi-incus"
 
@@ -103,15 +108,24 @@ func CSIIncusHelmRepository(namespace string) *sourcev1.HelmRepository {
 // scope cut, not a capability regression from the earlier vendored-YAML
 // approach (which never applied a VolumeSnapshotClass either).
 func CSIIncusHelmValues(source *corev1.Secret, wc *benchv1alpha1.WorkloadCluster) (*apiextensionsv1.JSON, error) {
-	values := map[string]any{
-		"incus": map[string]any{
-			"addr": string(source.Data["server"]),
-			"tls": map[string]any{
-				"clientCert": string(source.Data["client-crt"]),
-				"clientKey":  string(source.Data["client-key"]),
-				"serverCert": string(source.Data["server-crt"]),
-			},
+	incus := map[string]any{
+		"addr": string(source.Data["server"]),
+		"tls": map[string]any{
+			"clientCert": string(source.Data["client-crt"]),
+			"clientKey":  string(source.Data["client-key"]),
+			"serverCert": string(source.Data["server-crt"]),
 		},
+	}
+	// The same project cluster-api-provider-incus creates the machines in -
+	// csi-incus has to find those instances to attach volumes to them.
+	if project := string(source.Data["project"]); project != "" {
+		incus["project"] = project
+	}
+	if string(source.Data["insecure-skip-verify"]) == "true" {
+		incus["insecureSkipVerify"] = true
+	}
+	values := map[string]any{
+		"incus": incus,
 		"storageClasses": []map[string]any{
 			{
 				"name":                 CSIIncusStorageClassName,

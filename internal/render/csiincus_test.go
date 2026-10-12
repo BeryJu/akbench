@@ -32,7 +32,7 @@ func TestCSIIncusHelmValuesRemapsKeys(t *testing.T) {
 			"client-crt": []byte("client-cert-bytes"),
 			"client-key": []byte("client-key-bytes"),
 			"server-crt": []byte("server-cert-bytes"),
-			"project":    []byte("default"),
+			"project":    []byte("benchmark-prod"),
 		},
 	}
 
@@ -49,6 +49,12 @@ func TestCSIIncusHelmValuesRemapsKeys(t *testing.T) {
 	incus, ok := values["incus"].(map[string]any)
 	if !ok {
 		t.Fatalf("values.incus missing or wrong type: %v", values["incus"])
+	}
+	if incus["project"] != "benchmark-prod" {
+		t.Errorf("incus.project = %v, want benchmark-prod", incus["project"])
+	}
+	if _, ok := incus["insecureSkipVerify"]; ok {
+		t.Error("incus.insecureSkipVerify set without insecure-skip-verify in the Secret")
 	}
 	if incus["addr"] != "https://incus.example.com:8443" {
 		t.Errorf("incus.addr = %v, want https://incus.example.com:8443", incus["addr"])
@@ -122,5 +128,27 @@ func TestCSIIncusHelmRelease(t *testing.T) {
 	}
 	if hr.Spec.KubeConfig == nil || hr.Spec.KubeConfig.SecretRef.Name != "my-cluster-kubeconfig" {
 		t.Errorf("kubeConfig.secretRef.name = %v, want my-cluster-kubeconfig", hr.Spec.KubeConfig)
+	}
+}
+
+func TestCSIIncusHelmValuesOptionalConnectionSettings(t *testing.T) {
+	values := func(data map[string][]byte) map[string]any {
+		t.Helper()
+		raw, err := CSIIncusHelmValues(&corev1.Secret{Data: data}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var v map[string]any
+		if err := json.Unmarshal(raw.Raw, &v); err != nil {
+			t.Fatal(err)
+		}
+		return v["incus"].(map[string]any)
+	}
+	// No project: left to the chart's default (the "default" project).
+	if incus := values(map[string][]byte{"server": []byte("https://incus:8443")}); incus["project"] != nil {
+		t.Errorf("incus.project = %v, want unset", incus["project"])
+	}
+	if incus := values(map[string][]byte{"insecure-skip-verify": []byte("true")}); incus["insecureSkipVerify"] != true {
+		t.Errorf("incus.insecureSkipVerify = %v, want true", incus["insecureSkipVerify"])
 	}
 }
