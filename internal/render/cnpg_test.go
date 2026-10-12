@@ -69,7 +69,7 @@ func TestCNPGClusterDefaults(t *testing.T) {
 	}
 
 	// enablePodMonitor makes CNPG's own operator create a PodMonitor -
-	// closes the gap gitops/dashboards/README.md documents ("postgres.json
+	// closes the gap manifests/grafana-dashboards/README.md documents ("postgres.json
 	// is empty until something scrapes pg_* series").
 	enablePodMonitor, _, _ := unstructured.NestedBool(u.Object, "spec", "monitoring", "enablePodMonitor")
 	if !enablePodMonitor {

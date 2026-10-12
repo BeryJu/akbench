@@ -67,7 +67,7 @@ func (ar alertRule) toMap() map[string]any {
 // (http://<node-ip>:30909/api/v1/query) before being written down, not
 // guessed from documentation - this codebase has been burned twice already
 // by dashboard panels querying metric names that sounded right but never
-// actually existed (see gitops/dashboards/README.md's own "Caveats"
+// actually existed (see manifests/grafana-dashboards/README.md's own "Caveats"
 // section).
 //
 //   - AuthentikBenchServiceScrapeDown: up{job=~".+-metrics"} == 0 catches an
@@ -92,7 +92,7 @@ func (ar alertRule) toMap() map[string]any {
 //     true proportion of failed requests, and can read as "25% failed" (1
 //     failing series out of 4 distinct ones) when the real, volume-weighted
 //     failure rate is 0.05%. Confirmed live against a real burn test: 105
-//     failed requests out of ~196,150 total. gitops/dashboards/k6.json's own
+//     failed requests out of ~196,150 total. manifests/grafana-dashboards/k6.json's own
 //     "Failed requests" panel had the same flaw (an unweighted
 //     `avg by (testid) (k6_http_req_failed_rate{...})`) and was fixed
 //     alongside this rule - see that file's own history.

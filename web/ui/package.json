@@ -11,7 +11,6 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@goauthentik/brand-assets": "^2.0.0",
     "@goauthentik/fonts": "^2.0.0",
     "@goauthentik/theme": "^2.0.1",
     "@monaco-editor/react": "^4.7.0",
