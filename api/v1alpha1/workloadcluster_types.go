@@ -162,6 +162,7 @@ type WorkerPoolSpec struct {
 // annotations (cluster.x-k8s.io/cluster-api-autoscaler-node-group-{min,max}-size
 // - see https://github.com/kubernetes/autoscaler/blob/master/cluster-autoscaler/cloudprovider/clusterapi/README.md),
 // applied to the pool's MachineDeployment by render.MachineDeployment.
+// +kubebuilder:validation:XValidation:rule="!has(self.minReplicas) || self.minReplicas <= self.maxReplicas",message="minReplicas must not exceed maxReplicas"
 type AutoscalingSpec struct {
 	// +kubebuilder:validation:Minimum=0
 	// +kubebuilder:default=0

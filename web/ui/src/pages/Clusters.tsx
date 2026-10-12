@@ -268,8 +268,8 @@ function ClusterForm({ existing }: { existing?: WorkloadCluster }) {
                 </select>
               </Field>
               <Field
-                label="Replicas"
-                help={pool.autoscaling && `Autoscaled ${pool.autoscaling.minReplicas ?? 0}-${pool.autoscaling.maxReplicas}; this only sizes the pool at creation`}
+                label={pool.autoscaling ? 'Initial replicas' : 'Replicas'}
+                help={pool.autoscaling && 'Only sizes the pool at creation; cluster-autoscaler owns it after that'}
               >
                 <input
                   type="number"
@@ -278,6 +278,47 @@ function ClusterForm({ existing }: { existing?: WorkloadCluster }) {
                   onChange={e => patchPool(i, { replicas: Number(e.target.value) })}
                 />
               </Field>
+              <label className="check">
+                <input
+                  type="checkbox"
+                  checked={Boolean(pool.autoscaling)}
+                  onChange={e =>
+                    patchPool(i, {
+                      autoscaling: e.target.checked
+                        ? { minReplicas: pool.replicas, maxReplicas: Math.max(pool.replicas, 3) }
+                        : undefined,
+                    })
+                  }
+                />
+                Autoscale
+              </label>
+              {pool.autoscaling && (
+                <>
+                  <Field label="Min nodes" help="0 lets the pool scale to zero when idle">
+                    <input
+                      type="number"
+                      required
+                      min={0}
+                      max={pool.autoscaling.maxReplicas}
+                      value={pool.autoscaling.minReplicas ?? 0}
+                      onChange={e =>
+                        patchPool(i, { autoscaling: { ...pool.autoscaling!, minReplicas: Number(e.target.value) } })
+                      }
+                    />
+                  </Field>
+                  <Field label="Max nodes">
+                    <input
+                      type="number"
+                      required
+                      min={Math.max(1, pool.autoscaling.minReplicas ?? 0)}
+                      value={pool.autoscaling.maxReplicas}
+                      onChange={e =>
+                        patchPool(i, { autoscaling: { ...pool.autoscaling!, maxReplicas: Number(e.target.value) } })
+                      }
+                    />
+                  </Field>
+                </>
+              )}
               <Field label="Flavor">
                 <select
                   value={pool.incus?.flavor ?? INSTANCE_FLAVORS[1]}
