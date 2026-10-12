@@ -76,7 +76,11 @@ Implemented so far:
   the reference repo; `internal/render` reproduces its exact
   `testid`/`target`/`profile` tag scheme and env var contract
   (`TEST_ID`/`TARGET`/`BENCH_HOST`/... ), guarded by `test/contract`.
-- **Fixtures**: `fixtures/gen-blueprint.py` ported unchanged.
+- **Fixtures**: the operator seeds synthetic test users at startup
+  (`internal/fixtures`, a Go port of `fixtures/gen-blueprint.py`) unless
+  they're already loaded - 50 by default (`BENCH_FIXTURE_USERS`), a random
+  directory per install unless `BENCH_FIXTURE_SEED` is set.
+  `make fixtures` (the original script) still replaces them on demand.
 - **Test-case templates**: `TestCaseTemplate` is a real, UI-editable
   CRD (list/create/edit/delete, Monaco editor for the script) - the operator
   seeds four built-in ones at startup (`login`; `oauth-oidc`, driving a
@@ -151,7 +155,7 @@ management cluster onto it.
 - Go (the version in `go.mod`), Node.js 24+ and Docker
 - `kubectl` and a management cluster with Cluster API, the Incus
   infrastructure provider and Flux installed - or just use the appliance above
-- [uv](https://docs.astral.sh/uv/) for `make fixtures`
+- [uv](https://docs.astral.sh/uv/) for `make fixtures` (optional - the operator seeds test users itself)
 
 ### Running locally
 
@@ -159,7 +163,7 @@ management cluster onto it.
 make dev           # install CRDs, run the operator and cmd/apiserver against the current kubeconfig context
 make ui-dev        # Vite dev server on :5173, proxying the API (run alongside make dev)
 make dev-metrics   # optional: a minimal Prometheus for local metrics
-make fixtures      # synthetic users + the k6 credentials Secret
+make fixtures      # optional: regenerate the synthetic users + k6 credentials (the operator seeds 50 by default)
 ```
 
 `make deploy-apiserver` builds `cmd/apiserver` (API, web UI and `kubectl`

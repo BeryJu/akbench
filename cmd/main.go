@@ -1,9 +1,13 @@
 package main
 
 import (
+	"crypto/rand"
 	"crypto/tls"
+	"encoding/binary"
 	"flag"
+	"fmt"
 	"os"
+	"strconv"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
@@ -223,6 +227,13 @@ func main() {
 		setupLog.Error(err, "Failed to seed default TestCaseTemplates")
 		os.Exit(1)
 	}
+	// Synthetic test users, unless already loaded (e.g. by `make fixtures`).
+	// Not fatal: without them only test cases are blocked, and they say so.
+	if users, seed, err := fixtureSettings(); err != nil {
+		setupLog.Error(err, "Invalid test user settings; not seeding test users")
+	} else if err := controller.SeedFixtures(ctx, seedClient, envOr("BENCH_NAMESPACE", "default"), users, seed); err != nil {
+		setupLog.Error(err, "Failed to seed test users")
+	}
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		setupLog.Error(err, "Failed to set up health check")
@@ -238,6 +249,29 @@ func main() {
 		setupLog.Error(err, "Failed to run manager")
 		os.Exit(1)
 	}
+}
+
+// fixtureSettings reads how many test users SeedFixtures generates
+// (BENCH_FIXTURE_USERS, default 50 like `make fixtures`) and from which seed
+// (BENCH_FIXTURE_SEED, for a reproducible directory; random by default, so
+// every install's passwords differ).
+func fixtureSettings() (int, uint64, error) {
+	users, err := strconv.Atoi(envOr("BENCH_FIXTURE_USERS", "50"))
+	if err != nil || users < 1 {
+		return 0, 0, fmt.Errorf("BENCH_FIXTURE_USERS must be a positive number, got %q", os.Getenv("BENCH_FIXTURE_USERS"))
+	}
+	if v := os.Getenv("BENCH_FIXTURE_SEED"); v != "" {
+		seed, err := strconv.ParseUint(v, 10, 64)
+		if err != nil {
+			return 0, 0, fmt.Errorf("BENCH_FIXTURE_SEED must be a number, got %q", v)
+		}
+		return users, seed, nil
+	}
+	var b [8]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return 0, 0, err
+	}
+	return users, binary.LittleEndian.Uint64(b[:]), nil
 }
 
 func envOr(key, def string) string {

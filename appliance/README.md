@@ -60,6 +60,11 @@ page. For Incus:
 4. **Register a cluster:** register a workload cluster under **Clusters** and
    pick the connection.
 
+You don't need to load test users: the operator seeds 50 synthetic users at
+startup, which every deployment imports and every k6 run logs in as. Set
+`BENCH_FIXTURE_USERS` on the operator, or run `make fixtures`, for a
+different set.
+
 Connections are plain Secrets in the akbench namespace, in the shape
 `WorkloadCluster.spec.incus.lxcSecretRef` expects. A Secret created by hand
 or migrated from an older setup shows up as soon as a cluster uses it.

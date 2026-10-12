@@ -267,6 +267,16 @@ func (r *TestCaseReconciler) reconcileTarget(ctx context.Context, tc *benchv1alp
 		return targetResult{}, fmt.Errorf("ensure script configmap for %q: %w", ref.Name, err)
 	}
 	if err := ensureFixturesSecret(ctx, r.Client, rc, tc.Namespace); err != nil {
+		// No synthetic users loaded yet (SeedFixtures runs at operator startup;
+		// it skips a half-loaded pair, e.g. a hand-made Secret): a setup step
+		// still to do, not a failure - report it on the TestCase rather
+		// than only in the operator log, and pick it up once it's there.
+		if apierrors.IsNotFound(err) {
+			result.requeue = true
+			result.notReadyMsg = fmt.Sprintf("%s: test users not loaded - Secret %s/%s not found (the operator seeds them at startup - see its log)",
+				ref.Name, tc.Namespace, fixturesSecretName)
+			return result, nil
+		}
 		return targetResult{}, fmt.Errorf("ensure fixtures secret for %q: %w", ref.Name, err)
 	}
 

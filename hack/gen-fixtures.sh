@@ -1,9 +1,13 @@
 #!/usr/bin/env bash
-# Generates the synthetic-user blueprint + k6 credentials fixture and loads
-# the credentials into the Secret every k6 workload mounts (see
-# fixturesSecretName in internal/controller/fixtures.go). The blueprint
-# itself still needs importing into the target authentik instance for the
-# users to actually exist there - this only wires up the k6 side.
+# Generates the synthetic-user blueprint + k6 credentials fixture: the
+# credentials go into the Secret every k6 workload mounts (see
+# fixturesSecretName in internal/controller/fixtures.go), the blueprint into
+# the ConfigMap AuthentikDeploymentReconciler imports into each deployment.
+#
+# Optional: the operator seeds a default set of test users at startup
+# (controller.SeedFixtures) when neither object exists. Run this to replace
+# them, e.g. with more users (BENCH_FIXTURE_USERS) - it overwrites both, so
+# they stay a matching pair.
 set -euo pipefail
 
 NAMESPACE="${BENCH_NAMESPACE:-default}"

@@ -172,6 +172,13 @@ func (r *TestRunReconciler) start(ctx context.Context, run *benchv1alpha1.TestRu
 	}
 
 	if err := ensureFixturesSecret(ctx, r.Client, rc, run.Namespace); err != nil {
+		// See TestCaseReconciler.reconcileTarget: a setup step still to do.
+		if apierrors.IsNotFound(err) {
+			setCondition(r.Recorder, run, &run.Status.Conditions, run.Generation, benchv1alpha1.ConditionReady, metav1.ConditionFalse,
+				benchv1alpha1.ReasonDependencyNotReady, fmt.Sprintf("test users not loaded - Secret %s/%s not found (the operator seeds them at startup - see its log)",
+					run.Namespace, fixturesSecretName))
+			return ctrl.Result{RequeueAfter: 10 * time.Second}, r.Status().Update(ctx, run)
+		}
 		return ctrl.Result{}, fmt.Errorf("ensure fixtures secret: %w", err)
 	}
 
