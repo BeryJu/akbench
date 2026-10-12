@@ -378,12 +378,6 @@ export function TestCaseEditPage() {
   return existing.data ? <TestCaseForm key={name} existing={existing.data} /> : null;
 }
 
-const LIVE_WINDOWS = [
-  { value: '1m', label: 'Last 1 m' },
-  { value: '5m', label: 'Last 5 m' },
-  { value: '15m', label: 'Last 15 m' },
-];
-const DEFAULT_LIVE_WINDOW = '1m';
 const TIMELINE_RANGES = [
   { value: 3600, label: '1 h' },
   { value: 21600, label: '6 h' },
@@ -400,7 +394,7 @@ export function TestCaseViewPage() {
   const tc = testCase.data;
   const profile = tc?.spec.profile;
 
-  // Window, timeline range and baseline live in the URL, so a comparison
+  // Time range and baseline live in the URL, so a comparison
   // can be shared exactly as configured.
   const [params, setParams] = useSearchParams();
   function updateParams(patch: Record<string, string | undefined>) {
@@ -414,8 +408,6 @@ export function TestCaseViewPage() {
     }
     setParams(next, { replace: true });
   }
-  const windowParam = params.get('window');
-  const liveWindow = LIVE_WINDOWS.some(w => w.value === windowParam) ? windowParam! : DEFAULT_LIVE_WINDOW;
   const rangeParam = Number(params.get('range'));
   const timelineRange = TIMELINE_RANGES.some(r => r.value === rangeParam) ? rangeParam : DEFAULT_TIMELINE_RANGE;
 
@@ -425,7 +417,7 @@ export function TestCaseViewPage() {
   // Burn runs continuously, so "now" is right for it; a Quick test's data
   // ends with its latest completed run.
   const anchor = profile === 'Quick' ? metricsAnchorFromRuns(runs.data ?? []) : undefined;
-  const summaryWindow = profile === 'Quick' ? '5m' : liveWindow;
+  const summaryWindow = profile === 'Quick' ? '5m' : `${timelineRange}s`;
   const summary = useResource(
     () => (profile ? api.compare([name], summaryWindow, anchor?.endSeconds) : Promise.resolve(undefined)),
     [name, profile, summaryWindow, anchor?.endSeconds],
@@ -512,10 +504,10 @@ export function TestCaseViewPage() {
         </div>
         {profile === 'Burn' && (
           <Segmented
-            label="Summary window"
-            options={LIVE_WINDOWS}
-            value={liveWindow}
-            onChange={v => updateParams({ window: v === DEFAULT_LIVE_WINDOW ? undefined : v })}
+            label="Time range"
+            options={TIMELINE_RANGES}
+            value={timelineRange}
+            onChange={v => updateParams({ range: v === DEFAULT_TIMELINE_RANGE ? undefined : String(v) })}
           />
         )}
       </div>
@@ -570,14 +562,6 @@ export function TestCaseViewPage() {
           <h2>Timeline</h2>
           <div className="muted">One line per target, colored as in the table above.</div>
         </div>
-        {profile === 'Burn' && (
-          <Segmented
-            label="Time range"
-            options={TIMELINE_RANGES}
-            value={timelineRange}
-            onChange={v => updateParams({ range: v === DEFAULT_TIMELINE_RANGE ? undefined : String(v) })}
-          />
-        )}
       </div>
       {profile === 'Quick' && !anchor && (runs.data?.length ?? 0) > 0 && (
         <Alert kind="info">Latest run is still in progress - metrics will show once it completes.</Alert>
