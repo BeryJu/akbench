@@ -1,7 +1,6 @@
 package api
 
 import (
-	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -11,7 +10,7 @@ import (
 	"testing"
 )
 
-const dashboardDir = "../../gitops/dashboards"
+const dashboardDir = "../render/manifests/grafana-dashboards"
 
 type dashboardFile struct {
 	UID        string `json:"uid"`
@@ -52,44 +51,6 @@ func loadDashboards(t *testing.T) map[string]dashboardFile {
 		out[strings.TrimSuffix(entry.Name(), ".json")] = dash
 	}
 	return out
-}
-
-// renderEmbeddedDashboardDir is internal/render's own copy of these exact
-// dashboards, vendored via go:embed since go:embed can't reach outside its
-// own package's directory tree (see internal/render/grafana.go's own doc
-// comment on the embed directives). Nothing enforced the two copies ever
-// stayed in sync - TestDashboardsMatchRenderEmbeds does.
-const renderEmbeddedDashboardDir = "../render/manifests/grafana-dashboards"
-
-// TestDashboardsMatchRenderEmbeds guards against gitops/dashboards/*.json
-// (what a human edits, and what this file's other tests validate) silently
-// drifting from internal/render/manifests/grafana-dashboards/*.json (what
-// GrafanaObjects actually ships to every workload cluster) - the two are
-// meant to be byte-identical copies of the same file, and nothing else in
-// this repo would ever have caught them diverging.
-func TestDashboardsMatchRenderEmbeds(t *testing.T) {
-	entries, err := os.ReadDir(dashboardDir)
-	if err != nil {
-		t.Fatalf("read %s: %v", dashboardDir, err)
-	}
-	for _, entry := range entries {
-		if filepath.Ext(entry.Name()) != ".json" {
-			continue
-		}
-		source, err := os.ReadFile(filepath.Join(dashboardDir, entry.Name()))
-		if err != nil {
-			t.Fatalf("read %s: %v", entry.Name(), err)
-		}
-		embedded, err := os.ReadFile(filepath.Join(renderEmbeddedDashboardDir, entry.Name()))
-		if err != nil {
-			t.Errorf("%s exists in %s but not %s: %v", entry.Name(), dashboardDir, renderEmbeddedDashboardDir, err)
-			continue
-		}
-		if !bytes.Equal(source, embedded) {
-			t.Errorf("%s differs between %s and %s - keep the two copies in sync (see internal/render/grafana.go's own doc comment)",
-				entry.Name(), dashboardDir, renderEmbeddedDashboardDir)
-		}
-	}
 }
 
 // k6MetricNames is every series k6's experimental-prometheus-rw output can
@@ -162,7 +123,7 @@ func TestK6DashboardsSplitOnTheTagScheme(t *testing.T) {
 			vars[v.Name] = true
 		}
 		// Not "cluster": that variable was removed after turning out to be a
-		// real bug, not a harmless placeholder - see gitops/dashboards/README.md's
+		// real bug, not a harmless placeholder - see internal/render/manifests/grafana-dashboards/README.md's
 		// own "Label scheme" section. No k6 series has ever carried a
 		// "cluster" label, so its discovery query always returned zero
 		// options, leaving it unresolved and breaking every panel that

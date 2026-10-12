@@ -38,7 +38,7 @@ type resourceMetric struct {
 
 // resourceMetrics is keyed by the ?resource= query param. container!="",
 // container!="POD" excludes cAdvisor's own per-pod aggregate/pause-container
-// series, the same filter gitops/dashboards/authentik.json's own "CPU by
+// series, the same filter internal/render/manifests/grafana-dashboards/authentik.json's own "CPU by
 // pod"/"Memory by pod" panels use. "and on (pod) kube_pod_owner{owner_kind!=
 // \"Job\"}" excludes one-shot Job pods (the fixtures blueprint import, the
 // postgres role-fix job) - confirmed live these otherwise skew the sum

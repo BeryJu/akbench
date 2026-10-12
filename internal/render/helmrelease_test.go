@@ -138,7 +138,7 @@ func TestHelmValuesEmbedded(t *testing.T) {
 	}
 }
 
-// TestHelmValuesEnablesMetrics guards the fix for gitops/dashboards/
+// TestHelmValuesEnablesMetrics guards the fix for manifests/grafana-dashboards/
 // README.md's documented gap ("authentik.json shows resource use, not
 // authentik's own metrics... nothing scrapes the release's /metrics
 // endpoint until the operator renders a ServiceMonitor for it"): server/

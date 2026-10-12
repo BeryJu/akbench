@@ -137,12 +137,10 @@ providers:
       foldersFromFilesStructure: false
 `
 
-// The 5 dashboards are this project's own (gitops/dashboards/*.json,
-// already adapted to what this project actually collects - see that
-// directory's own README for why they're hand-authored rather than ported
-// from the reference harness's newer dashboard.grafana.app/v2-schema ones),
-// vendored here verbatim since go:embed can't reach outside its own
-// package's directory tree. Keep these two copies in sync if either changes.
+// The 5 dashboards are this project's own, already adapted to what this
+// project actually collects - see manifests/grafana-dashboards/README.md for
+// why they're hand-authored rather than ported from the reference harness's
+// newer dashboard.grafana.app/v2-schema ones.
 //
 //go:embed manifests/grafana-dashboards/compare-tests.json
 var grafanaDashboardCompareTests []byte

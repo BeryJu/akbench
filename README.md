@@ -123,9 +123,8 @@ The original plan's central, mTLS-secured metrics receiver was superseded by
 the per-workload-cluster observability stack described above once it became
 clear a management-cluster pod can reach a workload cluster's node IPs
 directly (the reverse can't), making a shared central pipeline unnecessary.
-Still not wired up: Flux-managed GitOps for this stack (dashboard JSON
-already lives in `gitops/dashboards/`, not yet wired to a Flux
-`Kustomization`).
+The Grafana dashboards live in
+[`internal/render/manifests/grafana-dashboards/`](internal/render/manifests/grafana-dashboards/README.md).
 
 ### Running the tests
 
@@ -145,111 +144,42 @@ Infrastructure page. See
 [appliance/MIGRATION.md](appliance/MIGRATION.md) to move an existing
 management cluster onto it.
 
-## Getting Started
+## Development
 
 ### Prerequisites
-- go version v1.24.6+
-- docker version 17.03+.
-- kubectl version v1.11.3+.
-- Access to a Kubernetes v1.11.3+ cluster.
 
-### To Deploy on the cluster
-**Build and push your image to the location specified by `IMG`:**
+- Go (the version in `go.mod`), Node.js 24+ and Docker
+- `kubectl` and a management cluster with Cluster API, the Incus
+  infrastructure provider and Flux installed - or just use the appliance above
+- [uv](https://docs.astral.sh/uv/) for `make fixtures`
 
-```sh
-make docker-build docker-push IMG=<some-registry>/authentik-bench:tag
-```
-
-**NOTE:** This image ought to be published in the personal registry you specified.
-And it is required to have access to pull the image from the working environment.
-Make sure you have the proper permission to the registry if the above commands don’t work.
-
-**Install the CRDs into the cluster:**
+### Running locally
 
 ```sh
-make install
+make dev           # install CRDs, run the operator and cmd/apiserver against the current kubeconfig context
+make ui-dev        # Vite dev server on :5173, proxying the API (run alongside make dev)
+make dev-metrics   # optional: a minimal Prometheus for local metrics
+make fixtures      # synthetic users + the k6 credentials Secret
 ```
 
-**Deploy the Manager to the cluster with the image specified by `IMG`:**
+`make deploy-apiserver` builds `cmd/apiserver` (API, web UI and `kubectl`
+shell) and deploys it in-cluster instead.
+
+### Deploying the operator
+
+CI publishes the operator image and its Helm chart (generated from
+`config/default` by `make helm-chart`) to GHCR on every push to `main` and
+every `v*` tag:
 
 ```sh
-make deploy IMG=<some-registry>/authentik-bench:tag
+helm install akbench oci://ghcr.io/<org>/<repo>-charts/authentik-bench-operator \
+  --namespace authentik-bench-system --create-namespace
 ```
 
-> **NOTE**: If you encounter RBAC errors, you may need to grant yourself cluster-admin
-privileges or be logged in as admin.
-
-**Create instances of your solution**
-You can apply the samples (examples) from the config/sample:
-
-```sh
-kubectl apply -k config/samples/
-```
-
->**NOTE**: Ensure that the samples has default values to test it out.
-
-### To Uninstall
-**Delete the instances (CRs) from the cluster:**
-
-```sh
-kubectl delete -k config/samples/
-```
-
-**Delete the APIs(CRDs) from the cluster:**
-
-```sh
-make uninstall
-```
-
-**UnDeploy the controller from the cluster:**
-
-```sh
-make undeploy
-```
-
-## Project Distribution
-
-Following the options to release and provide this solution to the users.
-
-### By providing a bundle with all YAML files
-
-1. Build the installer for the image built and published in the registry:
-
-```sh
-make build-installer IMG=<some-registry>/authentik-bench:tag
-```
-
-**NOTE:** The makefile target mentioned above generates an 'install.yaml'
-file in the dist directory. This file contains all the resources built
-with Kustomize, which are necessary to install this project without its
-dependencies.
-
-2. Using the installer
-
-Users can just run 'kubectl apply -f <URL for YAML BUNDLE>' to install
-the project, i.e.:
-
-```sh
-kubectl apply -f https://raw.githubusercontent.com/<org>/authentik-bench/<tag or branch>/dist/install.yaml
-```
-
-### By providing a Helm Chart
-
-1. Build the chart using the optional helm plugin
-
-```sh
-kubebuilder edit --plugins=helm/v2-alpha
-```
-
-2. See that a chart was generated under 'dist/chart', and users
-can obtain this solution from there.
-
-**NOTE:** If you change the project, you need to update the Helm Chart
-using the same command above to sync the latest changes. Furthermore,
-if you create webhooks, you need to use the above command with
-the '--force' flag and manually ensure that any custom configuration
-previously added to 'dist/chart/values.yaml' or 'dist/chart/manager/manager.yaml'
-is manually re-applied afterwards.
+For a one-off build, `make docker-build IMG=<registry>/akbench:tag` and
+`make deploy IMG=<registry>/akbench:tag` apply the same manifests via
+Kustomize (`make undeploy` removes them). `config/samples/` has an example of
+every CRD.
 
 ## Contributing
 
@@ -260,9 +190,7 @@ real bugs (chart schema mismatches, webhook-defaulting races, RBAC gaps)
 that `envtest` alone can't catch, since it never runs the actual
 Helm/CAPI/CSI controllers being integrated with.
 
-**NOTE:** Run `make help` for more information on all potential `make` targets
-
-More information can be found via the [Kubebuilder Documentation](https://book.kubebuilder.io/introduction.html)
+Run `make help` for every `make` target.
 
 ## License
 
