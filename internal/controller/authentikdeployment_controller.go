@@ -339,7 +339,14 @@ func (r *AuthentikDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.
 		return ctrl.Result{}, fmt.Errorf("ensure namespace: %w", err)
 	}
 
-	pgConn, pgReady, err := r.resolvePostgres(ctx, rc, &topo)
+	// wc is this deployment's own WorkloadCluster object (nil for the
+	// management cluster, or if it can't be resolved) - used only for
+	// node-pool placement (AuthentikPoolPlacement), never anything load-
+	// bearing, so a lookup failure here falls through silently rather than
+	// blocking the reconcile the way resolveClient's own failure above does.
+	wc := resolveWorkloadCluster(ctx, r.Client, topo.Namespace, topo.Spec.ClusterRef.Name)
+
+	pgConn, pgReady, err := r.resolvePostgres(ctx, rc, &topo, wc)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("resolve postgres: %w", err)
 	}
@@ -387,7 +394,7 @@ func (r *AuthentikDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.
 		return ctrl.Result{}, err
 	}
 
-	values, err := render.HelmValues(&topo, secretKey, pgConn, pyroscopeHost, tracingEndpoint)
+	values, err := render.HelmValues(&topo, wc, secretKey, pgConn, pyroscopeHost, tracingEndpoint)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("build helm values: %w", err)
 	}
@@ -508,10 +515,10 @@ func (r *AuthentikDeploymentReconciler) reconcileDelete(ctx context.Context, top
 // whether the backend is ready for the authentik chart to be installed
 // against. A false ready with a nil error means "still reconciling, check
 // back later" (e.g. CNPG cluster not healthy yet), not a failure.
-func (r *AuthentikDeploymentReconciler) resolvePostgres(ctx context.Context, rc client.Client, topo *benchv1alpha1.AuthentikDeployment) (*render.PostgresConnection, bool, error) {
+func (r *AuthentikDeploymentReconciler) resolvePostgres(ctx context.Context, rc client.Client, topo *benchv1alpha1.AuthentikDeployment, wc *benchv1alpha1.WorkloadCluster) (*render.PostgresConnection, bool, error) {
 	switch topo.Spec.Postgres.Mode {
 	case benchv1alpha1.PostgresCNPG:
-		return r.resolveCNPGPostgres(ctx, rc, topo)
+		return r.resolveCNPGPostgres(ctx, rc, topo, wc)
 	case benchv1alpha1.PostgresExternal:
 		return r.resolveExternalPostgres(ctx, rc, topo)
 	default: // PostgresEmbedded
@@ -542,8 +549,8 @@ func (r *AuthentikDeploymentReconciler) resolveEmbeddedPostgres(ctx context.Cont
 // garbage collector to recognize), and cleanup already goes through
 // reconcileDelete's namespace sweep on whichever cluster this is, so no
 // finalizer-tracked per-object cleanup is needed either.
-func (r *AuthentikDeploymentReconciler) resolveCNPGPostgres(ctx context.Context, rc client.Client, topo *benchv1alpha1.AuthentikDeployment) (*render.PostgresConnection, bool, error) {
-	cluster := render.CNPGCluster(topo)
+func (r *AuthentikDeploymentReconciler) resolveCNPGPostgres(ctx context.Context, rc client.Client, topo *benchv1alpha1.AuthentikDeployment, wc *benchv1alpha1.WorkloadCluster) (*render.PostgresConnection, bool, error) {
+	cluster := render.CNPGCluster(topo, wc)
 	if err := applyUnowned(ctx, rc, cluster); err != nil {
 		return nil, false, fmt.Errorf("apply CNPG Cluster: %w", err)
 	}

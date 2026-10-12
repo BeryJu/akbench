@@ -10,6 +10,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
 )
 
 // csi-incus (github.com/BeryJu/csi-incus) publishes its own Helm chart to
@@ -100,7 +102,7 @@ func CSIIncusHelmRepository(namespace string) *sourcev1.HelmRepository {
 // kind VolumeSnapshotClass") rather than just sitting inert - a pure
 // scope cut, not a capability regression from the earlier vendored-YAML
 // approach (which never applied a VolumeSnapshotClass either).
-func CSIIncusHelmValues(source *corev1.Secret) (*apiextensionsv1.JSON, error) {
+func CSIIncusHelmValues(source *corev1.Secret, wc *benchv1alpha1.WorkloadCluster) (*apiextensionsv1.JSON, error) {
 	values := map[string]any{
 		"incus": map[string]any{
 			"addr": string(source.Data["server"]),
@@ -124,6 +126,18 @@ func CSIIncusHelmValues(source *corev1.Secret) (*apiextensionsv1.JSON, error) {
 		"volumeSnapshotClass": map[string]any{
 			"create": false,
 		},
+	}
+	// controller.* only - never node.*: the node plugin is a DaemonSet that
+	// has to run on every node regardless of pool (it only formats/mounts a
+	// device the controller already attached), and the chart's own default
+	// already gives it a broad `operator: Exists` toleration for exactly
+	// that reason (confirmed against its own values.yaml) - scoping it to
+	// one pool would break volume mounting everywhere else.
+	if sel, tol := MonitoringPoolPlacement(wc); len(sel) > 0 || len(tol) > 0 {
+		values["controller"] = map[string]any{
+			"nodeSelector": sel,
+			"tolerations":  tol,
+		}
 	}
 	raw, err := json.Marshal(values)
 	if err != nil {

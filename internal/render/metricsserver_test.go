@@ -20,7 +20,7 @@ func TestMetricsServerHelmRepository(t *testing.T) {
 }
 
 func TestMetricsServerHelmValuesSetsInsecureTLS(t *testing.T) {
-	raw, err := MetricsServerHelmValues()
+	raw, err := MetricsServerHelmValues(nil)
 	if err != nil {
 		t.Fatalf("MetricsServerHelmValues: %v", err)
 	}
@@ -37,7 +37,7 @@ func TestMetricsServerHelmValuesSetsInsecureTLS(t *testing.T) {
 }
 
 func TestMetricsServerHelmRelease(t *testing.T) {
-	values, err := MetricsServerHelmValues()
+	values, err := MetricsServerHelmValues(nil)
 	if err != nil {
 		t.Fatalf("MetricsServerHelmValues: %v", err)
 	}

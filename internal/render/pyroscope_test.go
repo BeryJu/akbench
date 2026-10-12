@@ -7,7 +7,7 @@ import (
 )
 
 func TestPyroscopeObjectsMatchesDefaultPyroscopeHost(t *testing.T) {
-	objs := PyroscopeObjects()
+	objs := PyroscopeObjects(nil)
 	found := map[string]bool{"Namespace": false, "Deployment": false, "Service": false, "ServiceMonitor": false}
 	for _, obj := range objs {
 		if obj.GetName() == "" {
@@ -39,7 +39,7 @@ func TestPyroscopeObjectsMatchesDefaultPyroscopeHost(t *testing.T) {
 // selector) - a Service with no object-level labels would leave the
 // ServiceMonitor matching nothing, silently.
 func TestPyroscopeServiceIsLabeledForItsServiceMonitor(t *testing.T) {
-	for _, obj := range PyroscopeObjects() {
+	for _, obj := range PyroscopeObjects(nil) {
 		if svc, ok := obj.(*corev1.Service); ok {
 			if svc.Labels["app"] != PyroscopeServiceName {
 				t.Errorf("pyroscope Service.Labels = %v, want app=%q so its ServiceMonitor can find it", svc.Labels, PyroscopeServiceName)

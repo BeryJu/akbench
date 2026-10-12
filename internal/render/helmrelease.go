@@ -98,8 +98,15 @@ type AuthentikDeploymentHelmValues struct {
 // single-attach volume) every time the pod template changed for any
 // unrelated reason. A one-shot Job mounts BlueprintPVC instead, and
 // releases it as soon as the import completes.
-func HelmValues(t *benchv1alpha1.AuthentikDeployment, secretKey string, pgConn *PostgresConnection, pyroscopeHost, tracingEndpoint string) (*apiextensionsv1.JSON, error) {
+func HelmValues(t *benchv1alpha1.AuthentikDeployment, wc *benchv1alpha1.WorkloadCluster, secretKey string, pgConn *PostgresConnection, pyroscopeHost, tracingEndpoint string) (*apiextensionsv1.JSON, error) {
 	embedded := t.Spec.Postgres.Mode == benchv1alpha1.PostgresEmbedded
+	// poolSelector/poolTolerations are this deployment's own baseline
+	// authentik-pool targeting (see AuthentikPoolPlacement's own doc
+	// comment) - applied to every one of this deployment's own pods
+	// (server, worker, embedded-postgres below) regardless of
+	// PlacementMode, unlike PlacementSpec.NodeSelector/Tolerations further
+	// down, which stay a Dedicated-only, user-specified addition on top.
+	poolSelector, poolTolerations := AuthentikPoolPlacement(wc)
 	// hasServiceMonitorCRD: the ServiceMonitor CRD only exists on a cluster
 	// WorkloadClusterReconciler installed kube-prometheus-stack onto (every
 	// WorkloadCluster, once its control plane is reachable - see
@@ -161,7 +168,7 @@ func HelmValues(t *benchv1alpha1.AuthentikDeployment, secretKey string, pgConn *
 		// spreading/packing to replicate the way ServerWorkerAffinity does
 		// for Dedicated/Packed.
 		values.Postgres["commonLabels"] = DeploymentLabels(t.Name)
-		values.Postgres["primary"] = map[string]any{
+		primary := map[string]any{
 			"affinity": &corev1.Affinity{
 				PodAntiAffinity: &corev1.PodAntiAffinity{
 					RequiredDuringSchedulingIgnoredDuringExecution: []corev1.PodAffinityTerm{
@@ -170,6 +177,20 @@ func HelmValues(t *benchv1alpha1.AuthentikDeployment, secretKey string, pgConn *
 				},
 			},
 		}
+		// Same authentik-pool targeting as server/worker above - the bundled
+		// subchart's own primary.nodeSelector/primary.tolerations (Bitnami's
+		// standard convention, same as primary.affinity above) aren't wired
+		// through by the chart's own global.* values the way affinity's
+		// mutually-exclusive-with-presets mechanism forced server/worker's
+		// own values here, but are real top-level keys under primary all the
+		// same.
+		if len(poolSelector) > 0 {
+			primary["nodeSelector"] = poolSelector
+		}
+		if len(poolTolerations) > 0 {
+			primary["tolerations"] = poolTolerations
+		}
+		values.Postgres["primary"] = primary
 		// The bundled subchart is Bitnami's own postgresql chart (confirmed
 		// against its real values.yaml): metrics.enabled runs its
 		// postgres_exporter sidecar, metrics.serviceMonitor.enabled asks the
@@ -242,11 +263,20 @@ func HelmValues(t *benchv1alpha1.AuthentikDeployment, secretKey string, pgConn *
 		}
 	}
 
+	// Merged (not replaced) with poolSelector/poolTolerations above: the two
+	// mechanisms target different label keys, so there's nothing to
+	// reconcile between them.
 	applyPlacement := func(w map[string]any) {
-		if sel := NodeSelector(t.Spec.Placement); len(sel) > 0 {
+		sel := poolSelector
+		if dedicated := NodeSelector(t.Spec.Placement); len(dedicated) > 0 {
+			sel = mergeStringMaps(sel, dedicated)
+		}
+		if len(sel) > 0 {
 			w["nodeSelector"] = sel
 		}
-		if tol := Tolerations(t.Spec.Placement); len(tol) > 0 {
+		tol := append([]corev1.Toleration{}, poolTolerations...)
+		tol = append(tol, Tolerations(t.Spec.Placement)...)
+		if len(tol) > 0 {
 			w["tolerations"] = tol
 		}
 		// Always set, not just in Packed mode: ServerWorkerAffinity now

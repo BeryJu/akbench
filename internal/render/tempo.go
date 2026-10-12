@@ -9,6 +9,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
 )
 
 // TempoServiceName/TempoOTLPHTTPPort must match defaultTracingEndpoint
@@ -90,8 +92,9 @@ overrides:
 // authentik's OTLP trace export (AUTHENTIK_ERROR_REPORTING__OTEL_ENDPOINT)
 // has somewhere real to land instead of failing silently against a
 // nonexistent host.
-func TempoObjects() []client.Object {
+func TempoObjects(wc *benchv1alpha1.WorkloadCluster) []client.Object {
 	labels := tempoLabels()
+	nodeSelector, tolerations := MonitoringPoolPlacement(wc)
 	return []client.Object{
 		&corev1.Namespace{
 			Kind: kindNamespace, APIVersion: apiVersionV1,
@@ -131,6 +134,8 @@ func TempoObjects() []client.Object {
 								},
 							},
 						},
+						NodeSelector: nodeSelector,
+						Tolerations:  tolerations,
 						Volumes: []corev1.Volume{
 							{
 								Name: "config",

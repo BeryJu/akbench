@@ -43,7 +43,7 @@ func CNPGAppSecretName(t *benchv1alpha1.AuthentikDeployment) string {
 // postgres mode: instances (>1 for HA) and storage sized/classed from
 // spec.postgres.cnpg, bootstrapped with an "authentik" database/owner so its
 // generated app secret matches the embedded mode's own username/database.
-func CNPGCluster(t *benchv1alpha1.AuthentikDeployment) *unstructured.Unstructured {
+func CNPGCluster(t *benchv1alpha1.AuthentikDeployment, wc *benchv1alpha1.WorkloadCluster) *unstructured.Unstructured {
 	cnpg := t.Spec.Postgres.CNPG
 	instances := int64(3)
 	if cnpg != nil && cnpg.Instances > 0 {
@@ -104,6 +104,27 @@ func CNPGCluster(t *benchv1alpha1.AuthentikDeployment) *unstructured.Unstructure
 	antiAffinityMap, err := runtime.DefaultUnstructuredConverter.ToUnstructured(antiAffinity)
 	if err == nil {
 		_ = unstructured.SetNestedMap(u.Object, antiAffinityMap, "spec", "affinity", "additionalPodAntiAffinity")
+	}
+	// Same authentik-pool targeting as the chart's own server/worker pods
+	// (helmrelease.go) - CNPG's real API (Cluster.Spec.Affinity.NodeSelector/
+	// .Tolerations, confirmed against cloudnative-pg/cloudnative-pg's own
+	// cluster_types.go) passes both straight through to every instance pod
+	// it creates, alongside the anti-affinity term above.
+	if poolSelector, poolTolerations := AuthentikPoolPlacement(wc); len(poolSelector) > 0 || len(poolTolerations) > 0 {
+		if len(poolSelector) > 0 {
+			_ = unstructured.SetNestedStringMap(u.Object, poolSelector, "spec", "affinity", "nodeSelector")
+		}
+		if len(poolTolerations) > 0 {
+			tolerations := make([]any, 0, len(poolTolerations))
+			for _, t := range poolTolerations {
+				tm, err := runtime.DefaultUnstructuredConverter.ToUnstructured(&t)
+				if err != nil {
+					continue
+				}
+				tolerations = append(tolerations, tm)
+			}
+			_ = unstructured.SetNestedSlice(u.Object, tolerations, "spec", "affinity", "tolerations")
+		}
 	}
 	return u
 }

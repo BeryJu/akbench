@@ -66,6 +66,31 @@ type IncusProviderSpec struct {
 	ControlPlane IncusMachineSpec `json:"controlPlane,omitempty"`
 }
 
+// WorkerPoolRole is which of this project's own workloads a WorkerPoolSpec's
+// nodes are reserved for - see WorkerPoolSpec.Role's own doc comment for the
+// full taint/toleration/nodeSelector mechanics this drives.
+// +kubebuilder:validation:Enum=Generic;Authentik;K6;Monitoring
+type WorkerPoolRole string
+
+const (
+	// WorkerPoolRoleGeneric is the zero value: no taint, no label, no
+	// workload targets this pool by role - the scheduler's own default
+	// behavior applies, exactly as if this field didn't exist.
+	WorkerPoolRoleGeneric WorkerPoolRole = "Generic"
+	// WorkerPoolRoleAuthentik is reserved for an AuthentikDeployment's own
+	// server/worker/embedded-or-CNPG-postgres pods.
+	WorkerPoolRoleAuthentik WorkerPoolRole = "Authentik"
+	// WorkerPoolRoleK6 is reserved for a TestCase's k6 runner pods.
+	WorkerPoolRoleK6 WorkerPoolRole = "K6"
+	// WorkerPoolRoleMonitoring is reserved for the observability/addon stack
+	// WorkloadClusterReconciler itself installs (Prometheus, Grafana,
+	// Pyroscope, Tempo, metrics-server, csi-incus's controller, descheduler)
+	// - the "system" pool, in the sense that this project's own management
+	// workloads live here rather than on whatever pool is actually being
+	// benchmarked.
+	WorkerPoolRoleMonitoring WorkerPoolRole = "Monitoring"
+)
+
 // WorkerPoolSpec is one named, independently-sized group of worker machines,
 // letting a WorkloadCluster run more than one worker shape at once - e.g. a
 // small pool for the k6 runner alongside a larger one sized for load
@@ -91,6 +116,25 @@ type WorkerPoolSpec struct {
 	// own name, so it follows the same naming rules as a Kubernetes object.
 	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
 	Name string `json:"name"`
+
+	// role declares which of this project's own workloads this pool's nodes
+	// are meant for - WorkloadClusterReconciler taints every node registered
+	// into a non-Generic pool (see render.NodePoolLabel) with
+	// bench.goauthentik.io/pool=<role>:NoSchedule and the matching node
+	// label, and every workload this project renders for that role
+	// (AuthentikDeployment's server/worker/postgres pods for Authentik, a
+	// TestCase's k6 runner for K6, the observability/addon stack for
+	// Monitoring) is given a matching nodeSelector plus a toleration for
+	// that one taint - a toleration alone only ever *permits* scheduling
+	// onto a tainted node, it never *attracts* a pod there, so both are
+	// needed together. Generic (the zero value) carries no taint and no
+	// label at all, so every pool created before this field existed, or any
+	// pool a user adds without a role, keeps behaving exactly as it always
+	// did - nothing here is retroactive.
+	// +kubebuilder:validation:Enum=Generic;Authentik;K6;Monitoring
+	// +kubebuilder:default=Generic
+	// +optional
+	Role WorkerPoolRole `json:"role,omitempty"`
 
 	// replicas is this pool's initial/fixed size. Only used at creation time
 	// once autoscaling is set - see AutoscalingSpec.
@@ -147,8 +191,15 @@ type WorkloadClusterSpec struct {
 
 	// workerPools are the WorkloadCluster's worker machine groups - at least
 	// one is required. See WorkerPoolSpec for how editing this list after
-	// creation behaves.
+	// creation behaves. Omitting it entirely (rather than submitting an
+	// empty list, which MinItems below still rejects) defaults to three
+	// pools - one each for the three roles this project's own workloads
+	// actually use (Authentik/K6/Monitoring) - applied by the API server's
+	// own structural-schema defaulting before MinItems is even checked, not
+	// by this operator's own code, so it works the same whether the object
+	// is created via kubectl, the web UI, or any other client.
 	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:default={{name: "authentik", role: "Authentik", replicas: 2, incus: {flavor: "c2-m4"}}, {name: "k6", role: "K6", replicas: 2, incus: {flavor: "c2-m4"}}, {name: "monitoring", role: "Monitoring", replicas: 1, incus: {flavor: "c2-m4"}}}
 	WorkerPools []WorkerPoolSpec `json:"workerPools"`
 
 	// incus configures provisioning when provider is Incus.
@@ -246,4 +297,21 @@ func init() {
 		s.AddKnownTypes(SchemeGroupVersion, &WorkloadCluster{}, &WorkloadClusterList{})
 		return nil
 	})
+}
+
+// HasPoolRole reports whether this WorkloadCluster has at least one worker
+// pool reserved for role - what render.AuthentikPoolPlacement/
+// render.K6PoolPlacement/render.MonitoringPoolPlacement check before
+// targeting a workload at that role's taint/label at all, so a
+// WorkloadCluster that never got a pool for some role (every one created
+// before this field existed, or one whose pools were deliberately left
+// Generic) never ends up with a workload's nodeSelector pointing at a label
+// no node actually carries.
+func (wc *WorkloadCluster) HasPoolRole(role WorkerPoolRole) bool {
+	for _, pool := range wc.Spec.WorkerPools {
+		if pool.Role == role {
+			return true
+		}
+	}
+	return false
 }

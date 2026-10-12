@@ -183,6 +183,7 @@ var grafanaDashboardNodes []byte
 func GrafanaObjects(wc *benchv1alpha1.WorkloadCluster, adminPassword string) []client.Object {
 	labels := grafanaLabels()
 	rootURL := GrafanaProxyPathPrefix(wc)
+	monitoringNodeSelector, monitoringTolerations := MonitoringPoolPlacement(wc)
 	return []client.Object{
 		&corev1.Namespace{
 			Kind: kindNamespace, APIVersion: apiVersionV1,
@@ -258,6 +259,8 @@ func GrafanaObjects(wc *benchv1alpha1.WorkloadCluster, adminPassword string) []c
 								},
 							},
 						},
+						NodeSelector: monitoringNodeSelector,
+						Tolerations:  monitoringTolerations,
 						Volumes: []corev1.Volume{
 							{
 								Name: "datasources",

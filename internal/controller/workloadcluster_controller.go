@@ -251,6 +251,7 @@ func (r *WorkloadClusterReconciler) ensureAddons(ctx context.Context, wc *benchv
 		{"Pyroscope", r.ensurePyroscope},
 		{"Tempo", r.ensureTempo},
 		{"Grafana", r.ensureGrafana},
+		{"descheduler", r.ensureDescheduler},
 	}
 	for _, addon := range addons {
 		if err := addon.ensure(ctx, wc); err != nil {
@@ -322,7 +323,7 @@ func (r *WorkloadClusterReconciler) ensureCSIIncus(ctx context.Context, wc *benc
 	if err := r.Get(ctx, types.NamespacedName{Name: wc.Spec.Incus.LXCSecretRef.Name, Namespace: wc.Namespace}, &source); err != nil {
 		return fmt.Errorf("get incus credentials secret: %w", err)
 	}
-	values, err := render.CSIIncusHelmValues(&source)
+	values, err := render.CSIIncusHelmValues(&source, wc)
 	if err != nil {
 		return err
 	}
@@ -336,11 +337,31 @@ func (r *WorkloadClusterReconciler) ensureCSIIncus(ctx context.Context, wc *benc
 	return nil
 }
 
+// ensureDescheduler installs kubernetes-sigs/descheduler onto the workload
+// cluster via its own official Helm chart - same Flux HelmRepository +
+// HelmRelease mechanism as ensureCNI/ensureCSIIncus/ensureMetricsServer. See
+// render.DeschedulerHelmValues' own doc comment for why it exists and what
+// (little) is overridden from the chart's own defaults.
+func (r *WorkloadClusterReconciler) ensureDescheduler(ctx context.Context, wc *benchv1alpha1.WorkloadCluster) error {
+	values, err := render.DeschedulerHelmValues(wc)
+	if err != nil {
+		return err
+	}
+	if err := applyOwned(ctx, r.Client, r.Scheme, wc, render.DeschedulerHelmRepository(wc.Namespace)); err != nil {
+		return fmt.Errorf("apply descheduler HelmRepository: %w", err)
+	}
+	hr := render.DeschedulerHelmRelease(wc.Namespace, render.KubeconfigSecretName(wc), values)
+	if err := applyOwned(ctx, r.Client, r.Scheme, wc, hr); err != nil {
+		return fmt.Errorf("apply descheduler HelmRelease: %w", err)
+	}
+	return nil
+}
+
 // ensureMetricsServer installs kubernetes-sigs/metrics-server onto the
 // workload cluster via its own official Helm chart - same Flux
 // HelmRepository + HelmRelease mechanism as ensureCNI/ensureCSIIncus.
 func (r *WorkloadClusterReconciler) ensureMetricsServer(ctx context.Context, wc *benchv1alpha1.WorkloadCluster) error {
-	values, err := render.MetricsServerHelmValues()
+	values, err := render.MetricsServerHelmValues(wc)
 	if err != nil {
 		return err
 	}
@@ -408,7 +429,7 @@ func reachableNodeIP(ctx context.Context, remoteClient client.Client) (string, e
 // name/NodePort (see render.PrometheusServiceName's own doc comment for why
 // no other consumer needed to change).
 func (r *WorkloadClusterReconciler) ensurePrometheus(ctx context.Context, wc *benchv1alpha1.WorkloadCluster) error {
-	values, err := render.KubePrometheusStackHelmValues()
+	values, err := render.KubePrometheusStackHelmValues(wc)
 	if err != nil {
 		return err
 	}
@@ -491,7 +512,7 @@ func (r *WorkloadClusterReconciler) ensurePyroscope(ctx context.Context, wc *ben
 	if err != nil {
 		return err
 	}
-	return createAll(ctx, remoteClient, render.PyroscopeObjects())
+	return createAll(ctx, remoteClient, render.PyroscopeObjects(wc))
 }
 
 // ensureTempo installs a single-replica Grafana Tempo onto the workload
@@ -502,7 +523,7 @@ func (r *WorkloadClusterReconciler) ensureTempo(ctx context.Context, wc *benchv1
 	if err != nil {
 		return err
 	}
-	return createAll(ctx, remoteClient, render.TempoObjects())
+	return createAll(ctx, remoteClient, render.TempoObjects(wc))
 }
 
 // ensureGrafana installs a single-replica Grafana onto the workload cluster

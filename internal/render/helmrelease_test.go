@@ -31,9 +31,82 @@ func decodeValues(t *testing.T, raw json.RawMessage) AuthentikDeploymentHelmValu
 	return v
 }
 
+// TestHelmValuesTargetsAuthentikPool guards the node-pool baseline wiring:
+// server, worker and the embedded-postgres primary all get a nodeSelector/
+// toleration pair matching the cluster's own authentik-role pool, regardless
+// of PlacementMode (Default here - the simplest case, where the old
+// Dedicated-only NodeSelector/Tolerations functions would have returned
+// nothing at all).
+func TestHelmValuesTargetsAuthentikPool(t *testing.T) {
+	topo := exampleDeployment()
+	wc := &benchv1alpha1.WorkloadCluster{Spec: benchv1alpha1.WorkloadClusterSpec{
+		WorkerPools: []benchv1alpha1.WorkerPoolSpec{{Name: "ak", Role: benchv1alpha1.WorkerPoolRoleAuthentik}},
+	}}
+	raw, err := HelmValues(topo, wc, "the-secret-key", &PostgresConnection{Password: "pw"}, "http://pyroscope.example:4040", "http://tempo.example:4318")
+	if err != nil {
+		t.Fatalf("HelmValues: %v", err)
+	}
+	values := decodeValues(t, raw.Raw)
+
+	for _, section := range []struct {
+		name string
+		w    map[string]any
+	}{{"server", values.Server}, {"worker", values.Worker}} {
+		sel, _ := section.w["nodeSelector"].(map[string]any)
+		if sel[NodePoolLabel] != "authentik" {
+			t.Errorf("%s.nodeSelector[%s] = %v, want authentik", section.name, NodePoolLabel, sel[NodePoolLabel])
+		}
+		if _, ok := section.w["tolerations"]; !ok {
+			t.Errorf("%s.tolerations not set", section.name)
+		}
+	}
+
+	primary, _ := values.Postgres["primary"].(map[string]any)
+	if primary == nil {
+		t.Fatal("postgresql.primary not set")
+	}
+	sel, _ := primary["nodeSelector"].(map[string]any)
+	if sel[NodePoolLabel] != "authentik" {
+		t.Errorf("postgresql.primary.nodeSelector[%s] = %v, want authentik", NodePoolLabel, sel[NodePoolLabel])
+	}
+	if _, ok := primary["tolerations"]; !ok {
+		t.Error("postgresql.primary.tolerations not set")
+	}
+}
+
+// TestHelmValuesMergesDedicatedNodeSelectorWithPool confirms the two
+// mechanisms combine rather than one overriding the other: a Dedicated-mode
+// user-supplied nodeSelector/toleration must survive alongside the pool's
+// own baseline, not replace it.
+func TestHelmValuesMergesDedicatedNodeSelectorWithPool(t *testing.T) {
+	topo := exampleDeployment()
+	topo.Spec.Placement = benchv1alpha1.PlacementSpec{
+		Mode:         benchv1alpha1.PlacementDedicated,
+		NodeSelector: map[string]string{"disk": "nvme"},
+		Tolerations:  []corev1.Toleration{{Key: "dedicated", Operator: corev1.TolerationOpExists}},
+	}
+	wc := &benchv1alpha1.WorkloadCluster{Spec: benchv1alpha1.WorkloadClusterSpec{
+		WorkerPools: []benchv1alpha1.WorkerPoolSpec{{Name: "ak", Role: benchv1alpha1.WorkerPoolRoleAuthentik}},
+	}}
+	raw, err := HelmValues(topo, wc, "the-secret-key", &PostgresConnection{Password: "pw"}, "http://pyroscope.example:4040", "http://tempo.example:4318")
+	if err != nil {
+		t.Fatalf("HelmValues: %v", err)
+	}
+	values := decodeValues(t, raw.Raw)
+
+	sel, _ := values.Server["nodeSelector"].(map[string]any)
+	if sel[NodePoolLabel] != "authentik" || sel["disk"] != "nvme" {
+		t.Errorf("server.nodeSelector = %v, want both the pool's own key and the Dedicated-mode one", sel)
+	}
+	tol, _ := values.Server["tolerations"].([]any)
+	if len(tol) != 2 {
+		t.Errorf("server.tolerations = %v, want 2 (the pool's own plus the Dedicated-mode one)", tol)
+	}
+}
+
 func TestHelmValuesEmbedded(t *testing.T) {
 	topo := exampleDeployment()
-	raw, err := HelmValues(topo, "the-secret-key", &PostgresConnection{Password: "pw"}, "http://pyroscope.example:4040", "http://tempo.example:4318")
+	raw, err := HelmValues(topo, nil, "the-secret-key", &PostgresConnection{Password: "pw"}, "http://pyroscope.example:4040", "http://tempo.example:4318")
 	if err != nil {
 		t.Fatalf("HelmValues: %v", err)
 	}
@@ -73,7 +146,7 @@ func TestHelmValuesEmbedded(t *testing.T) {
 // must all be turned on, for Embedded mode.
 func TestHelmValuesEnablesMetrics(t *testing.T) {
 	topo := exampleDeployment()
-	raw, err := HelmValues(topo, "secret", &PostgresConnection{Password: "pw"}, "http://pyroscope.example:4040", "http://tempo.example:4318")
+	raw, err := HelmValues(topo, nil, "secret", &PostgresConnection{Password: "pw"}, "http://pyroscope.example:4040", "http://tempo.example:4318")
 	if err != nil {
 		t.Fatalf("HelmValues: %v", err)
 	}
@@ -111,7 +184,7 @@ func TestHelmValuesEnablesMetrics(t *testing.T) {
 func TestHelmValuesNoServiceMonitorWithoutClusterRef(t *testing.T) {
 	topo := exampleDeployment()
 	topo.Spec.ClusterRef = corev1.LocalObjectReference{}
-	raw, err := HelmValues(topo, "secret", &PostgresConnection{Password: "pw"}, "http://pyroscope.example:4040", "http://tempo.example:4318")
+	raw, err := HelmValues(topo, nil, "secret", &PostgresConnection{Password: "pw"}, "http://pyroscope.example:4040", "http://tempo.example:4318")
 	if err != nil {
 		t.Fatalf("HelmValues: %v", err)
 	}
@@ -169,7 +242,7 @@ func affinityOf(t *testing.T, w map[string]any) map[string]any {
 func TestHelmValuesDedicatedSetsServerWorkerAffinity(t *testing.T) {
 	topo := exampleDeployment()
 	topo.Spec.Placement = benchv1alpha1.PlacementSpec{Mode: benchv1alpha1.PlacementDedicated}
-	raw, err := HelmValues(topo, "secret", &PostgresConnection{Password: "pw"}, "http://pyroscope.example:4040", "http://tempo.example:4318")
+	raw, err := HelmValues(topo, nil, "secret", &PostgresConnection{Password: "pw"}, "http://pyroscope.example:4040", "http://tempo.example:4318")
 	if err != nil {
 		t.Fatalf("HelmValues: %v", err)
 	}
@@ -202,7 +275,7 @@ func TestHelmValuesDedicatedSetsServerWorkerAffinity(t *testing.T) {
 func TestHelmValuesPacked(t *testing.T) {
 	topo := exampleDeployment()
 	topo.Spec.Placement = benchv1alpha1.PlacementSpec{Mode: benchv1alpha1.PlacementPacked}
-	raw, err := HelmValues(topo, "secret", &PostgresConnection{Password: "pw"}, "http://pyroscope.example:4040", "http://tempo.example:4318")
+	raw, err := HelmValues(topo, nil, "secret", &PostgresConnection{Password: "pw"}, "http://pyroscope.example:4040", "http://tempo.example:4318")
 	if err != nil {
 		t.Fatalf("HelmValues: %v", err)
 	}
@@ -229,7 +302,7 @@ func TestHelmValuesPacked(t *testing.T) {
 // another deployment's pods either.
 func TestHelmValuesEmbeddedPostgresGetsCrossDeploymentAffinity(t *testing.T) {
 	topo := exampleDeployment()
-	raw, err := HelmValues(topo, "secret", &PostgresConnection{Password: "pw"}, "http://pyroscope.example:4040", "http://tempo.example:4318")
+	raw, err := HelmValues(topo, nil, "secret", &PostgresConnection{Password: "pw"}, "http://pyroscope.example:4040", "http://tempo.example:4318")
 	if err != nil {
 		t.Fatalf("HelmValues: %v", err)
 	}
@@ -254,7 +327,7 @@ func TestHelmValuesExternalDisablesBundledPostgres(t *testing.T) {
 		Mode:     benchv1alpha1.PostgresExternal,
 		External: &benchv1alpha1.ExternalPostgresSpec{},
 	}
-	raw, err := HelmValues(topo, "secret", &PostgresConnection{
+	raw, err := HelmValues(topo, nil, "secret", &PostgresConnection{
 		Host: "pg.example.com", Port: 5432, Database: "authentik", User: "authentik", Password: "s3cret",
 	}, "http://pyroscope.example:4040", "http://tempo.example:4318")
 	if err != nil {
@@ -276,7 +349,7 @@ func TestHelmValuesExternalDisablesBundledPostgres(t *testing.T) {
 
 func TestHelmReleaseUsesExplicitReleaseName(t *testing.T) {
 	topo := exampleDeployment()
-	raw, err := HelmValues(topo, "secret", nil, "http://pyroscope.example:4040", "http://tempo.example:4318")
+	raw, err := HelmValues(topo, nil, "secret", nil, "http://pyroscope.example:4040", "http://tempo.example:4318")
 	if err != nil {
 		t.Fatalf("HelmValues: %v", err)
 	}
@@ -319,7 +392,7 @@ func envValue(t *testing.T, w map[string]any, name string) (string, bool) {
 // matching the Ansible harness this project replaces).
 func TestHelmValuesPyroscopeAlwaysSet(t *testing.T) {
 	topo := exampleDeployment()
-	raw, err := HelmValues(topo, "secret", &PostgresConnection{Password: "pw"}, "http://pyroscope.example:4040", "http://tempo.example:4318")
+	raw, err := HelmValues(topo, nil, "secret", &PostgresConnection{Password: "pw"}, "http://pyroscope.example:4040", "http://tempo.example:4318")
 	if err != nil {
 		t.Fatalf("HelmValues: %v", err)
 	}
@@ -367,7 +440,7 @@ func TestHelmValuesTracingOnlyWhenErrorReportingEnabled(t *testing.T) {
 
 func mustValues(t *testing.T, topo *benchv1alpha1.AuthentikDeployment) AuthentikDeploymentHelmValues {
 	t.Helper()
-	raw, err := HelmValues(topo, "secret", &PostgresConnection{Password: "pw"}, "http://pyroscope.example:4040", "http://tempo.example:4318")
+	raw, err := HelmValues(topo, nil, "secret", &PostgresConnection{Password: "pw"}, "http://pyroscope.example:4040", "http://tempo.example:4318")
 	if err != nil {
 		t.Fatalf("HelmValues: %v", err)
 	}

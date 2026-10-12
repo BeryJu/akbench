@@ -12,6 +12,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/intstr"
+
+	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
 )
 
 // ObservabilityNamespace is where every per-workload-cluster
@@ -189,7 +191,7 @@ func prometheusCompatServices() []map[string]any {
 //     against the chart's own values.yaml comment - means "select
 //     everything," in every namespace (serviceMonitorNamespaceSelector/
 //     podMonitorNamespaceSelector already default to {} too).
-func KubePrometheusStackHelmValues() (*apiextensionsv1.JSON, error) {
+func KubePrometheusStackHelmValues(wc *benchv1alpha1.WorkloadCluster) (*apiextensionsv1.JSON, error) {
 	// DefaultAlertRules is deliberately NOT in extraManifests alongside the
 	// compat Services below: confirmed live that this chart's own
 	// extra-objects.yaml template runs every extraManifests entry through
@@ -203,22 +205,44 @@ func KubePrometheusStackHelmValues() (*apiextensionsv1.JSON, error) {
 	// any templating engine at all.
 	extraManifests := append(prometheusCompatServices(), alertmanagerCompatServices()...)
 
+	// poolSelector/poolTolerations scope every Deployment this chart renders
+	// to the monitoring pool - deliberately NOT prometheus-node-exporter
+	// (its own DaemonSet, left at the chart's default: it exists to report
+	// per-node metrics for *every* node, authentik/k6 pools included, and
+	// already tolerates any NoSchedule taint by default - confirmed against
+	// its own subchart values.yaml - so scoping it here would defeat the
+	// entire point of it).
+	poolSelector, poolTolerations := MonitoringPoolPlacement(wc)
+	prometheusSpec := map[string]any{
+		"enableRemoteWriteReceiver":               true,
+		"serviceMonitorSelectorNilUsesHelmValues": false,
+		"podMonitorSelectorNilUsesHelmValues":     false,
+		"ruleSelectorNilUsesHelmValues":           false,
+	}
+	alertmanagerSpec := map[string]any{}
+	prometheusOperator := map[string]any{}
+	kubeStateMetrics := map[string]any{}
+	if len(poolSelector) > 0 || len(poolTolerations) > 0 {
+		for _, m := range []map[string]any{prometheusSpec, alertmanagerSpec, prometheusOperator, kubeStateMetrics} {
+			m["nodeSelector"] = poolSelector
+			m["tolerations"] = poolTolerations
+		}
+	}
+
 	raw, err := json.Marshal(map[string]any{
 		"fullnameOverride":                   kubePrometheusStackFullname,
 		"cleanPrometheusOperatorObjectNames": true,
 		"grafana":                            map[string]any{"enabled": false},
 		"alertmanager": map[string]any{
-			"enabled": true,
-			"config":  defaultAlertmanagerConfig(),
+			"enabled":          true,
+			"config":           defaultAlertmanagerConfig(),
+			"alertmanagerSpec": alertmanagerSpec,
 		},
 		"prometheus": map[string]any{
-			"prometheusSpec": map[string]any{
-				"enableRemoteWriteReceiver":               true,
-				"serviceMonitorSelectorNilUsesHelmValues": false,
-				"podMonitorSelectorNilUsesHelmValues":     false,
-				"ruleSelectorNilUsesHelmValues":           false,
-			},
+			"prometheusSpec": prometheusSpec,
 		},
+		"prometheusOperator": prometheusOperator,
+		"kube-state-metrics": kubeStateMetrics,
 		// kubeScheduler/kubeControllerManager/kubeProxy disabled: confirmed
 		// live (Alertmanager's own KubeSchedulerInstanceUnreachable/
 		// KubeControllerManagerInstanceUnreachable/KubeProxyInstanceUnreachable/

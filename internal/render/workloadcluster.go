@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"hash/fnv"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
@@ -98,12 +99,46 @@ func workerKubeadmConfigTemplateName(wc *benchv1alpha1.WorkloadCluster, pool ben
 // containers/VMs report host-level filesystem stats kubelet's default
 // eviction thresholds reject, and provider-id is what lets CAPI match a
 // Kubernetes Node back to the LXCMachine that created it.
-func nodeRegistrationArgs() []bootstrapv1.Arg {
-	return []bootstrapv1.Arg{
-		{Name: "eviction-hard", Value: new("nodefs.available<0%,nodefs.inodesFree<0%,imagefs.available<0%")},
-		{Name: "fail-swap-on", Value: new("false")},
-		{Name: "provider-id", Value: new("lxc:///{{ v1.local_hostname }}")},
+func nodeRegistrationArgs(extra ...bootstrapv1.Arg) []bootstrapv1.Arg {
+	args := make([]bootstrapv1.Arg, 0, 3+len(extra))
+	args = append(args,
+		bootstrapv1.Arg{Name: "eviction-hard", Value: new("nodefs.available<0%,nodefs.inodesFree<0%,imagefs.available<0%")},
+		bootstrapv1.Arg{Name: "fail-swap-on", Value: new("false")},
+		bootstrapv1.Arg{Name: "provider-id", Value: new("lxc:///{{ v1.local_hostname }}")},
+	)
+	return append(args, extra...)
+}
+
+// workerNodeRegistrationArgs is nodeRegistrationArgs plus, for a pool with a
+// non-Generic role, a --node-labels registering this node with
+// render.NodePoolLabel - what a pool-targeted workload's nodeSelector
+// actually matches against (its own toleration, set via poolTaints below on
+// the same NodeRegistrationOptions, only ever *permits* scheduling onto the
+// node, it doesn't request one). Custom-domain labels like this one are
+// allowed via kubelet's own --node-labels flag regardless of
+// NodeRestriction admission - that only blocks a kubelet self-labeling under
+// the reserved kubernetes.io/k8s.io namespaces.
+func workerNodeRegistrationArgs(pool benchv1alpha1.WorkerPoolSpec) []bootstrapv1.Arg {
+	value := poolLabelValue(pool.Role)
+	if value == "" {
+		return nodeRegistrationArgs()
 	}
+	return nodeRegistrationArgs(bootstrapv1.Arg{Name: "node-labels", Value: new(NodePoolLabel + "=" + value)})
+}
+
+// poolTaints is the worker JoinConfiguration's NodeRegistration.Taints for
+// pool - always a non-nil pointer, never left nil: kubeadm's own doc comment
+// on this field treats a nil Taints specially (it would otherwise apply
+// kubeadm's own init-time defaulting, meant for a control-plane node, not a
+// worker join), so every pool gets an explicit value - an empty slice for
+// Generic (no taint at all), or exactly the one taint matching this pool's
+// role.
+func poolTaints(pool benchv1alpha1.WorkerPoolSpec) *[]corev1.Taint {
+	taint := poolTaint(pool.Role)
+	if taint == nil {
+		return &[]corev1.Taint{}
+	}
+	return &[]corev1.Taint{*taint}
 }
 
 // kubeProxyConfigFile disables per-core conntrack sizing, which fails inside
@@ -363,7 +398,10 @@ func MachineDeployment(wc *benchv1alpha1.WorkloadCluster, pool benchv1alpha1.Wor
 // use (no InitConfiguration - only the first control-plane machine inits the
 // cluster, everything else joins it).
 func WorkerKubeadmConfigTemplate(wc *benchv1alpha1.WorkloadCluster, pool benchv1alpha1.WorkerPoolSpec) *bootstrapv1.KubeadmConfigTemplate {
-	nodeReg := bootstrapv1.NodeRegistrationOptions{KubeletExtraArgs: nodeRegistrationArgs()}
+	nodeReg := bootstrapv1.NodeRegistrationOptions{
+		KubeletExtraArgs: workerNodeRegistrationArgs(pool),
+		Taints:           poolTaints(pool),
+	}
 	return &bootstrapv1.KubeadmConfigTemplate{
 		Name:      workerKubeadmConfigTemplateName(wc, pool),
 		Namespace: wc.Namespace,

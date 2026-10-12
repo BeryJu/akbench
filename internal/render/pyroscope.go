@@ -6,6 +6,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
 )
 
 // PyroscopeServiceName/PyroscopePort must match defaultPyroscopeHost
@@ -34,8 +36,9 @@ func pyroscopeLabels() map[string]string {
 // nothing yet reads this data back out; it exists so authentik's own
 // continuous-profiling push has somewhere real to land instead of failing
 // silently against a nonexistent host.
-func PyroscopeObjects() []client.Object {
+func PyroscopeObjects(wc *benchv1alpha1.WorkloadCluster) []client.Object {
 	labels := pyroscopeLabels()
+	nodeSelector, tolerations := MonitoringPoolPlacement(wc)
 	return []client.Object{
 		&corev1.Namespace{
 			Kind: kindNamespace, APIVersion: apiVersionV1,
@@ -57,6 +60,8 @@ func PyroscopeObjects() []client.Object {
 								Ports: []corev1.ContainerPort{{Name: portNameHTTP, ContainerPort: PyroscopePort}},
 							},
 						},
+						NodeSelector: nodeSelector,
+						Tolerations:  tolerations,
 					},
 				},
 			},

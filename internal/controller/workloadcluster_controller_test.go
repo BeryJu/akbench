@@ -228,3 +228,70 @@ var _ = Describe("WorkloadCluster Controller", func() {
 		})
 	})
 })
+
+// This is a real API-server-level test, not a render unit test, because the
+// thing it guards (WorkerPools.+kubebuilder:default on
+// api/v1alpha1/workloadcluster_types.go) is CRD structural-schema defaulting
+// - only a real apiserver (envtest, here) applies it; the fake client used
+// elsewhere in this package's unit tests has no OpenAPI schema at all and
+// would silently pass with an empty slice regardless of whether the marker
+// generated correctly.
+var _ = Describe("WorkloadCluster defaulting", func() {
+	It("defaults to three pools (authentik/k6/monitoring) when workerPools is omitted", func() {
+		ctx := context.Background()
+		name := "default-pools-test"
+		resource := &benchv1alpha1.WorkloadCluster{
+			Name:      name,
+			Namespace: "default",
+			Spec: benchv1alpha1.WorkloadClusterSpec{
+				KubernetesVersion: "v1.31.0",
+				Provider:          benchv1alpha1.InfrastructureIncus,
+				Incus: &benchv1alpha1.IncusProviderSpec{
+					LXCSecretRef: corev1.LocalObjectReference{Name: "lxc-secret"},
+				},
+				// WorkerPools deliberately omitted.
+			},
+		}
+		Expect(k8sClient.Create(ctx, resource)).To(Succeed())
+		defer forceDelete(ctx, resource)
+
+		var got benchv1alpha1.WorkloadCluster
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: "default"}, &got)).To(Succeed())
+		Expect(got.Spec.WorkerPools).To(HaveLen(3))
+
+		byName := map[string]benchv1alpha1.WorkerPoolSpec{}
+		for _, p := range got.Spec.WorkerPools {
+			byName[p.Name] = p
+		}
+		Expect(byName["authentik"].Role).To(Equal(benchv1alpha1.WorkerPoolRoleAuthentik))
+		Expect(byName["k6"].Role).To(Equal(benchv1alpha1.WorkerPoolRoleK6))
+		Expect(byName["monitoring"].Role).To(Equal(benchv1alpha1.WorkerPoolRoleMonitoring))
+	})
+
+	It("leaves an explicitly-submitted workerPools list untouched", func() {
+		ctx := context.Background()
+		name := "explicit-pools-test"
+		resource := &benchv1alpha1.WorkloadCluster{
+			Name:      name,
+			Namespace: "default",
+			Spec: benchv1alpha1.WorkloadClusterSpec{
+				KubernetesVersion: "v1.31.0",
+				Provider:          benchv1alpha1.InfrastructureIncus,
+				WorkerPools: []benchv1alpha1.WorkerPoolSpec{
+					{Name: "workers", Replicas: 1, Incus: benchv1alpha1.IncusMachineSpec{Flavor: "c2-m4"}},
+				},
+				Incus: &benchv1alpha1.IncusProviderSpec{
+					LXCSecretRef: corev1.LocalObjectReference{Name: "lxc-secret"},
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, resource)).To(Succeed())
+		defer forceDelete(ctx, resource)
+
+		var got benchv1alpha1.WorkloadCluster
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: "default"}, &got)).To(Succeed())
+		Expect(got.Spec.WorkerPools).To(HaveLen(1))
+		Expect(got.Spec.WorkerPools[0].Name).To(Equal("workers"))
+		Expect(got.Spec.WorkerPools[0].Role).To(Equal(benchv1alpha1.WorkerPoolRoleGeneric))
+	})
+})
