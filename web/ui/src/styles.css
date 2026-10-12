@@ -104,6 +104,10 @@ button:disabled { opacity: .55; cursor: default; }
 .field { display: flex; flex-direction: column; gap: 4px; font-weight: 600; font-size: 13px; }
 .field .help { font-weight: 400; color: var(--muted); font-size: 12px; }
 label.check { display: flex; gap: 8px; align-items: center; }
+.pool { border: 1px solid var(--border); border-radius: var(--radius); background: var(--panel); padding: 12px; margin-bottom: 12px; }
+.pool > .fields { grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: start; }
+@media (max-width: 720px) { .pool > .fields { grid-template-columns: 1fr; } }
+.pool-footer { display: flex; justify-content: space-between; align-items: center; }
 input, select, textarea { font: inherit; padding: 6px 8px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg); color: var(--text); font-weight: 400; }
 input:disabled, select:disabled { opacity: .6; }
 .form-actions { display: flex; gap: 8px; margin-top: 20px; }

@@ -247,91 +247,96 @@ function ClusterForm({ existing }: { existing?: WorkloadCluster }) {
 
         <fieldset>
           <legend>Worker pools</legend>
+          <p className="muted">
+            A role reserves a pool for one of this project's own workloads: its nodes get a matching taint/label, and
+            that workload gets a matching nodeSelector/toleration. Generic schedules anywhere.
+          </p>
           {spec.workerPools.map((pool, i) => (
-            <div className="fields" key={i} style={{ alignItems: 'end' }}>
-              <Field label="Pool name">
-                <input required value={pool.name} onChange={e => patchPool(i, { name: e.target.value })} />
-              </Field>
-              <Field
-                label="Role"
-                help="Reserves this pool for one of this project's own workloads: its nodes get a matching taint/label, and that workload gets a matching nodeSelector/toleration. Generic schedules anywhere."
-              >
-                <select
-                  value={pool.role ?? 'Generic'}
-                  onChange={e => patchPool(i, { role: e.target.value as WorkerPoolRole })}
+            <div className="pool" key={i}>
+              <div className="fields">
+                <Field label="Pool name">
+                  <input required value={pool.name} onChange={e => patchPool(i, { name: e.target.value })} />
+                </Field>
+                <Field label="Role">
+                  <select
+                    value={pool.role ?? 'Generic'}
+                    onChange={e => patchPool(i, { role: e.target.value as WorkerPoolRole })}
+                  >
+                    {WORKER_POOL_ROLES.map(r => (
+                      <option key={r} value={r}>
+                        {roleLabel(r)}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+                <Field label="Flavor">
+                  <select
+                    value={pool.incus?.flavor ?? INSTANCE_FLAVORS[1]}
+                    onChange={e => patchPool(i, { incus: { ...pool.incus, flavor: e.target.value } })}
+                  >
+                    {INSTANCE_FLAVORS.map(f => (
+                      <option key={f} value={f}>
+                        {flavorLabel(f)}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+              </div>
+              <div className="fields">
+                <Field
+                  label={pool.autoscaling ? 'Initial replicas' : 'Replicas'}
+                  help={pool.autoscaling && 'Only sizes the pool at creation; cluster-autoscaler owns it after that'}
                 >
-                  {WORKER_POOL_ROLES.map(r => (
-                    <option key={r} value={r}>
-                      {roleLabel(r)}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-              <Field
-                label={pool.autoscaling ? 'Initial replicas' : 'Replicas'}
-                help={pool.autoscaling && 'Only sizes the pool at creation; cluster-autoscaler owns it after that'}
-              >
-                <input
-                  type="number"
-                  min={1}
-                  value={pool.replicas}
-                  onChange={e => patchPool(i, { replicas: Number(e.target.value) })}
-                />
-              </Field>
-              <label className="check">
-                <input
-                  type="checkbox"
-                  checked={Boolean(pool.autoscaling)}
-                  onChange={e =>
-                    patchPool(i, {
-                      autoscaling: e.target.checked
-                        ? { minReplicas: pool.replicas, maxReplicas: Math.max(pool.replicas, 3) }
-                        : undefined,
-                    })
-                  }
-                />
-                Autoscale
-              </label>
-              {pool.autoscaling && (
-                <>
-                  <Field label="Min nodes" help="0 lets the pool scale to zero when idle">
-                    <input
-                      type="number"
-                      required
-                      min={0}
-                      max={pool.autoscaling.maxReplicas}
-                      value={pool.autoscaling.minReplicas ?? 0}
-                      onChange={e =>
-                        patchPool(i, { autoscaling: { ...pool.autoscaling!, minReplicas: Number(e.target.value) } })
-                      }
-                    />
-                  </Field>
-                  <Field label="Max nodes">
-                    <input
-                      type="number"
-                      required
-                      min={Math.max(1, pool.autoscaling.minReplicas ?? 0)}
-                      value={pool.autoscaling.maxReplicas}
-                      onChange={e =>
-                        patchPool(i, { autoscaling: { ...pool.autoscaling!, maxReplicas: Number(e.target.value) } })
-                      }
-                    />
-                  </Field>
-                </>
-              )}
-              <Field label="Flavor">
-                <select
-                  value={pool.incus?.flavor ?? INSTANCE_FLAVORS[1]}
-                  onChange={e => patchPool(i, { incus: { ...pool.incus, flavor: e.target.value } })}
-                >
-                  {INSTANCE_FLAVORS.map(f => (
-                    <option key={f} value={f}>
-                      {flavorLabel(f)}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-              <div>
+                  <input
+                    type="number"
+                    min={1}
+                    value={pool.replicas}
+                    onChange={e => patchPool(i, { replicas: Number(e.target.value) })}
+                  />
+                </Field>
+                {pool.autoscaling && (
+                  <>
+                    <Field label="Min nodes" help="0 lets the pool scale to zero when idle">
+                      <input
+                        type="number"
+                        required
+                        min={0}
+                        max={pool.autoscaling.maxReplicas}
+                        value={pool.autoscaling.minReplicas ?? 0}
+                        onChange={e =>
+                          patchPool(i, { autoscaling: { ...pool.autoscaling!, minReplicas: Number(e.target.value) } })
+                        }
+                      />
+                    </Field>
+                    <Field label="Max nodes">
+                      <input
+                        type="number"
+                        required
+                        min={Math.max(1, pool.autoscaling.minReplicas ?? 0)}
+                        value={pool.autoscaling.maxReplicas}
+                        onChange={e =>
+                          patchPool(i, { autoscaling: { ...pool.autoscaling!, maxReplicas: Number(e.target.value) } })
+                        }
+                      />
+                    </Field>
+                  </>
+                )}
+              </div>
+              <div className="pool-footer">
+                <label className="check">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(pool.autoscaling)}
+                    onChange={e =>
+                      patchPool(i, {
+                        autoscaling: e.target.checked
+                          ? { minReplicas: pool.replicas, maxReplicas: Math.max(pool.replicas, 3) }
+                          : undefined,
+                      })
+                    }
+                  />
+                  Autoscale
+                </label>
                 <button
                   type="button"
                   className="small danger"
