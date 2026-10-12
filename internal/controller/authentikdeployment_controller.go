@@ -201,10 +201,18 @@ func (r *AuthentikDeploymentReconciler) helmReleaseReadiness(ctx context.Context
 		}
 		return metav1.ConditionFalse, "", fmt.Errorf("get HelmRelease: %w", err)
 	}
-	if existing.Status.ObservedGeneration != existing.Generation {
-		return metav1.ConditionFalse, "waiting for helm-controller to observe the latest spec", nil
-	}
 	cond := meta.FindStatusCondition(existing.Status.Conditions, "Ready")
+	if existing.Status.ObservedGeneration != existing.Generation {
+		// helm-controller only bumps status.observedGeneration once an
+		// action finishes - for the whole first install, that's minutes. Its
+		// Ready condition is already stamped with the new generation while
+		// the action runs, though, and says what it's doing ("Running
+		// 'install' action with timeout of 15m0s"), which is what to show.
+		if cond != nil && cond.ObservedGeneration == existing.Generation && cond.Status != metav1.ConditionTrue && cond.Message != "" {
+			return metav1.ConditionFalse, cond.Message, nil
+		}
+		return metav1.ConditionFalse, "waiting for helm-controller to pick up the latest spec", nil
+	}
 	if cond == nil {
 		return metav1.ConditionFalse, "waiting for helm-controller to reconcile", nil
 	}

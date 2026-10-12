@@ -1,6 +1,7 @@
 package render
 
 import (
+	"maps"
 	"strings"
 	"testing"
 
@@ -247,5 +248,50 @@ func TestAddonHelmReleaseName(t *testing.T) {
 	}
 	if got == AddonHelmReleaseName(other, KubePrometheusStackHelmReleaseName) {
 		t.Error("truncated names of different clusters collide")
+	}
+}
+
+func TestMachineDeploymentScaleFromZeroAnnotations(t *testing.T) {
+	wc := addonTestCluster("c1")
+	pool := benchv1alpha1.WorkerPoolSpec{
+		Name: "ak", Replicas: 2, Role: benchv1alpha1.WorkerPoolRoleAuthentik,
+		Incus:       benchv1alpha1.IncusMachineSpec{Flavor: "c2-m4"},
+		Autoscaling: &benchv1alpha1.AutoscalingSpec{MinReplicas: 0, MaxReplicas: 10},
+	}
+	got := MachineDeployment(wc, pool).Annotations
+	want := map[string]string{
+		ClusterAutoscalerMinSizeAnnotation:                  "0",
+		ClusterAutoscalerMaxSizeAnnotation:                  "10",
+		"capacity.cluster-autoscaler.kubernetes.io/cpu":     "2",
+		"capacity.cluster-autoscaler.kubernetes.io/memory":  "4Gi",
+		"capacity.cluster-autoscaler.kubernetes.io/maxPods": "110",
+		"capacity.cluster-autoscaler.kubernetes.io/labels":  "bench.goauthentik.io/pool=authentik",
+		"capacity.cluster-autoscaler.kubernetes.io/taints":  "bench.goauthentik.io/pool=authentik:NoSchedule",
+	}
+	if !maps.Equal(got, want) {
+		t.Errorf("annotations = %v, want %v", got, want)
+	}
+	for key := range want {
+		if !IsClusterAutoscalerAnnotation(key) {
+			t.Errorf("%s not recognised as a cluster-autoscaler annotation", key)
+		}
+	}
+	if IsClusterAutoscalerAnnotation("machinedeployment.clusters.x-k8s.io/revision") {
+		t.Error("Cluster API's revision annotation claimed as ours")
+	}
+
+	// A Generic pool with an unknown flavor: no label/taint/size, still
+	// scalable from zero, just without size annotations.
+	pool.Role, pool.Incus.Flavor = benchv1alpha1.WorkerPoolRoleGeneric, "custom"
+	got = MachineDeployment(wc, pool).Annotations
+	for _, key := range []string{"cpu", "memory", "labels", "taints"} {
+		if _, ok := got["capacity.cluster-autoscaler.kubernetes.io/"+key]; ok {
+			t.Errorf("unexpected %s annotation: %v", key, got)
+		}
+	}
+
+	pool.Autoscaling = nil
+	if got := MachineDeployment(wc, pool).Annotations; len(got) != 0 {
+		t.Errorf("non-autoscaled pool annotations = %v", got)
 	}
 }

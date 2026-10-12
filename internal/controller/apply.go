@@ -3,7 +3,6 @@ package controller
 import (
 	"context"
 	"fmt"
-	"maps"
 
 	helmv2 "github.com/fluxcd/helm-controller/api/v2"
 	sourcev1 "github.com/fluxcd/source-controller/api/v1"
@@ -153,14 +152,38 @@ func applyMachineDeploymentPool(ctx context.Context, c client.Client, scheme *ru
 		existing.Spec.Template.Spec.InfrastructureRef.Name = desired.Spec.Template.Spec.InfrastructureRef.Name
 		changed = true
 	}
-	if !maps.Equal(existing.Annotations, desired.Annotations) {
-		existing.Annotations = desired.Annotations
+	if syncAutoscalerAnnotations(&existing, desired.Annotations) {
 		changed = true
 	}
 	if !changed {
 		return nil
 	}
 	return c.Update(ctx, &existing)
+}
+
+// syncAutoscalerAnnotations makes existing's cluster-autoscaler annotations
+// (render.IsClusterAutoscalerAnnotation) match desired's - adding, updating
+// and removing only those, so annotations other controllers own (Cluster
+// API's own machinedeployment revision) survive. Reports whether anything
+// changed.
+func syncAutoscalerAnnotations(existing *clusterv1.MachineDeployment, desired map[string]string) bool {
+	changed := false
+	for key := range existing.Annotations {
+		if _, keep := desired[key]; render.IsClusterAutoscalerAnnotation(key) && !keep {
+			delete(existing.Annotations, key)
+			changed = true
+		}
+	}
+	for key, value := range desired {
+		if existing.Annotations[key] != value {
+			if existing.Annotations == nil {
+				existing.Annotations = map[string]string{}
+			}
+			existing.Annotations[key] = value
+			changed = true
+		}
+	}
+	return changed
 }
 
 // applyUnowned is applyOwned without the ownerReference: for objects applied

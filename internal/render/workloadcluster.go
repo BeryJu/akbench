@@ -5,6 +5,8 @@ import (
 	"encoding/hex"
 	"fmt"
 	"hash/fnv"
+	"maps"
+	"regexp"
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
@@ -382,6 +384,49 @@ const (
 	ClusterAutoscalerMaxSizeAnnotation = "cluster.x-k8s.io/cluster-api-autoscaler-node-group-max-size"
 )
 
+// clusterAutoscalerCapacityPrefix prefixes cluster-autoscaler's
+// scale-from-zero annotations (cloudprovider/clusterapi's README, "Scale
+// from zero support"): cpu, memory, maxPods, labels, taints.
+const clusterAutoscalerCapacityPrefix = "capacity.cluster-autoscaler.kubernetes.io/"
+
+// IsClusterAutoscalerAnnotation reports the MachineDeployment annotations
+// this operator renders for cluster-autoscaler - the only ones
+// applyMachineDeploymentPool syncs, leaving every other annotation (e.g.
+// Cluster API's own revision) alone.
+func IsClusterAutoscalerAnnotation(key string) bool {
+	return key == ClusterAutoscalerMinSizeAnnotation || key == ClusterAutoscalerMaxSizeAnnotation ||
+		strings.HasPrefix(key, clusterAutoscalerCapacityPrefix)
+}
+
+// incusFlavorPattern matches cluster-api-provider-incus's "cX-mY" instance
+// flavors: X vCPUs, Y GiB of memory.
+var incusFlavorPattern = regexp.MustCompile(`^c(\d+)-m(\d+)$`)
+
+// scaleFromZeroAnnotations tells cluster-autoscaler what a node of this
+// pool looks like, so it can scale the pool up from zero replicas. With no
+// node of a pool left to inspect, cluster-autoscaler builds the node from
+// these annotations (or the infrastructure template's status.capacity,
+// which cluster-api-provider-incus doesn't populate); without them it
+// leaves an empty pool out of every scale-up decision, so a pool with
+// minReplicas 0 that scaled down never comes back, and every pod pinned to
+// it - by its role's label and taint - stays Pending.
+func scaleFromZeroAnnotations(pool benchv1alpha1.WorkerPoolSpec) map[string]string {
+	annotations := map[string]string{
+		clusterAutoscalerCapacityPrefix + "maxPods": "110", // kubelet's default
+	}
+	if m := incusFlavorPattern.FindStringSubmatch(pool.Incus.Flavor); m != nil {
+		annotations[clusterAutoscalerCapacityPrefix+"cpu"] = m[1]
+		annotations[clusterAutoscalerCapacityPrefix+"memory"] = m[2] + "Gi"
+	}
+	if value := poolLabelValue(pool.Role); value != "" {
+		annotations[clusterAutoscalerCapacityPrefix+"labels"] = NodePoolLabel + "=" + value
+	}
+	if taint := poolTaint(pool.Role); taint != nil {
+		annotations[clusterAutoscalerCapacityPrefix+"taints"] = fmt.Sprintf("%s=%s:%s", taint.Key, taint.Value, taint.Effect)
+	}
+	return annotations
+}
+
 // MachineDeployment renders one worker pool. When pool.Autoscaling is set,
 // the rendered object carries cluster-autoscaler's own min/max-size
 // annotations - replicas is still set (it's this pool's initial size at
@@ -397,6 +442,7 @@ func MachineDeployment(wc *benchv1alpha1.WorkloadCluster, pool benchv1alpha1.Wor
 			ClusterAutoscalerMinSizeAnnotation: fmt.Sprintf("%d", pool.Autoscaling.MinReplicas),
 			ClusterAutoscalerMaxSizeAnnotation: fmt.Sprintf("%d", pool.Autoscaling.MaxReplicas),
 		}
+		maps.Copy(annotations, scaleFromZeroAnnotations(pool))
 	}
 	return &clusterv1.MachineDeployment{
 		Name:        MachineDeploymentName(wc, pool),
