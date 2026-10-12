@@ -282,8 +282,20 @@ export interface WorkloadClusterSpec {
   incus?: IncusProviderSpec;
 }
 
+export type AddonState = 'Ready' | 'Progressing' | 'Waiting' | 'Failed';
+
+// One add-on WorkloadClusterReconciler installs onto the cluster
+// (api/v1alpha1.AddonStatus).
+export interface AddonStatus {
+  name: string;
+  state: AddonState;
+  message?: string;
+  lastTransitionTime?: string;
+}
+
 export interface WorkloadClusterStatus {
   conditions?: Condition[];
+  addons?: AddonStatus[];
   phase?: string;
   observedGeneration?: number;
   controlPlaneReady?: boolean;

@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router';
 import { api, MANAGEMENT_CLUSTER } from '../api';
 import { ObjectYaml } from '../components/ObjectYaml';
 import { ActivityLog } from '../components/ActivityLog';
-import { Badge, ConditionList, StatusBadge } from '../components/Status';
+import { AddonList, Badge, ConditionList, StatusBadge } from '../components/Status';
 import { Alert, confirmAndRun, errorMessage, Field, Page, Table } from '../components/ui';
 import { toast } from '../components/Toast';
 import { shellLinkForCluster } from '../shell/links';
@@ -556,6 +556,7 @@ export function ClusterViewPage() {
               <span className="muted">Kubernetes {wc.data.spec.kubernetesVersion}</span>
             </div>
             <ConditionList conditions={status?.conditions} />
+            <AddonList addons={status?.addons} controlPlaneReady={status?.controlPlaneReady} />
             <ActivityLog path="workloadclusters" name={name} />
           </div>
 

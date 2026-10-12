@@ -260,8 +260,47 @@ type WorkloadClusterStatus struct {
 	// +optional
 	AlertmanagerURL string `json:"alertmanagerURL,omitempty"`
 
+	// addons reports each add-on WorkloadClusterReconciler installs onto
+	// the cluster once its control plane is up (CNI, storage, monitoring,
+	// ...), in install order. Empty until then.
+	// +listType=map
+	// +listMapKey=name
+	// +optional
+	Addons []AddonStatus `json:"addons,omitempty"`
+
 	// +optional
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
+}
+
+// AddonState is where one add-on stands.
+// +kubebuilder:validation:Enum=Ready;Progressing;Waiting;Failed
+type AddonState string
+
+const (
+	// AddonReady: installed - for a Helm-based add-on, its HelmRelease is
+	// Ready.
+	AddonReady AddonState = "Ready"
+	// AddonProgressing: applied, and its HelmRelease is still installing or
+	// upgrading.
+	AddonProgressing AddonState = "Progressing"
+	// AddonWaiting: blocked on something that resolves by itself, typically
+	// a CRD another add-on (kube-prometheus-stack) hasn't installed yet.
+	AddonWaiting AddonState = "Waiting"
+	// AddonFailed: applying it failed, or its HelmRelease did.
+	AddonFailed AddonState = "Failed"
+)
+
+// AddonStatus is one add-on's state on the workload cluster.
+type AddonStatus struct {
+	// name is the add-on's display name, e.g. "CNI" or "Prometheus".
+	Name  string     `json:"name"`
+	State AddonState `json:"state"`
+	// message explains anything but Ready.
+	// +optional
+	Message string `json:"message,omitempty"`
+	// lastTransitionTime is when state last changed.
+	// +optional
+	LastTransitionTime metav1.Time `json:"lastTransitionTime,omitempty"`
 }
 
 // +kubebuilder:object:root=true

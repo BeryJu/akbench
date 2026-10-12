@@ -4,7 +4,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router';
 import { MANAGEMENT_CLUSTER } from '../api';
-import { Condition, readyCondition } from '../types';
+import { AddonStatus, Condition, readyCondition } from '../types';
 import { shellLink } from '../shell/links';
 
 function phaseClass(phase?: string): string {
@@ -19,7 +19,10 @@ function phaseClass(phase?: string): string {
       return 'err';
     case 'Not ready':
       return 'warn';
+    case 'Waiting':
+      return 'warn';
     case 'Reconciling':
+    case 'Progressing':
     case 'Running':
     case 'Provisioning':
     case 'Pending':
@@ -101,6 +104,42 @@ export function ConditionList({ conditions }: { conditions?: Condition[] }) {
           </span>
         </div>
       ))}
+    </div>
+  );
+}
+
+// A workload cluster's add-ons (status.addons) - CNI, storage, monitoring,
+// ... - each with its own state, since one stuck add-on (say a Helm install
+// failing) otherwise only shows up as a line in the activity log.
+export function AddonList({ addons, controlPlaneReady }: { addons?: AddonStatus[]; controlPlaneReady?: boolean }) {
+  const ready = (addons ?? []).filter(a => a.state === 'Ready').length;
+  return (
+    <div className="activity">
+      <h3>
+        Add-ons{' '}
+        {addons?.length ? (
+          <span className="muted">
+            {ready}/{addons.length} ready
+          </span>
+        ) : null}
+      </h3>
+      {!addons?.length ? (
+        <div className="muted">
+          {controlPlaneReady ? 'Not reported yet.' : 'Installed once the control plane is ready.'}
+        </div>
+      ) : (
+        <div className="conditions">
+          {addons.map(a => (
+            <div className="cond" key={a.name}>
+              <Badge value={a.state} />
+              <span className="cond-type" title={a.lastTransitionTime ? `Since ${new Date(a.lastTransitionTime).toLocaleString()}` : undefined}>
+                {a.name}
+              </span>
+              <span className={a.state === 'Ready' ? 'muted' : undefined}>{a.message ?? ''}</span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

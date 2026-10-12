@@ -263,6 +263,41 @@ spec:
               WorkloadClusterStatus mirrors the underlying CAPI Cluster's readiness, plus
               where to find the kubeconfig once it exists.
             properties:
+              addons:
+                description: |-
+                  addons reports each add-on WorkloadClusterReconciler installs onto
+                  the cluster once its control plane is up (CNI, storage, monitoring,
+                  ...), in install order. Empty until then.
+                items:
+                  description: AddonStatus is one add-on's state on the workload cluster.
+                  properties:
+                    lastTransitionTime:
+                      description: lastTransitionTime is when state last changed.
+                      format: date-time
+                      type: string
+                    message:
+                      description: message explains anything but Ready.
+                      type: string
+                    name:
+                      description: name is the add-on's display name, e.g. "CNI" or
+                        "Prometheus".
+                      type: string
+                    state:
+                      description: AddonState is where one add-on stands.
+                      enum:
+                      - Ready
+                      - Progressing
+                      - Waiting
+                      - Failed
+                      type: string
+                  required:
+                  - name
+                  - state
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - name
+                x-kubernetes-list-type: map
               alertmanagerURL:
                 description: |-
                   AlertmanagerURL is where this cluster's own Alertmanager (bundled in

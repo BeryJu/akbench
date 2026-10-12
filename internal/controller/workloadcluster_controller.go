@@ -3,9 +3,11 @@ package controller
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
+	helmv2 "github.com/fluxcd/helm-controller/api/v2"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -181,6 +183,13 @@ func (r *WorkloadClusterReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		return ctrl.Result{}, err
 	}
 	log.Info("reconciled WorkloadCluster", "phase", wc.Status.Phase, "ready", ready)
+	// Add-ons waiting on another one's CRDs (or failed outright) aren't
+	// retried by any watch event, unlike HelmRelease-based ones settling.
+	for _, a := range wc.Status.Addons {
+		if a.State != benchv1alpha1.AddonReady {
+			return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
+		}
+	}
 	return ctrl.Result{}, nil
 }
 
@@ -228,24 +237,42 @@ func (r *WorkloadClusterReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 //     above, so it's useful the moment it comes up.
 func (r *WorkloadClusterReconciler) ensureAddons(ctx context.Context, wc *benchv1alpha1.WorkloadCluster) {
 	log := logf.FromContext(ctx)
-	addons := []struct {
+	type addon struct {
 		name   string
 		ensure func(context.Context, *benchv1alpha1.WorkloadCluster) error
-	}{
-		{"CNI", r.ensureCNI},
-		{"csi-incus", r.ensureCSIIncus},
-		{"metrics-server", r.ensureMetricsServer},
-		{"Prometheus", r.ensurePrometheus},
-		{"cluster-autoscaler", r.ensureClusterAutoscaler},
-		{"Pyroscope", r.ensurePyroscope},
-		{"Tempo", r.ensureTempo},
-		{"Grafana", r.ensureGrafana},
-		{"descheduler", r.ensureDescheduler},
+		// helmRelease names the add-on's Flux HelmRelease (in wc's
+		// namespace), which its state is read from; empty for add-ons
+		// applied directly.
+		helmRelease string
+	}
+	addons := []addon{
+		{"CNI", r.ensureCNI, render.CNIHelmReleaseName},
+		{"metrics-server", r.ensureMetricsServer, render.MetricsServerHelmReleaseName},
+		{"Prometheus", r.ensurePrometheus, render.KubePrometheusStackHelmReleaseName},
+		{"cluster-autoscaler", r.ensureClusterAutoscaler, render.ClusterAutoscalerHelmReleaseName(wc)},
+		{"Pyroscope", r.ensurePyroscope, ""},
+		{"Tempo", r.ensureTempo, ""},
+		{"Grafana", r.ensureGrafana, ""},
+		{"descheduler", r.ensureDescheduler, render.DeschedulerHelmReleaseName},
+	}
+	// csi-incus is Incus-specific (and a no-op without spec.incus).
+	if wc.Spec.Incus != nil {
+		addons = slices.Insert(addons, 1, addon{"csi-incus", r.ensureCSIIncus, render.CSIIncusHelmReleaseName})
+	}
+	previous := map[string]benchv1alpha1.AddonState{}
+	for _, a := range wc.Status.Addons {
+		previous[a.Name] = a.State
 	}
 	for _, addon := range addons {
-		if err := addon.ensure(ctx, wc); err != nil {
-			log.Error(err, "failed to ensure addon on workload cluster", "addon", addon.name)
-			r.Recorder.Eventf(wc, corev1.EventTypeWarning, "AddonFailed", "failed to ensure %s: %v", addon.name, err)
+		err := addon.ensure(ctx, wc)
+		state, message := r.addonState(ctx, wc, addon.helmRelease, err)
+		setAddonStatus(wc, addon.name, state, message)
+		switch {
+		case state == benchv1alpha1.AddonFailed:
+			log.Error(err, "failed to ensure addon on workload cluster", "addon", addon.name, "message", message)
+			r.Recorder.Eventf(wc, corev1.EventTypeWarning, "AddonFailed", "%s: %s", addon.name, message)
+		case state == benchv1alpha1.AddonReady && previous[addon.name] != benchv1alpha1.AddonReady:
+			r.Recorder.Eventf(wc, corev1.EventTypeNormal, "AddonReady", "%s is ready", addon.name)
 		}
 	}
 }
@@ -701,6 +728,9 @@ func (r *WorkloadClusterReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&benchv1alpha1.WorkloadCluster{}).
 		Owns(&clusterv1.Cluster{}).
+		// The add-on HelmReleases it applies: their Ready condition is what
+		// status.addons reports, so it has to follow them settling.
+		Owns(&helmv2.HelmRelease{}).
 		Named("workloadcluster").
 		Complete(r)
 }
