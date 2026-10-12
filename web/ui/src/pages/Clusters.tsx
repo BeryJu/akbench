@@ -7,7 +7,8 @@ import { AddonList, Badge, ConditionList, StatusBadge } from '../components/Stat
 import { Alert, confirmAndRun, errorMessage, Field, Page, Table } from '../components/ui';
 import { toast } from '../components/Toast';
 import { shellLinkForCluster } from '../shell/links';
-import { WorkerPoolRole, WorkerPoolSpec, WorkloadCluster, WorkloadClusterSpec } from '../types';
+import { ClusterPool, WorkerPoolRole, WorkerPoolSpec, WorkloadCluster, WorkloadClusterSpec } from '../types';
+import { formatDuration } from '../format';
 import { useResource } from '../useResource';
 
 export function ClustersPage() {
@@ -479,6 +480,12 @@ export function ClusterViewPage() {
   const shellTarget = isManagement ? undefined : name;
   const status = wc.data?.status;
   const pools = wc.data?.spec.workerPools ?? [];
+  const nodes = useResource(
+    () => (isManagement ? Promise.resolve(undefined) : api.clusterNodes(name)),
+    [name, isManagement],
+    10000
+  );
+  const poolSize = (pool: string) => nodes.data?.pools.find(p => p.name === pool);
   const [kicking, setKicking] = useState(false);
 
   const kick = async () => {
@@ -568,6 +575,7 @@ export function ClusterViewPage() {
             columns={[
               { label: 'Pool', render: p => p.name },
               { label: 'Role', render: p => <Badge value={roleLabel(p.role)} /> },
+              { label: 'Nodes', render: p => <PoolNodes size={poolSize(p.name)} loaded={nodes.data !== undefined} /> },
               {
                 label: 'Size',
                 render: p =>
@@ -576,6 +584,22 @@ export function ClusterViewPage() {
                     : `${p.replicas} (fixed)`,
               },
               { label: 'Flavor', render: p => (p.incus?.flavor ? flavorLabel(p.incus.flavor) : '-') },
+            ]}
+          />
+
+          <h2>Nodes</h2>
+          <Alert>{nodes.error}</Alert>
+          <Table
+            rows={nodes.data?.machines}
+            rowKey={m => m.name}
+            empty="No machines yet - they appear once Cluster API starts provisioning."
+            columns={[
+              { label: 'Node', render: m => m.nodeName ?? <span className="muted">{m.name} (not joined yet)</span> },
+              { label: 'Pool', render: m => m.pool },
+              { label: 'Status', render: m => <Badge value={m.ready ? 'Ready' : (m.phase ?? 'Pending')} /> },
+              { label: 'Internal IP', render: m => m.internalIP ?? '-' },
+              { label: 'Version', render: m => m.version ?? '-' },
+              { label: 'Age', render: m => (m.created ? formatDuration((Date.now() - Date.parse(m.created)) / 1000) : '-') },
             ]}
           />
 
@@ -600,5 +624,23 @@ export function ClusterViewPage() {
       )}
       <ObjectYaml object={wc.data} />
     </Page>
+  );
+}
+
+/**
+ * PoolNodes shows how many nodes a worker pool has right now: Ready of
+ * current, plus where it's heading while Cluster API (or
+ * cluster-autoscaler, for an autoscaled pool) is still scaling it.
+ */
+function PoolNodes({ size, loaded }: { size: ClusterPool | undefined; loaded: boolean }) {
+  if (!size) {
+    return <span className="muted">{loaded ? '0' : '…'}</span>;
+  }
+  const scaling = size.desired !== size.current;
+  return (
+    <span>
+      <Badge value={size.ready === size.current && !scaling ? 'Ready' : 'Pending'} /> {size.ready}/{size.current} ready
+      {scaling && <span className="muted"> - scaling to {size.desired}</span>}
+    </span>
   );
 }

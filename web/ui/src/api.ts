@@ -7,6 +7,7 @@ import {
   AuthentikDeployment,
   AuthentikDeploymentSpec,
   Cluster,
+  ClusterNodes,
   CompareResponse,
   IncusCredential,
   IncusCredentialInput,
@@ -126,6 +127,7 @@ export const api = {
   registerCluster: (obj: ObjectInput<WorkloadClusterSpec>) =>
     request<WorkloadCluster>('/api/v1/clusters', json('POST', obj)),
   deprovisionCluster: (name: string) => request<void>(`/api/v1/clusters/${seg(name)}`, { method: 'DELETE' }),
+  clusterNodes: (name: string) => request<ClusterNodes>(`/api/v1/clusters/${seg(name)}/nodes`),
   workloadClusters: () =>
     request<List<WorkloadCluster>>('/api/v1/workloadclusters').then(r => r.items ?? []),
   workloadCluster: (name: string) => request<WorkloadCluster>(`/api/v1/workloadclusters/${seg(name)}`),

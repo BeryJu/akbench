@@ -430,3 +430,32 @@ export interface IncusProbe {
   serverCertFingerprint?: string;
   message?: string;
 }
+
+// -- A workload cluster's nodes (internal/api/machines.go): its Cluster API
+// Machines and per-pool sizes, read from the management cluster.
+
+export interface ClusterPool {
+  // A WorkerPoolSpec name, or "control-plane".
+  name: string;
+  // Replicas currently asked for - moves within an autoscaled pool's range.
+  desired: number;
+  current: number;
+  ready: number;
+}
+
+export interface ClusterMachine {
+  name: string;
+  pool: string;
+  // Empty until the machine's node has joined the cluster.
+  nodeName?: string;
+  phase?: string;
+  ready: boolean;
+  internalIP?: string;
+  version?: string;
+  created?: string;
+}
+
+export interface ClusterNodes {
+  pools: ClusterPool[];
+  machines: ClusterMachine[];
+}

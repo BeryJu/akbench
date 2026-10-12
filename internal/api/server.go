@@ -151,6 +151,7 @@ func (s *Server) Router() http.Handler {
 			r.Post("/clusters", s.registerCluster)
 			r.Get("/clusters/{name}", s.getCluster)
 			r.Delete("/clusters/{name}", s.deleteCluster)
+			r.Get("/clusters/{name}/nodes", s.listClusterNodes)
 
 			for path, kind := range resourceKinds {
 				r.Get("/"+path, s.listResource(kind))
