@@ -123,6 +123,12 @@ func run() error {
 			return err
 		}
 		log.Info("OIDC login enabled", "issuer", oidcCfg.Issuer, "clientID", oidcCfg.ClientID)
+		if oidcCfg.RequiredGroup == "" {
+			log.Info("WARNING: --oidc-required-group is not set - any account that can authenticate " +
+				"against the OIDC issuer above is granted full access to this API, including a " +
+				"cluster-admin kubectl shell if one is configured. Set --oidc-required-group (or " +
+				"BENCH_OIDC_REQUIRED_GROUP) before exposing this backend beyond a trusted network.")
+		}
 	}
 
 	wsOrigins := wsOriginPatterns(corsOrigin)

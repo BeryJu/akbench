@@ -98,3 +98,37 @@ func TestTraceBreakdownValidatesWindow(t *testing.T) {
 	requireStatus(t, do(t, s, http.MethodGet, "/api/v1/traces/breakdown?testid=x&window=7d", nil), http.StatusBadRequest)
 	requireStatus(t, do(t, s, http.MethodGet, "/api/v1/traces/breakdown", nil), http.StatusBadRequest)
 }
+
+// TestTraceBreakdownRejectsUnsafeTargetName is a regression test for a
+// TraceQL-injection risk: spec.targetName is a free-form field (unlike the
+// object name, which the apiserver already restricts to a DNS subdomain),
+// and traceBreakdownQuery interpolates it directly into a TraceQL search.
+// A value with TraceQL metacharacters must never reach Tempo's query API at
+// all - it should surface as a per-target error instead.
+func TestTraceBreakdownRejectsUnsafeTargetName(t *testing.T) {
+	var searched atomic.Bool
+	grafana := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		searched.Store(true)
+		_, _ = fmt.Fprint(w, fakeTempoSearch)
+	}))
+	t.Cleanup(grafana.Close)
+
+	wc := &benchv1alpha1.WorkloadCluster{Name: "bench", Namespace: testNamespace}
+	wc.Status.GrafanaURL = grafana.URL
+	malicious := &benchv1alpha1.AuthentikDeployment{Name: "ak-evil", Namespace: testNamespace}
+	malicious.Spec.ClusterRef = corev1.LocalObjectReference{Name: "bench"}
+	malicious.Spec.TargetName = `a" } || { true } //`
+	tc := &benchv1alpha1.TestCase{Name: "login", Namespace: testNamespace}
+	tc.Spec.DeploymentRefs = []corev1.LocalObjectReference{{Name: "ak-evil"}}
+	s, _ := newServer(t, Config{}, wc, malicious, tc)
+
+	rec := do(t, s, http.MethodGet, "/api/v1/traces/breakdown?testid=login&window=1h", nil)
+	requireStatus(t, rec, http.StatusOK)
+	got := decodeBody[TraceBreakdown](t, rec)
+	if len(got.Targets) != 1 || got.Targets[0].Error == "" {
+		t.Fatalf("expected one target with an error, got: %+v", got.Targets)
+	}
+	if searched.Load() {
+		t.Error("Tempo was queried with an unvalidated target name")
+	}
+}

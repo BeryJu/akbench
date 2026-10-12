@@ -118,6 +118,16 @@ func (s *Server) tempoTargetsForTestID(ctx context.Context, tc *benchv1alpha1.Te
 		if target.Target == "" {
 			target.Target = topo.Name
 		}
+		// TargetName is a free-form spec field (unlike the object name
+		// itself, which the apiserver already constrains to a DNS subdomain)
+		// and is interpolated directly into a TraceQL search below - reject
+		// anything that isn't a safe label value rather than trust it,
+		// rather than rely on fmt's %q escaping matching whatever escaping
+		// rules Tempo's own TraceQL parser happens to implement.
+		if !safeLabelValue.MatchString(target.Target) {
+			targets = append(targets, tempoTarget{Target: target.Target, Error: "targetName contains characters that aren't safe to query Tempo with"})
+			continue
+		}
 		var wc benchv1alpha1.WorkloadCluster
 		wcKey := types.NamespacedName{Name: topo.Spec.ClusterRef.Name, Namespace: s.cfg.Namespace}
 		switch {
