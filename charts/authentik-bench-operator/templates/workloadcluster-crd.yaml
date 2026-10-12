@@ -5,6 +5,7 @@ metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.21.0
   labels:
+    clusterctl.cluster.x-k8s.io/move-hierarchy: "true"
   {{- include "authentik-bench-operator.labels" . | nindent 4 }}
 spec:
   group: bench.goauthentik.io

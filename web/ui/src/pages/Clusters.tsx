@@ -1,20 +1,4 @@
-/*
- * Copyright 2026
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
-
-import { FormEvent, useState } from 'react';
+import { FormEvent, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { api, MANAGEMENT_CLUSTER } from '../api';
 import { ObjectYaml } from '../components/ObjectYaml';
@@ -130,7 +114,8 @@ function emptySpec(): WorkloadClusterSpec {
     controlPlane: { replicas: 1 },
     workerPools: [emptyPool('workers')],
     incus: {
-      lxcSecretRef: { name: 'lxc-secret' },
+      // Filled in with the first Incus connection once they've loaded.
+      lxcSecretRef: { name: '' },
       image: 'ubuntu:24.04',
       profiles: ['default'],
       controlPlane: { flavor: 'c2-m4' },
@@ -152,6 +137,22 @@ function ClusterForm({ existing }: { existing?: WorkloadCluster }) {
   const [error, setError] = useState<string>();
   const [saving, setSaving] = useState(false);
   const locked = Boolean(existing);
+  const infra = useResource(() => api.infrastructure(), [], 15000);
+  const incusConnections = useResource(() => api.incusCredentials(), [], 15000);
+  const providers = (infra.data?.providers ?? []).filter(p => p.clusterProvider);
+  const selectedProvider = providers.find(p => p.clusterProvider === spec.provider);
+
+  // A new cluster defaults to the first Incus connection there is.
+  const firstConnection = incusConnections.data?.[0]?.name;
+  useEffect(() => {
+    if (!locked && firstConnection) {
+      setSpec(current =>
+        current.incus && !current.incus.lxcSecretRef.name
+          ? { ...current, incus: { ...current.incus, lxcSecretRef: { name: firstConnection } } }
+          : current
+      );
+    }
+  }, [locked, firstConnection]);
 
   const patch = (changes: Partial<WorkloadClusterSpec>) => setSpec(current => ({ ...current, ...changes }));
   const patchIncus = (changes: Partial<NonNullable<WorkloadClusterSpec['incus']>>) =>
@@ -208,12 +209,27 @@ function ClusterForm({ existing }: { existing?: WorkloadCluster }) {
                 ))}
               </select>
             </Field>
-            <Field label="Infrastructure provider">
-              <select disabled value={spec.provider}>
-                <option value="Incus">Incus / LXC</option>
+            <Field label="Infrastructure provider" help={<Link to="/infrastructure">Manage infrastructure</Link>}>
+              <select
+                disabled={locked || providers.length <= 1}
+                value={spec.provider}
+                onChange={e => patch({ provider: e.target.value as WorkloadClusterSpec['provider'] })}
+              >
+                {providers.length === 0 && <option value="Incus">Incus / LXC</option>}
+                {providers.map(p => (
+                  <option key={p.id} value={p.clusterProvider}>
+                    {p.displayName}
+                  </option>
+                ))}
               </select>
             </Field>
           </div>
+          {!locked && selectedProvider && !selectedProvider.installedVersion && (
+            <Alert kind="info">
+              The {selectedProvider.displayName} provider isn't installed on the management cluster yet, so this cluster
+              won't start provisioning until it is - <Link to="/infrastructure">set it up under Infrastructure</Link>.
+            </Alert>
+          )}
         </fieldset>
 
         <fieldset>
@@ -361,14 +377,34 @@ function ClusterForm({ existing }: { existing?: WorkloadCluster }) {
             <legend>Incus / LXC</legend>
             {locked && <p className="muted">Image and profiles apply to new or edited worker pools only.</p>}
             <div className="fields">
-              <Field label="LXC daemon connection secret">
-                <input
+              <Field
+                label="Incus connection"
+                help={
+                  <Link to={incusConnections.data?.length === 0 ? '/infrastructure/incus/new' : '/infrastructure'}>
+                    {incusConnections.data?.length === 0 ? 'Create a connection first' : 'Manage connections'}
+                  </Link>
+                }
+              >
+                <select
                   required
                   disabled={locked}
                   value={spec.incus?.lxcSecretRef.name ?? ''}
-                  placeholder="lxc-secret"
                   onChange={e => patchIncus({ lxcSecretRef: { name: e.target.value } })}
-                />
+                >
+                  <option value="" disabled>
+                    {incusConnections.data === undefined ? 'Loading…' : 'Select a connection'}
+                  </option>
+                  {/* An existing cluster's connection may not be listed (e.g. deleted since). */}
+                  {spec.incus?.lxcSecretRef.name &&
+                    !incusConnections.data?.some(c => c.name === spec.incus?.lxcSecretRef.name) && (
+                      <option value={spec.incus.lxcSecretRef.name}>{spec.incus.lxcSecretRef.name}</option>
+                    )}
+                  {incusConnections.data?.map(c => (
+                    <option key={c.name} value={c.name}>
+                      {c.name} ({c.server})
+                    </option>
+                  ))}
+                </select>
               </Field>
               <Field label="Image">
                 <input

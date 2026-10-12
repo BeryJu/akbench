@@ -10,6 +10,8 @@ controllerManager:
         drop:
         - ALL
       readOnlyRootFilesystem: true
+    env:
+      benchNamespace: default
     image:
       repository: ghcr.io/beryju/akbench
       tag: latest

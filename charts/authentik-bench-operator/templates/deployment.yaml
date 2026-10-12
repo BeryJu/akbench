@@ -9,13 +9,11 @@ spec:
   replicas: {{ .Values.controllerManager.replicas }}
   selector:
     matchLabels:
-      app.kubernetes.io/name: authentik-bench
       control-plane: controller-manager
     {{- include "authentik-bench-operator.selectorLabels" . | nindent 6 }}
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: authentik-bench
         control-plane: controller-manager
       {{- include "authentik-bench-operator.selectorLabels" . | nindent 8 }}
       annotations:
@@ -26,6 +24,8 @@ spec:
         command:
         - /manager
         env:
+        - name: BENCH_NAMESPACE
+          value: {{ quote .Values.controllerManager.manager.env.benchNamespace }}
         - name: KUBERNETES_CLUSTER_DOMAIN
           value: {{ quote .Values.kubernetesClusterDomain }}
         image: {{ .Values.controllerManager.manager.image.repository }}:{{ .Values.controllerManager.manager.image.tag

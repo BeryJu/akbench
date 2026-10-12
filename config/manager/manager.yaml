@@ -65,6 +65,12 @@ spec:
           - --health-probe-bind-address=:8081
         image: controller:latest
         name: manager
+        env:
+        # Where the built-in TestCaseTemplates are seeded - must match the
+        # apiserver's BENCH_NAMESPACE. helmify turns this into the chart
+        # value controllerManager.manager.env.benchNamespace.
+        - name: BENCH_NAMESPACE
+          value: default
         ports:
         - containerPort: 8081
           name: health
