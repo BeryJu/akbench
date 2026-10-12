@@ -64,9 +64,6 @@ h3 { font-size: 13px; margin: 0 0 8px; color: var(--muted); font-weight: 600; }
 .nav-sep { height: 1px; background: var(--border); margin: 8px 4px; }
 .nav-section-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); padding: 18px 12px 6px; }
 .nav-section-label:first-child { padding-top: 0; }
-/* Infrastructure is set up once and rarely touched - pushed to the bottom,
- * away from the day-to-day load-test navigation. */
-.nav-bottom { margin-top: auto; padding-top: 16px; border-top: 1px solid var(--border); }
 .build-badge { align-self: flex-start; padding: 1px 8px; border: 1px solid var(--border); border-radius: 999px; color: var(--muted); font: 11px var(--ak-global--font-family--monospace); white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
 a.build-badge:hover { color: var(--text); border-color: var(--muted); text-decoration: none; }
 .sidebar-foot { padding: 12px 8px 0; color: var(--muted); font-size: 12px; display: flex; flex-direction: column; gap: 6px; }

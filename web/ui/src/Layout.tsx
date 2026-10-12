@@ -33,16 +33,15 @@ const navSections: NavSection[] = [
       { to: '/grafana', label: 'Grafana' },
     ],
   },
+  {
+    label: 'Infrastructure',
+    items: [
+      { to: '/infrastructure', label: 'Providers' },
+      { to: '/clusters', label: 'Clusters' },
+      { to: '/shell', label: 'Shell' },
+    ],
+  }
 ];
-
-const infraSection: NavSection = {
-  label: 'Infrastructure',
-  items: [
-    { to: '/infrastructure', label: 'Providers' },
-    { to: '/clusters', label: 'Clusters' },
-    { to: '/shell', label: 'Shell' },
-  ],
-};
 
 const REPO_URL = 'https://github.com/BeryJu/akbench';
 
@@ -104,9 +103,6 @@ export function Layout() {
         {navSections.map((section, i) => (
           <NavSectionLinks key={section.label ?? i} section={section} />
         ))}
-        <div className="nav-bottom">
-          <NavSectionLinks section={infraSection} />
-        </div>
         <div className="sidebar-foot">
           <BuildBadge />
           {identity && <span>Signed in as {identity}</span>}
