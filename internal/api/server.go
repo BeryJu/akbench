@@ -13,6 +13,7 @@ package api
 import (
 	"io/fs"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -70,10 +71,17 @@ type Server struct {
 	http   *http.Client
 	shell  *shellState
 	// grafanaKey signs the Grafana proxy's session cookies (grafana_session.go).
-	grafanaKey    []byte
-	traces        *traceBreakdownCache
-	events        *eventHub
-	eventsTickets *eventsState
+	grafanaKey []byte
+	// grafanaAdminMu/grafanaAdminCache cache each workload cluster's
+	// generated Grafana admin password (grafana_proxy.go), keyed by cluster
+	// name - read-only and create-once at the source, so a cached value
+	// never goes stale short of a manual rotation, which a process restart
+	// would pick up anyway.
+	grafanaAdminMu    sync.Mutex
+	grafanaAdminCache map[string]string
+	traces            *traceBreakdownCache
+	events            *eventHub
+	eventsTickets     *eventsState
 }
 
 // New builds a Server. The client must be backed by the management cluster
@@ -90,9 +98,10 @@ func New(c client.WithWatch, cfg Config) *Server {
 	}
 	return &Server{
 		client: c, cfg: cfg, http: httpClient, shell: newShellState(), grafanaKey: newGrafanaSessionKey(),
-		traces:        &traceBreakdownCache{entries: map[string]TraceBreakdown{}},
-		events:        newEventHub(),
-		eventsTickets: newEventsState(),
+		grafanaAdminCache: map[string]string{},
+		traces:            &traceBreakdownCache{entries: map[string]TraceBreakdown{}},
+		events:            newEventHub(),
+		eventsTickets:     newEventsState(),
 	}
 }
 

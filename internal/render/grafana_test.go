@@ -20,7 +20,7 @@ func TestGrafanaProxyPathPrefix(t *testing.T) {
 
 func TestGrafanaObjects(t *testing.T) {
 	wc := &benchv1alpha1.WorkloadCluster{Name: "test-cluster"}
-	objs := GrafanaObjects(wc)
+	objs := GrafanaObjects(wc, "s3cr3t")
 
 	found := map[string]int{}
 	var deployment *appsv1.Deployment
@@ -69,11 +69,16 @@ func TestGrafanaObjects(t *testing.T) {
 	for _, e := range deployment.Spec.Template.Spec.Containers[0].Env {
 		env[e.Name] = e.Value
 	}
-	if env["GF_AUTH_ANONYMOUS_ENABLED"] != "true" {
-		t.Errorf("GF_AUTH_ANONYMOUS_ENABLED = %q, want true", env["GF_AUTH_ANONYMOUS_ENABLED"])
+	// Anonymous Admin would make the NodePort Service above (needed so
+	// cmd/apiserver, on a different cluster entirely, can reach Grafana at
+	// all) an unauthenticated admin panel for anyone who can reach a node's
+	// IP - real credentials are required instead; cmd/apiserver injects them
+	// as Basic auth on every request it proxies.
+	if env["GF_SECURITY_ADMIN_USER"] != GrafanaAdminUser {
+		t.Errorf("GF_SECURITY_ADMIN_USER = %q, want %q", env["GF_SECURITY_ADMIN_USER"], GrafanaAdminUser)
 	}
-	if env["GF_AUTH_ANONYMOUS_ORG_ROLE"] != "Admin" {
-		t.Errorf("GF_AUTH_ANONYMOUS_ORG_ROLE = %q, want Admin", env["GF_AUTH_ANONYMOUS_ORG_ROLE"])
+	if env["GF_SECURITY_ADMIN_PASSWORD"] != "s3cr3t" {
+		t.Errorf("GF_SECURITY_ADMIN_PASSWORD = %q, want the password passed in", env["GF_SECURITY_ADMIN_PASSWORD"])
 	}
 	// Without this, Grafana sends "X-Frame-Options: deny" on every response
 	// (confirmed live against the real image) and the web UI's

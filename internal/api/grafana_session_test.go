@@ -6,8 +6,16 @@ import (
 	"testing"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
+
 	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
+	"github.com/goauthentik/authentik-bench/internal/render"
 )
+
+// grafanaTestAdminPassword is the fake credential grafanaTestServer seeds
+// render.GrafanaAdminSecretName with, standing in for the one
+// WorkloadClusterReconciler's ensureGrafana generates for real.
+const grafanaTestAdminPassword = "test-grafana-password"
 
 // grafanaTestServer is a Server whose one WorkloadCluster's Grafana is a
 // fake; *forwarded is the last request that reached it.
@@ -20,7 +28,11 @@ func grafanaTestServer(t *testing.T) (*Server, **http.Request) {
 	t.Cleanup(upstream.Close)
 	wc := &benchv1alpha1.WorkloadCluster{Name: "bench", Namespace: testNamespace}
 	wc.Status.GrafanaURL = upstream.URL
-	s, _ := newServer(t, Config{}, wc)
+	adminSecret := &corev1.Secret{
+		Name: render.GrafanaAdminSecretName(wc), Namespace: testNamespace,
+		Data: map[string][]byte{"password": []byte(grafanaTestAdminPassword)},
+	}
+	s, _ := newServer(t, Config{}, wc, adminSecret)
 	return s, forwarded
 }
 
@@ -78,8 +90,13 @@ func TestGrafanaProxyStripsOwnCredentials(t *testing.T) {
 	if forwarded == nil {
 		t.Fatal("request never reached Grafana")
 	}
-	if got := forwarded.Header.Get("Authorization"); got != "" {
-		t.Errorf("Authorization forwarded to Grafana: %q", got)
+	// The caller's own Authorization (the ak-bench bearer token) must never
+	// reach Grafana - but the proxy must inject Grafana's own real
+	// credentials in its place (render.GrafanaObjects requires them now
+	// that anonymous Admin access is gone), not leave the header empty.
+	user, pass, ok := forwarded.BasicAuth()
+	if !ok || user != render.GrafanaAdminUser || pass != grafanaTestAdminPassword {
+		t.Errorf("Grafana admin credentials not injected: user=%q pass=%q ok=%v", user, pass, ok)
 	}
 	if _, err := forwarded.Cookie(grafanaSessionCookie); err == nil {
 		t.Error("session cookie forwarded to Grafana")

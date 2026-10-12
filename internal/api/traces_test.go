@@ -12,6 +12,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 
 	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
+	"github.com/goauthentik/authentik-bench/internal/render"
 )
 
 // A Tempo search response shaped like authentik's real traces: per trace,
@@ -40,6 +41,10 @@ func TestTraceBreakdown(t *testing.T) {
 			http.NotFound(w, r)
 			return
 		}
+		if user, pass, ok := r.BasicAuth(); !ok || user != render.GrafanaAdminUser || pass != grafanaTestAdminPassword {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
 		searches.Add(1)
 		query = r.URL.Query().Get("q")
 		_, _ = fmt.Fprint(w, fakeTempoSearch)
@@ -48,13 +53,17 @@ func TestTraceBreakdown(t *testing.T) {
 
 	wc := &benchv1alpha1.WorkloadCluster{Name: "bench", Namespace: testNamespace}
 	wc.Status.GrafanaURL = grafana.URL
+	adminSecret := &corev1.Secret{
+		Name: render.GrafanaAdminSecretName(wc), Namespace: testNamespace,
+		Data: map[string][]byte{"password": []byte(grafanaTestAdminPassword)},
+	}
 	onCluster := &benchv1alpha1.AuthentikDeployment{Name: "ak-a", Namespace: testNamespace}
 	onCluster.Spec.ClusterRef = corev1.LocalObjectReference{Name: "bench"}
 	onCluster.Spec.TargetName = "a"
 	onManagement := &benchv1alpha1.AuthentikDeployment{Name: "ak-b", Namespace: testNamespace}
 	tc := &benchv1alpha1.TestCase{Name: "login", Namespace: testNamespace}
 	tc.Spec.DeploymentRefs = []corev1.LocalObjectReference{{Name: "ak-a"}, {Name: "ak-b"}}
-	s, _ := newServer(t, Config{}, wc, onCluster, onManagement, tc)
+	s, _ := newServer(t, Config{}, wc, adminSecret, onCluster, onManagement, tc)
 
 	rec := do(t, s, http.MethodGet, "/api/v1/traces/breakdown?testid=login&window=1h", nil)
 	requireStatus(t, rec, http.StatusOK)

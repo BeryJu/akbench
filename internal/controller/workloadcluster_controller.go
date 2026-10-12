@@ -518,7 +518,18 @@ func (r *WorkloadClusterReconciler) ensureGrafana(ctx context.Context, wc *bench
 	if err != nil {
 		return err
 	}
-	if err := createAll(ctx, remoteClient, render.GrafanaObjects(wc)); err != nil {
+	// Generated once on the management cluster (not the remote one): both
+	// cmd/apiserver (which proxies to Grafana) and this Deployment's own env
+	// need the exact same value, and only the management cluster is
+	// somewhere cmd/apiserver can already read a Secret from directly - see
+	// render.GrafanaAdminSecretName's own doc comment.
+	adminPassword, err := ensureRandomSecret(ctx, r.Client,
+		types.NamespacedName{Name: render.GrafanaAdminSecretName(wc), Namespace: wc.Namespace},
+		"password", 16)
+	if err != nil {
+		return fmt.Errorf("ensure Grafana admin password: %w", err)
+	}
+	if err := createAll(ctx, remoteClient, render.GrafanaObjects(wc, adminPassword)); err != nil {
 		return err
 	}
 	nodeIP, err := reachableNodeIP(ctx, remoteClient)
