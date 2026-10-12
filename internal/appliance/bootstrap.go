@@ -3,12 +3,17 @@ package appliance
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -38,30 +43,89 @@ func ExecRunner(kubeconfig string) Runner {
 
 // Bootstrapper installs everything on top of k3s. Every step is idempotent,
 // so the whole sequence runs again on each container start - which is also
-// how an image upgrade rolls out (newer pinned providers, newer chart).
+// how an image upgrade rolls out (newer providers, newer chart). After that
+// it keeps syncing the infrastructure providers enabled in the web UI.
 type Bootstrapper struct {
-	Config *Config
-	State  *State
-	Run    Runner
-	Log    io.Writer
+	Config  *Config
+	State   *State
+	Shipped *Shipped
+	Run     Runner
+	Log     io.Writer
+	// SyncInterval is how often the provider loop re-reads the providers
+	// the web UI enabled.
+	SyncInterval time.Duration
+
+	// syncMu serialises SyncProviders - the bootstrap and the provider loop
+	// must never run clusterctl at the same time.
+	syncMu sync.Mutex
+	// coreReady is closed once Cluster API itself is installed, which is
+	// when the provider loop starts - independently of the rest of the
+	// bootstrap, so enabling a provider in the UI works even while e.g. the
+	// operator chart can't be pulled.
+	coreReady     chan struct{}
+	coreReadyOnce sync.Once
+}
+
+// init prepares the zero-value fields. Called by Serve before it starts the
+// provider loop, and by RunOnce for callers (tests) that use it directly -
+// both from the same goroutine.
+func (b *Bootstrapper) init() {
+	if b.coreReady == nil {
+		b.coreReady = make(chan struct{})
+	}
 }
 
 func (b *Bootstrapper) logf(format string, args ...any) {
 	_, _ = fmt.Fprintf(b.Log, "[akbench] "+format+"\n", args...)
 }
 
-// RunUntilDone retries the bootstrap sequence until it succeeds or ctx ends.
-func (b *Bootstrapper) RunUntilDone(ctx context.Context) error {
+// Serve bootstraps (retrying until it succeeds) and, from the moment Cluster
+// API itself is installed, syncs infrastructure providers every
+// SyncInterval - both until ctx ends.
+func (b *Bootstrapper) Serve(ctx context.Context) error {
+	b.init()
+	go b.providerLoop(ctx)
 	for attempt := 1; ; attempt++ {
 		err := b.RunOnce(ctx)
 		if err == nil {
-			return nil
+			break
 		}
 		b.logf("Bootstrap attempt %d failed, retrying in 15s: %v", attempt, err)
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-time.After(15 * time.Second):
+		}
+	}
+	b.PrintBanner()
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+func (b *Bootstrapper) providerLoop(ctx context.Context) {
+	select {
+	case <-ctx.Done():
+		return
+	case <-b.coreReady:
+	}
+	lastErr := ""
+	for {
+		msg := ""
+		if err := b.SyncProviders(ctx); err != nil {
+			msg = err.Error()
+		}
+		if msg != lastErr {
+			if msg != "" {
+				b.logf("Infrastructure provider sync failed: %s", msg)
+			} else if lastErr != "" {
+				b.logf("Infrastructure providers are in sync again")
+			}
+			lastErr = msg
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(b.SyncInterval):
 		}
 	}
 }
@@ -82,9 +146,15 @@ func (b *Bootstrapper) RunOnce(ctx context.Context) error {
 		return err
 	}
 
-	if err := b.ensureClusterAPI(ctx); err != nil {
+	// The operator watches Cluster API types and won't start without their
+	// CRDs, so the core providers go in before it does. Infrastructure
+	// providers already enabled (e.g. on a restart) come along in the same
+	// pass; newly enabled ones are the provider loop's job.
+	if err := b.SyncProviders(ctx); err != nil {
 		return err
 	}
+	b.init()
+	b.coreReadyOnce.Do(func() { close(b.coreReady) })
 
 	b.logf("Applying akbench %s", b.Config.Version)
 	stack, err := RenderStack(b.Config, b.State)
@@ -96,12 +166,28 @@ func (b *Bootstrapper) RunOnce(ctx context.Context) error {
 		return err
 	}
 
-	b.logf("Waiting for the web UI to roll out")
-	if _, err := b.Run(ctx, nil, "kubectl", "-n", "authentik-bench", "rollout", "status",
+	b.logf("Waiting for the operator and the web UI to roll out")
+	if _, err := b.Run(ctx, nil, "kubectl", "-n", "flux-system", "wait", "helmrelease/authentik-bench-operator",
+		"--for=condition=Ready", "--timeout=10m"); err != nil {
+		return b.explainHelmRelease(ctx, err)
+	}
+	if _, err := b.Run(ctx, nil, "kubectl", "-n", SystemNamespace, "rollout", "status",
 		"deployment/apiserver", "--timeout=10m"); err != nil {
 		return err
 	}
 	return nil
+}
+
+// explainHelmRelease replaces a bare `kubectl wait` timeout with the
+// HelmRelease's own Ready message (e.g. the chart registry refusing an
+// anonymous pull), which is what the user actually needs to see.
+func (b *Bootstrapper) explainHelmRelease(ctx context.Context, waitErr error) error {
+	msg, err := b.Run(ctx, nil, "kubectl", "-n", "flux-system", "get", "helmrelease/authentik-bench-operator",
+		"-o", `jsonpath={.status.conditions[?(@.type=="Ready")].message}`)
+	if err != nil || strings.TrimSpace(string(msg)) == "" {
+		return waitErr
+	}
+	return fmt.Errorf("operator HelmRelease is not ready: %s", strings.TrimSpace(string(msg)))
 }
 
 func (b *Bootstrapper) waitForAPI(ctx context.Context) error {
@@ -120,7 +206,32 @@ func (b *Bootstrapper) waitForAPI(ctx context.Context) error {
 	}
 }
 
-func (b *Bootstrapper) ensureClusterAPI(ctx context.Context) error {
+// SyncProviders installs/upgrades the core Cluster API providers plus every
+// infrastructure provider enabled in the web UI, and reports the outcome in
+// StatusConfigMap. Providers are never removed: disabling one in the UI
+// would otherwise orphan every cluster it provisioned.
+func (b *Bootstrapper) SyncProviders(ctx context.Context) error {
+	b.syncMu.Lock()
+	defer b.syncMu.Unlock()
+	enabled, err := b.enabledProviders(ctx)
+	if err == nil {
+		err = b.ensureProviders(ctx, enabled)
+	}
+	b.writeStatus(ctx, err)
+	return err
+}
+
+func (b *Bootstrapper) enabledProviders(ctx context.Context) ([]string, error) {
+	out, err := b.Run(ctx, nil, "kubectl", "-n", SystemNamespace, "get", "configmap", ProvidersConfigMap,
+		"--ignore-not-found", "-o", "jsonpath={.data."+ProvidersKeyInfrastructure+"}")
+	if err != nil {
+		return nil, err
+	}
+	return ParseProviderList(string(out)), nil
+}
+
+func (b *Bootstrapper) ensureProviders(ctx context.Context, enabled []string) error {
+	desired, unknown := b.Shipped.Desired(enabled)
 	var installed []Provider
 	crd, err := b.Run(ctx, nil, "kubectl", "get", "crd", "providers.clusterctl.cluster.x-k8s.io", "--ignore-not-found", "-o", "name")
 	if err != nil {
@@ -135,16 +246,12 @@ func (b *Bootstrapper) ensureClusterAPI(ctx context.Context) error {
 			return fmt.Errorf("parse clusterctl inventory: %w", err)
 		}
 	}
-	cmds, skipped, err := PlanClusterctl(installed, PinnedProviders(b.Config))
+	cmds, skipped, err := PlanClusterctl(installed, desired)
 	if err != nil {
 		return err
 	}
 	for _, s := range skipped {
 		b.logf("Not downgrading Cluster API provider: %s", s)
-	}
-	if len(cmds) == 0 {
-		b.logf("Cluster API providers are up to date")
-		return nil
 	}
 	global := []string{"--config", filepath.Join(b.Config.AssetsDir, "clusterctl", "clusterctl.yaml"), "--kubeconfig", b.Config.Kubeconfig}
 	for _, args := range cmds {
@@ -153,22 +260,37 @@ func (b *Bootstrapper) ensureClusterAPI(ctx context.Context) error {
 			return err
 		}
 	}
+	if len(unknown) > 0 {
+		return fmt.Errorf("this appliance image doesn't ship the infrastructure provider(s) %s (available: %s)",
+			strings.Join(unknown, ", "), strings.Join(slices.Sorted(maps.Keys(b.Shipped.Infrastructure)), ", "))
+	}
 	return nil
 }
 
-// PrintIncusInstructions tells the user how to trust a generated client
-// certificate on their Incus server - the one manual step the appliance
-// can't do for them.
-func (b *Bootstrapper) PrintIncusInstructions() {
-	if !b.State.IncusCertGenerated {
-		return
+// writeStatus reports a provider sync's outcome for the web UI. Best-effort:
+// before the akbench stack has created SystemNamespace (the very first
+// sync), there is nowhere to write it yet, and nothing reads it either.
+func (b *Bootstrapper) writeStatus(ctx context.Context, syncErr error) {
+	shipped, _ := json.Marshal(b.Shipped.Infrastructure)
+	msg := ""
+	if syncErr != nil {
+		msg = syncErr.Error()
 	}
-	fp, _ := CertFingerprint(b.State.IncusClientCert)
-	b.logf("Incus client certificate (fingerprint %s) - trust it on your Incus server with:", fp)
-	b.logf("  docker exec <container> akbench-appliance incus-cert > akbench.crt")
-	b.logf("  incus config trust add-certificate akbench.crt --name akbench")
-	if b.Config.Incus.Server == "" {
-		b.logf("INCUS_SERVER is not set: the %s/%s Secret is not managed by the appliance", b.Config.Namespace, b.Config.Incus.SecretName)
+	cm, _ := json.Marshal(map[string]any{
+		"apiVersion": "v1",
+		"kind":       "ConfigMap",
+		"metadata":   map[string]any{"name": StatusConfigMap, "namespace": SystemNamespace},
+		"data": map[string]string{
+			StatusKeyShipped:  string(shipped),
+			StatusKeyError:    msg,
+			StatusKeySyncedAt: time.Now().UTC().Format(time.RFC3339),
+		},
+	})
+	if _, err := b.Run(ctx, cm, "kubectl", "apply", "--server-side", "--force-conflicts",
+		"--field-manager="+fieldManager, "-f", "-"); err != nil && !errors.Is(ctx.Err(), context.Canceled) {
+		if !strings.Contains(err.Error(), "NotFound") {
+			b.logf("Could not write provider status: %v", err)
+		}
 	}
 }
 
@@ -177,5 +299,5 @@ func (b *Bootstrapper) PrintBanner() {
 	b.logf("akbench %s is ready", b.Config.Version)
 	b.logf("  Web UI:    http://<host>:%s/", b.Config.UIPort)
 	b.logf("  API token: docker exec <container> akbench-appliance token")
-	b.logf("  kubectl:   docker exec -it <container> kubectl get workloadclusters -A")
+	b.logf("  Next:      enable an infrastructure provider and add its credentials under Infrastructure in the web UI")
 }

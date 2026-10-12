@@ -2,7 +2,10 @@
 # cmd/appliance on every boot, after Flux and the Cluster API providers are
 # up (the operator watches CAPI/Flux types and won't start without their
 # CRDs). Every string value goes through toJSON - JSON strings are valid
-# YAML scalars, so PEM blocks and tokens can't break the document.
+# YAML scalars, so tokens can't break the document.
+#
+# Nothing here is specific to any infrastructure provider: which providers
+# get installed and their connection settings are chosen in the web UI.
 apiVersion: v1
 kind: Namespace
 metadata:
@@ -16,30 +19,6 @@ metadata:
 type: Opaque
 stringData:
   token: {{ toJSON .State.APIToken }}
-{{- if .Config.Incus.Server }}
----
-# The Incus connection every WorkloadCluster's spec.incus.lxcSecretRef names
-# (keys as cluster-api-provider-incus and csi-incus expect them). Only
-# managed when INCUS_SERVER is set, so a Secret migrated from an existing
-# management cluster is left alone otherwise.
-apiVersion: v1
-kind: Secret
-metadata:
-  name: {{ toJSON .Config.Incus.SecretName }}
-  namespace: {{ toJSON .Config.Namespace }}
-type: Opaque
-stringData:
-  server: {{ toJSON .Config.Incus.Server }}
-  project: {{ toJSON .Config.Incus.Project }}
-  client-crt: {{ toJSON .State.IncusClientCert }}
-  client-key: {{ toJSON .State.IncusClientKey }}
-{{- if .Config.Incus.ServerCert }}
-  server-crt: {{ toJSON .Config.Incus.ServerCert }}
-{{- end }}
-{{- if .Config.Incus.InsecureSkipVerify }}
-  insecure-skip-verify: "true"
-{{- end }}
-{{- end }}
 ---
 apiVersion: source.toolkit.fluxcd.io/v1
 kind: OCIRepository
@@ -146,6 +125,11 @@ spec:
           env:
             - name: BENCH_NAMESPACE
               value: {{ toJSON .Config.Namespace }}
+            # Lets the web UI enable infrastructure providers: it writes the
+            # appliance's provider ConfigMap, which cmd/appliance's provider
+            # loop installs with clusterctl (internal/appliance/providers.go).
+            - name: BENCH_APPLIANCE
+              value: "true"
             - name: BENCH_API_TOKEN
               valueFrom:
                 secretKeyRef:

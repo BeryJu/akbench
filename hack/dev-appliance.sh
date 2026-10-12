@@ -7,7 +7,7 @@
 # agent/images is imported when k3s starts), so local apiserver/UI
 # changes run without pushing anything.
 #
-# Usage: make appliance-dev [AKBENCH_VERSION=0.0.0-main.<sha>] [INCUS_SERVER=https://...]
+# Usage: make appliance-dev [AKBENCH_VERSION=0.0.0-main.<sha>]
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -25,17 +25,10 @@ docker save -o "$IMAGES_DIR/apiserver.tar" "$APISERVER_IMG"
 
 docker rm -f "$NAME" >/dev/null 2>&1 || true
 docker volume create "$NAME" >/dev/null
-incus_env=()
-for v in INCUS_SERVER INCUS_PROJECT INCUS_SERVER_CERT INCUS_INSECURE_SKIP_VERIFY; do
-    if [[ -n "${!v:-}" ]]; then
-        incus_env+=(-e "$v=${!v}")
-    fi
-done
 docker run -d --name "$NAME" --privileged \
     -v "$NAME:/var/lib/rancher/k3s" \
     -v "$IMAGES_DIR/apiserver.tar:/var/lib/rancher/k3s/agent/images/apiserver.tar:ro" \
     -p 8080:8080 -p 6443:6443 \
-    ${incus_env[@]+"${incus_env[@]}"} \
     "$APPLIANCE_IMG" >/dev/null
 
 cat <<EOF

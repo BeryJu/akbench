@@ -27,6 +27,10 @@ BENCH_GROUP="bench.goauthentik.io"
 COPIED_KINDS=(testcasetemplates authentikdeployments testcases testruns)
 ALL_KINDS=(workloadclusters "${COPIED_KINDS[@]}")
 TARGET_OPERATOR_NS="authentik-bench"
+# The appliance's provider contract with the web UI (internal/appliance/providers.go).
+APPLIANCE_NS="authentik-bench"
+APPLIANCE_PROVIDERS="appliance-providers"
+APPLIANCE_STATUS="appliance-status"
 TARGET_OPERATOR_DEPLOY="authentik-bench-operator-controller-manager"
 
 usage() {
@@ -192,7 +196,21 @@ dst version >/dev/null || die "target cluster unreachable"
     die "target's WorkloadCluster CRD lacks the clusterctl move-hierarchy label - is it an appliance with an akbench version that supports migration, and has it finished bootstrapping?"
 dst -n "$TARGET_OPERATOR_NS" get deploy "$TARGET_OPERATOR_DEPLOY" >/dev/null ||
     die "target has no $TARGET_OPERATOR_NS/$TARGET_OPERATOR_DEPLOY - wait for the appliance to finish bootstrapping"
-dst get providers.clusterctl.cluster.x-k8s.io -A >/dev/null 2>&1 || die "target has no Cluster API providers installed"
+
+# Infrastructure providers: clusterctl move needs every one the source has
+# on the target too. Inside the appliance, missing ones are enabled the same
+# way the web UI's Infrastructure page does it (ProvidersConfigMap, see
+# internal/appliance/providers.go) once the plan is confirmed.
+infra_names() { jq -r '[.items[] | select(.type == "InfrastructureProvider") | .providerName] | unique | .[]'; }
+src_infra="$(src get providers.clusterctl.cluster.x-k8s.io -A -o json | infra_names)"
+dst_infra="$(dst get providers.clusterctl.cluster.x-k8s.io -A -o json 2>/dev/null | infra_names || true)"
+missing_infra=()
+for p in $src_infra; do
+    grep -qx "$p" <<<"$dst_infra" || missing_infra+=("$p")
+done
+if [[ ${#missing_infra[@]} -gt 0 ]] && ! dst -n "$APPLIANCE_NS" get configmap "$APPLIANCE_STATUS" >/dev/null 2>&1; then
+    die "the target lacks the infrastructure provider(s) ${missing_infra[*]} - install them with clusterctl init --infrastructure first"
+fi
 
 detect_namespaces
 [[ ${#NAMESPACES[@]} -gt 0 ]] || die "no akbench objects found on the source"
@@ -219,24 +237,41 @@ if ! $SKIP_NETCHECK; then
             info "checking the appliance can reach $cluster at $endpoint"
             dst -n "$TARGET_OPERATOR_NS" run "akbench-netcheck-$RANDOM" --rm -i --quiet --restart=Never \
                 --image=curlimages/curl:8.17.0 -- curl -sk -o /dev/null --connect-timeout 5 "https://$endpoint/" ||
-                die "the appliance can't reach $cluster's API at $endpoint - fix routing to the Incus network first (or --skip-netcheck)"
+                die "the appliance can't reach $cluster's API at $endpoint - fix routing to the infrastructure's network first (or --skip-netcheck)"
         done < <(src -n "$ns" get clusters.cluster.x-k8s.io -o json |
             jq -r '.items[] | select(.spec.controlPlaneEndpoint.host // "" != "") | "\(.metadata.name) \(.spec.controlPlaneEndpoint.host):\(.spec.controlPlaneEndpoint.port)"')
     done
 fi
 
-# clusterctl move's own dry run: catches missing/older target providers and
-# an unmovable object graph before anything has been changed. The source CRD
+# clusterctl move's own dry run: catches older target providers and an
+# unmovable object graph before anything has been changed. The source CRD
 # label is what makes WorkloadClusters part of that graph (see the marker on
 # api/v1alpha1/workloadcluster_types.go); adding it changes nothing else.
-src label crd "workloadclusters.$BENCH_GROUP" clusterctl.cluster.x-k8s.io/move-hierarchy=true --overwrite >/dev/null
-for ns in "${NAMESPACES[@]}"; do
-    info "clusterctl move --dry-run -n $ns"
-    clusterctl move "${move_args[@]}" -n "$ns" --dry-run >/dev/null
-done
+# Only possible once the target has every provider - otherwise it runs
+# after they're installed below.
+dry_run() {
+    src label crd "workloadclusters.$BENCH_GROUP" clusterctl.cluster.x-k8s.io/move-hierarchy=true --overwrite >/dev/null
+    local ns out
+    for ns in "${NAMESPACES[@]}"; do
+        info "clusterctl move --dry-run -n $ns"
+        # Quiet unless it fails: a dry run still logs "Deleting objects from
+        # the source cluster", which is alarming to read before anything was
+        # agreed to.
+        if ! out="$(clusterctl move "${move_args[@]}" -n "$ns" --dry-run 2>&1)"; then
+            printf '%s\n' "$out" >&2
+            die "clusterctl move --dry-run failed for namespace $ns"
+        fi
+    done
+}
+if [[ ${#missing_infra[@]} -eq 0 ]]; then
+    dry_run
+fi
 
 # --- Plan ----------------------------------------------------------------------
 step "Plan"
+if [[ ${#missing_infra[@]} -gt 0 ]]; then
+    info "0. Install the infrastructure provider(s) ${missing_infra[*]} on the appliance."
+fi
 cat >&2 <<EOF
     1. Scale to 0 on the source (also stop any 'make dev'/'make run' operator you run locally):
 $(sed 's/^/         /' <<<"${controllers:-(none)}")
@@ -250,6 +285,32 @@ if [[ -n "$local_targets" ]]; then
     printf '\n    These run on the old management cluster itself and will be installed fresh on\n    the appliance (no data is carried over - e.g. an embedded Postgres starts empty):\n%b' "$local_targets" >&2
 fi
 confirm "Proceed?"
+
+# --- 0. Infrastructure providers ---------------------------------------------
+if [[ ${#missing_infra[@]} -gt 0 ]]; then
+    step "Installing infrastructure providers on the appliance: ${missing_infra[*]}"
+    enabled="$(dst -n "$APPLIANCE_NS" get configmap "$APPLIANCE_PROVIDERS" --ignore-not-found \
+        -o jsonpath='{.data.infrastructure}')"
+    for p in "${missing_infra[@]}"; do
+        grep -qx "$p" <<<"${enabled//,/$'\n'}" || enabled="${enabled:+$enabled,}$p"
+    done
+    dst -n "$APPLIANCE_NS" create configmap "$APPLIANCE_PROVIDERS" --from-literal=infrastructure="$enabled" \
+        --dry-run=client -o yaml | dst apply -f - >/dev/null
+    for _ in $(seq 1 120); do
+        dst_infra="$(dst get providers.clusterctl.cluster.x-k8s.io -A -o json 2>/dev/null | infra_names || true)"
+        still_missing=()
+        for p in "${missing_infra[@]}"; do
+            grep -qx "$p" <<<"$dst_infra" || still_missing+=("$p")
+        done
+        [[ ${#still_missing[@]} -eq 0 ]] && break
+        sleep 5
+    done
+    if [[ ${#still_missing[@]} -gt 0 ]]; then
+        err="$(dst -n "$APPLIANCE_NS" get configmap "$APPLIANCE_STATUS" -o jsonpath='{.data.error}' 2>/dev/null || true)"
+        die "the appliance didn't install ${still_missing[*]} within 10 minutes${err:+: $err}"
+    fi
+    dry_run
+fi
 
 # --- 1. Quiesce the source ---------------------------------------------------
 step "Quiescing the source"

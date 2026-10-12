@@ -3,26 +3,23 @@ package appliance
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"maps"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	utilyaml "k8s.io/apimachinery/pkg/util/yaml"
 )
 
-func testEnv(extra map[string]string) func(string) string {
-	env := map[string]string{
-		"AKBENCH_CAPI_VERSION": "v1.14.3",
-		"AKBENCH_CAPN_VERSION": "v0.9.1",
-	}
-	maps.Copy(env, extra)
+func testEnv(env map[string]string) func(string) string {
 	return func(k string) string { return env[k] }
 }
 
@@ -31,37 +28,14 @@ func TestLoadConfigDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Namespace != "default" || cfg.UIPort != "8080" || cfg.Incus.SecretName != "lxc-secret" || cfg.Incus.Project != "default" {
+	if cfg.Namespace != "default" || cfg.UIPort != "8080" || cfg.Version != Version {
 		t.Errorf("unexpected defaults: %+v", cfg)
 	}
 }
 
-func TestLoadConfigErrors(t *testing.T) {
-	for name, env := range map[string]map[string]string{
-		"cert without key": {"INCUS_CLIENT_CERT": "-----BEGIN CERTIFICATE-----\n"},
-		"bad port":         {"AKBENCH_UI_PORT": "http"},
-		"missing file":     {"INCUS_SERVER_CERT": "/does/not/exist"},
-	} {
-		if _, err := LoadConfig(testEnv(env)); err == nil {
-			t.Errorf("%s: expected an error", name)
-		}
-	}
-	if _, err := LoadConfig(func(string) string { return "" }); err == nil {
-		t.Error("expected an error without pinned provider versions")
-	}
-}
-
-func TestLoadConfigPEMFromFile(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "server.crt")
-	if err := os.WriteFile(path, []byte("-----BEGIN CERTIFICATE-----\nx\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	cfg, err := LoadConfig(testEnv(map[string]string{"INCUS_SERVER_CERT": path}))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.HasPrefix(cfg.Incus.ServerCert, "-----BEGIN CERTIFICATE-----") {
-		t.Errorf("server cert not read from file: %q", cfg.Incus.ServerCert)
+func TestLoadConfigRejectsBadPort(t *testing.T) {
+	if _, err := LoadConfig(testEnv(map[string]string{"AKBENCH_UI_PORT": "http"})); err == nil {
+		t.Error("expected an error")
 	}
 }
 
@@ -74,37 +48,83 @@ func TestEnsureStateIsStable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(first.APIToken) != 64 || !first.IncusCertGenerated {
-		t.Fatalf("unexpected first state: token %q generated %v", first.APIToken, first.IncusCertGenerated)
-	}
-	if _, err := CertFingerprint(first.IncusClientCert); err != nil {
-		t.Errorf("generated certificate: %v", err)
+	if len(first.APIToken) != 64 {
+		t.Fatalf("unexpected token %q", first.APIToken)
 	}
 	second, err := EnsureState(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(first, second) {
-		t.Error("state changed between boots")
+	if *first != *second {
+		t.Error("token changed between boots")
+	}
+
+	cfg.APIToken = "fixed"
+	if st, err := EnsureState(cfg); err != nil || st.APIToken != "fixed" {
+		t.Errorf("pinned token not used: %+v %v", st, err)
 	}
 }
 
-func TestEnsureStateUsesSuppliedCredentials(t *testing.T) {
-	cfg, err := LoadConfig(testEnv(map[string]string{
-		"AKBENCH_STATE_DIR": t.TempDir(),
-		"AKBENCH_API_TOKEN": "fixed",
-		"INCUS_CLIENT_CERT": "-----BEGIN CERTIFICATE-----\nc\n",
-		"INCUS_CLIENT_KEY":  "-----BEGIN EC PRIVATE KEY-----\nk\n",
-	}))
+// writeRepo lays out a clusterctl local repository the way
+// hack/update-appliance-assets.sh does.
+func writeRepo(t *testing.T, dirs ...string) string {
+	t.Helper()
+	repo := t.TempDir()
+	for _, d := range dirs {
+		if err := os.MkdirAll(filepath.Join(repo, d), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return repo
+}
+
+func TestDiscoverShipped(t *testing.T) {
+	repo := writeRepo(t,
+		"cluster-api/v1.14.3", "bootstrap-kubeadm/v1.14.3", "control-plane-kubeadm/v1.14.3",
+		"infrastructure-incus/v0.9.1", "infrastructure-aws/v2.9.0", "cert-manager/v1.21.2")
+	shipped, err := DiscoverShipped(repo)
 	if err != nil {
 		t.Fatal(err)
 	}
-	st, err := EnsureState(cfg)
-	if err != nil {
-		t.Fatal(err)
+	want := &Shipped{CAPIVersion: "v1.14.3", Infrastructure: map[string]string{"incus": "v0.9.1", "aws": "v2.9.0"}}
+	if !reflect.DeepEqual(shipped, want) {
+		t.Errorf("got %+v, want %+v", shipped, want)
 	}
-	if st.APIToken != "fixed" || st.IncusCertGenerated || !strings.Contains(st.IncusClientKey, "k") {
-		t.Errorf("supplied credentials not used: %+v", st)
+
+	for name, dirs := range map[string][]string{
+		"two versions":     {"cluster-api/v1.14.3", "cluster-api/v1.14.2", "bootstrap-kubeadm/v1.14.3", "control-plane-kubeadm/v1.14.3"},
+		"version mismatch": {"cluster-api/v1.14.3", "bootstrap-kubeadm/v1.14.2", "control-plane-kubeadm/v1.14.3"},
+		"no core":          {"infrastructure-incus/v0.9.1"},
+	} {
+		if _, err := DiscoverShipped(writeRepo(t, dirs...)); err == nil {
+			t.Errorf("%s: expected an error", name)
+		}
+	}
+}
+
+func TestShippedDesired(t *testing.T) {
+	shipped := &Shipped{CAPIVersion: "v1.14.3", Infrastructure: map[string]string{"incus": "v0.9.1"}}
+	got, unknown := shipped.Desired([]string{"incus", "aws", "incus"})
+	want := []Provider{
+		{Type: "CoreProvider", Name: "cluster-api", Version: "v1.14.3"},
+		{Type: "BootstrapProvider", Name: "kubeadm", Version: "v1.14.3"},
+		{Type: "ControlPlaneProvider", Name: "kubeadm", Version: "v1.14.3"},
+		{Type: "InfrastructureProvider", Name: "incus", Version: "v0.9.1"},
+	}
+	if !reflect.DeepEqual(got, want) || !reflect.DeepEqual(unknown, []string{"aws"}) {
+		t.Errorf("got %v unknown %v", got, unknown)
+	}
+	if got, _ := shipped.Desired(nil); len(got) != 3 {
+		t.Errorf("no infrastructure enabled: got %v, want only the core providers", got)
+	}
+}
+
+func TestParseProviderList(t *testing.T) {
+	if got := ParseProviderList(" incus, ,aws "); !reflect.DeepEqual(got, []string{"incus", "aws"}) {
+		t.Errorf("got %v", got)
+	}
+	if got := ParseProviderList(""); got != nil {
+		t.Errorf("got %v, want nil", got)
 	}
 }
 
@@ -139,24 +159,19 @@ func TestRenderStack(t *testing.T) {
 		"AKBENCH_NAMESPACE":   "bench",
 		"AKBENCH_UI_PORT":     "9000",
 		"AKBENCH_OIDC_ISSUER": "https://id.example.com/",
-		"INCUS_SERVER":        "https://incus:8443",
-		"INCUS_SERVER_CERT":   "-----BEGIN CERTIFICATE-----\n\"quoted\": yes\n",
 	}))
 	if err != nil {
 		t.Fatal(err)
 	}
-	st := &State{APIToken: "tok", IncusClientCert: "-----BEGIN CERTIFICATE-----\nc\n", IncusClientKey: "-----BEGIN EC PRIVATE KEY-----\nk\n"}
-	docs := renderDocs(t, cfg, st)
+	docs := renderDocs(t, cfg, &State{APIToken: `to"k`})
 
-	secret := docs["Secret/lxc-secret"]
-	if secret == nil || secret.GetNamespace() != "bench" {
-		t.Fatalf("lxc-secret missing or in wrong namespace: %v", secret)
+	if v, _, _ := unstructured.NestedString(docs["Secret/apiserver-token"].Object, "stringData", "token"); v != `to"k` {
+		t.Errorf("token = %q", v)
 	}
-	if v, _, _ := unstructured.NestedString(secret.Object, "stringData", "server-crt"); v != cfg.Incus.ServerCert {
-		t.Errorf("server-crt = %q, want %q", v, cfg.Incus.ServerCert)
-	}
-	if v, _, _ := unstructured.NestedString(secret.Object, "stringData", "client-key"); v != st.IncusClientKey {
-		t.Errorf("client-key = %q", v)
+	for key := range docs {
+		if strings.HasPrefix(key, "Secret/") && key != "Secret/apiserver-token" {
+			t.Errorf("unexpected %s - infrastructure credentials belong to the web UI", key)
+		}
 	}
 
 	if tag, _, _ := unstructured.NestedString(docs["OCIRepository/authentik-bench-operator"].Object, "spec", "ref", "tag"); tag != "1.2.3" {
@@ -176,7 +191,7 @@ func TestRenderStack(t *testing.T) {
 		m := e.(map[string]any)
 		env[m["name"].(string)] = m["value"]
 	}
-	if env["BENCH_NAMESPACE"] != "bench" || env["BENCH_OIDC_ISSUER"] != "https://id.example.com/" {
+	if env["BENCH_NAMESPACE"] != "bench" || env["BENCH_OIDC_ISSUER"] != "https://id.example.com/" || env["BENCH_APPLIANCE"] != "true" {
 		t.Errorf("apiserver env = %v", env)
 	}
 	if _, ok := env["BENCH_OIDC_CLIENT_ID"]; ok {
@@ -189,21 +204,11 @@ func TestRenderStack(t *testing.T) {
 	}
 }
 
-func TestRenderStackWithoutIncusServer(t *testing.T) {
-	cfg, err := LoadConfig(testEnv(nil))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := renderDocs(t, cfg, &State{APIToken: "tok"})["Secret/lxc-secret"]; ok {
-		t.Error("lxc-secret rendered without INCUS_SERVER - would clobber a migrated Secret")
-	}
-}
-
 func TestPlanClusterctl(t *testing.T) {
-	cfg, _ := LoadConfig(testEnv(nil))
-	pinned := PinnedProviders(cfg)
+	shipped := &Shipped{CAPIVersion: "v1.14.3", Infrastructure: map[string]string{"incus": "v0.9.1"}}
+	desired, _ := shipped.Desired([]string{"incus"})
 
-	cmds, skipped, err := PlanClusterctl(nil, pinned)
+	cmds, skipped, err := PlanClusterctl(nil, desired)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -219,7 +224,7 @@ func TestPlanClusterctl(t *testing.T) {
 		{Type: "BootstrapProvider", Name: "kubeadm", Version: "v1.14.3"},
 		{Type: "ControlPlaneProvider", Name: "kubeadm", Version: "v1.15.0"},
 	}
-	cmds, skipped, err = PlanClusterctl(installed, pinned)
+	cmds, skipped, err = PlanClusterctl(installed, desired)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -233,13 +238,6 @@ func TestPlanClusterctl(t *testing.T) {
 	if len(skipped) != 1 || !strings.Contains(skipped[0], "v1.15.0") {
 		t.Errorf("mixed: skipped %v", skipped)
 	}
-
-	cmds, _, err = PlanClusterctl(append(installed[:2:2],
-		Provider{Type: "ControlPlaneProvider", Name: "kubeadm", Version: "v1.14.3"},
-		Provider{Type: "InfrastructureProvider", Name: "incus", Version: "v0.9.1"}), pinned)
-	if err != nil || len(cmds) != 1 || cmds[0][0] != "upgrade" {
-		t.Errorf("only core outdated: cmds %v err %v", cmds, err)
-	}
 }
 
 func TestParseInventory(t *testing.T) {
@@ -252,41 +250,139 @@ func TestParseInventory(t *testing.T) {
 	}
 }
 
-func TestBootstrapRunOnceOrder(t *testing.T) {
-	dir := t.TempDir()
-	kubeconfig := filepath.Join(dir, "k3s.yaml")
+// fakeCluster answers the kubectl/clusterctl calls the bootstrapper makes,
+// recording them.
+type fakeCluster struct {
+	calls    []string
+	enabled  string
+	statuses []map[string]string
+	stack    []byte
+}
+
+func (f *fakeCluster) run(_ context.Context, stdin []byte, name string, args ...string) ([]byte, error) {
+	call := name + " " + strings.Join(args, " ")
+	f.calls = append(f.calls, call)
+	switch {
+	case strings.Contains(call, "get configmap "+ProvidersConfigMap):
+		return []byte(f.enabled), nil
+	case stdin != nil && bytes.Contains(stdin, []byte(StatusConfigMap)):
+		var cm struct {
+			Data map[string]string `json:"data"`
+		}
+		if err := json.Unmarshal(stdin, &cm); err != nil {
+			return nil, err
+		}
+		f.statuses = append(f.statuses, cm.Data)
+	case stdin != nil:
+		f.stack = stdin
+	}
+	return nil, nil
+}
+
+func newTestBootstrapper(t *testing.T, f *fakeCluster) *Bootstrapper {
+	t.Helper()
+	kubeconfig := filepath.Join(t.TempDir(), "k3s.yaml")
 	if err := os.WriteFile(kubeconfig, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	cfg, _ := LoadConfig(testEnv(map[string]string{"AKBENCH_KUBECONFIG": kubeconfig, "AKBENCH_ASSETS_DIR": "/assets"}))
-	var calls []string
-	var applied []byte
-	run := func(_ context.Context, stdin []byte, name string, args ...string) ([]byte, error) {
-		calls = append(calls, name+" "+strings.Join(args, " "))
-		if stdin != nil {
-			applied = stdin
-		}
-		return nil, nil
+	cfg, err := LoadConfig(testEnv(map[string]string{"AKBENCH_KUBECONFIG": kubeconfig, "AKBENCH_ASSETS_DIR": "/assets"}))
+	if err != nil {
+		t.Fatal(err)
 	}
-	b := &Bootstrapper{Config: cfg, State: &State{APIToken: "tok"}, Run: run, Log: io.Discard}
-	if err := b.RunOnce(context.Background()); err != nil {
+	return &Bootstrapper{
+		Config: cfg, State: &State{APIToken: "tok"}, Run: f.run, Log: io.Discard,
+		Shipped: &Shipped{CAPIVersion: "v1.14.3", Infrastructure: map[string]string{"incus": "v0.9.1"}},
+	}
+}
+
+func TestBootstrapRunOnceOrder(t *testing.T) {
+	f := &fakeCluster{}
+	if err := newTestBootstrapper(t, f).RunOnce(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	var order []string
-	for _, c := range calls {
+	for _, c := range f.calls {
 		switch {
 		case strings.Contains(c, "/assets/flux/install.yaml"):
 			order = append(order, "flux")
 		case strings.HasPrefix(c, "clusterctl init"):
 			order = append(order, "clusterctl")
-		case strings.HasSuffix(c, "-f -"):
-			order = append(order, "stack")
+			if strings.Contains(c, "--infrastructure") {
+				t.Errorf("infrastructure provider installed without being enabled: %s", c)
+			}
+		case strings.HasSuffix(c, "-f -") && !strings.Contains(c, "status"):
+			if len(order) == 0 || order[len(order)-1] != "stack" {
+				order = append(order, "stack")
+			}
+		case strings.Contains(c, "wait helmrelease/authentik-bench-operator"):
+			order = append(order, "wait-operator")
 		}
 	}
-	if !reflect.DeepEqual(order, []string{"flux", "clusterctl", "stack"}) {
-		t.Errorf("order = %v (calls %v)", order, calls)
+	if !reflect.DeepEqual(order, []string{"flux", "clusterctl", "stack", "wait-operator"}) {
+		t.Errorf("order = %v (calls %v)", order, f.calls)
 	}
-	if !bytes.Contains(applied, []byte("kind: HelmRelease")) {
+	if !bytes.Contains(f.stack, []byte("kind: HelmRelease")) {
 		t.Error("stack not passed on stdin")
+	}
+}
+
+func TestSyncProvidersInstallsEnabledAndReportsUnknown(t *testing.T) {
+	f := &fakeCluster{enabled: "incus,aws"}
+	err := newTestBootstrapper(t, f).SyncProviders(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "aws") {
+		t.Fatalf("expected an error about aws, got %v", err)
+	}
+	var initCall string
+	for _, c := range f.calls {
+		if strings.HasPrefix(c, "clusterctl init") {
+			initCall = c
+		}
+	}
+	if !strings.Contains(initCall, "--infrastructure incus:v0.9.1") {
+		t.Errorf("incus not installed: %q", initCall)
+	}
+	if len(f.statuses) != 1 {
+		t.Fatalf("statuses = %v", f.statuses)
+	}
+	st := f.statuses[0]
+	if !strings.Contains(st[StatusKeyError], "aws") || st[StatusKeyShipped] != `{"incus":"v0.9.1"}` || st[StatusKeySyncedAt] == "" {
+		t.Errorf("status = %v", st)
+	}
+}
+
+func TestServeStartsProviderLoopBeforeBootstrapFinishes(t *testing.T) {
+	// The operator HelmRelease never becomes Ready (e.g. its chart can't be
+	// pulled), yet a provider enabled in the UI afterwards still gets
+	// installed - by the provider loop, well before the bootstrap's own 15s
+	// retry could.
+	f := &fakeCluster{}
+	var mu sync.Mutex
+	installed := make(chan struct{})
+	b := newTestBootstrapper(t, f)
+	b.SyncInterval = 10 * time.Millisecond
+	b.Run = func(ctx context.Context, stdin []byte, name string, args ...string) ([]byte, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		call := name + " " + strings.Join(args, " ")
+		if strings.Contains(call, "wait helmrelease/authentik-bench-operator") {
+			f.enabled = "incus"
+			return nil, errors.New("timed out")
+		}
+		if strings.Contains(call, "--infrastructure incus:v0.9.1") {
+			select {
+			case <-installed:
+			default:
+				close(installed)
+			}
+		}
+		return f.run(ctx, stdin, name, args...)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = b.Serve(ctx) }()
+	select {
+	case <-installed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("enabled provider not installed while the bootstrap was still failing")
 	}
 }

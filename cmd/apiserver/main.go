@@ -158,6 +158,7 @@ func run() error {
 		Token:            token,
 		PrometheusURL:    prometheusURL,
 		CAPIAvailable:    capiAvailable,
+		Appliance:        os.Getenv("BENCH_APPLIANCE") == "true",
 		OIDC:             verifier,
 		OIDCConfig:       oidcCfg,
 		Shell:            shell,

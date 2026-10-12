@@ -54,6 +54,11 @@ type Config struct {
 	// management cluster itself.
 	CAPIAvailable bool
 
+	// Appliance is true when running inside the single-container appliance
+	// (Dockerfile.appliance), where infrastructure providers are enabled
+	// from the UI (infrastructure.go). Elsewhere they're installed by hand.
+	Appliance bool
+
 	// HTTPClient is used for Prometheus calls. Defaults to a 30s client.
 	HTTPClient *http.Client
 
@@ -165,6 +170,16 @@ func (s *Server) Router() http.Handler {
 			r.Get("/metrics/compare", s.compare)
 			r.Get("/metrics/range", s.metricsRange)
 			r.Get("/metrics/resources", s.listResourceMetrics)
+
+			r.Get("/infrastructure", s.getInfrastructure)
+			r.Post("/infrastructure/providers/{id}/enable", s.enableInfrastructureProvider)
+			r.Get("/infrastructure/incus/credentials", s.listIncusCredentials)
+			r.Post("/infrastructure/incus/credentials", s.createIncusCredential)
+			r.Get("/infrastructure/incus/credentials/{name}", s.getIncusCredential)
+			r.Put("/infrastructure/incus/credentials/{name}", s.updateIncusCredential)
+			r.Delete("/infrastructure/incus/credentials/{name}", s.deleteIncusCredential)
+			r.Post("/infrastructure/incus/credentials/{name}/test", s.testIncusCredential)
+			r.Post("/infrastructure/incus/credentials/{name}/trust", s.trustIncusCredential)
 
 			r.Get("/alerts", s.listAlerts)
 			r.Get("/placement", s.listPlacement)

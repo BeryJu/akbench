@@ -2,7 +2,7 @@
 
 This moves an existing akbench management cluster onto the [appliance](README.md)
 **without recreating any workload cluster**. The source is the setup that
-`main` documents: Cluster API, the Incus provider and Flux installed by hand
+`main` documents: Cluster API, an infrastructure provider (Incus) and Flux installed by hand
 on some cluster (minikube, kind, …), with the operator deployed via
 `make deploy` or the chart, or run locally with `make dev`.
 
@@ -16,7 +16,8 @@ change hands.
 |---|---|
 | `WorkloadCluster`s, and everything they own: the CAPI `Cluster`/`LXCCluster`/`KubeadmControlPlane`/`MachineDeployment` tree, machines, CA and kubeconfig Secrets, and the CNI/CSI/observability `HelmRelease`s | `clusterctl move`. The `WorkloadCluster` CRD carries `clusterctl.cluster.x-k8s.io/move-hierarchy=true`, so clusterctl moves it with its whole owner tree and rebuilds the ownerReferences. Status is recomputed by the controllers. |
 | `TestCaseTemplate`s, `AuthentikDeployment`s, `TestCase`s, `TestRun`s | Copied by the script, **including status**, so finished `TestRun`s stay finished and keep the time ranges the Compare view uses. |
-| Hand-made Secrets and ConfigMaps in those namespaces (Incus credentials, `bench-fixtures-*`, external Postgres credentials, extra values, custom k6 scripts) | Copied by the script. Secrets and ConfigMaps that already exist on the appliance are kept. |
+| Hand-made Secrets and ConfigMaps in those namespaces (infrastructure credentials such as `lxc-secret`, `bench-fixtures-*`, external Postgres credentials, extra values, custom k6 scripts) | Copied by the script. Secrets and ConfigMaps that already exist on the appliance are kept. A copied Incus connection keeps the certificate the server already trusts, and shows up on the web UI's Infrastructure page as soon as a cluster uses it. |
+| Infrastructure providers | The script enables, on the appliance, every infrastructure provider the source has installed, the same way the Infrastructure page's **Enable** button does, and waits until they're installed. |
 | Operator-generated Secrets, the `HelmRelease`s of `AuthentikDeployment`s | Not copied. The appliance's operator regenerates them. helm-controller finds each existing helm release on its cluster and upgrades it in place, so nothing is reinstalled. |
 
 **What does not carry over:** any `AuthentikDeployment` or `TestCase` that
@@ -31,10 +32,6 @@ these before asking to proceed.
 1. **Run the appliance** with an akbench version that includes this
    migration support (the `WorkloadCluster` CRD has the move-hierarchy label),
    and wait for the `akbench … is ready` log line.
-   - Leave `INCUS_SERVER` **unset** for now. The script copies the existing
-     `lxc-secret`, which already holds a certificate the Incus server trusts.
-     If you set `INCUS_SERVER`, the appliance would overwrite that Secret with
-     its own, generated certificate, which Incus doesn't trust yet.
    - Use the same `AKBENCH_NAMESPACE` the old setup used (default
      `default`). `clusterctl move` can't rename namespaces.
 2. **Get a kubeconfig context for the appliance** on the machine running the
@@ -46,13 +43,14 @@ these before asking to proceed.
    ```
    The `sed` renames k3s's default context/cluster/user to `akbench`, so it
    doesn't collide with anything else in your kubeconfig.
-3. **Check reachability**: the Docker host must reach the Incus API and every
-   workload cluster's API load balancer, as the old management cluster did.
+3. **Check reachability**: the Docker host must reach your infrastructure's API
+   (e.g. Incus) and every workload cluster's API load balancer, as the old
+   management cluster did.
    The script checks the load balancers from inside the appliance
    (`--skip-netcheck` turns this off).
 4. **Install the tools** on the machine running the script: `kubectl`, `jq`, and `clusterctl` at least
    as new as the source's Cluster API version.
-5. **Check the providers**: the appliance's Cluster API and Incus provider versions must be **≥ the
+5. **Check the providers**: the appliance's Cluster API and infrastructure provider versions must be **≥ the
    source's**. `clusterctl move` refuses otherwise, and the script's
    dry run catches it before changing anything. If the source is ahead,
    upgrade the appliance image first.
@@ -71,6 +69,9 @@ It runs preflight checks (both clusters reachable, target ready, network,
 `clusterctl move --dry-run`), prints its plan and asks before changing anything. Then
 it:
 
+0. **Installs missing infrastructure providers** on the appliance, if the
+   source has any the appliance doesn't yet, and runs the dry run once
+   they're in.
 1. **Quiesces the source**: scales the akbench operator, apiserver and Flux
    helm-controller to 0. This step is required, not a precaution:
    `clusterctl move` deletes source objects *before* it strips their
@@ -94,10 +95,10 @@ cause and run the script again.
 
 - In the web UI, check that every workload cluster is Ready, the kubectl
   shell lists every cluster's context, and the Grafana proxy works.
-- To let the appliance manage the Incus credentials from now on, restart it
-  with `INCUS_SERVER` and friends set, after trusting its certificate
-  (`akbench-appliance incus-cert`) on the Incus server. Otherwise keep using
-  the migrated `lxc-secret`.
+- Check the Infrastructure page: the migrated Incus connection is listed under
+  the cluster that uses it, and **Test connection** reports it as reachable
+  and trusted. Saving it there once makes it a UI-managed connection, for
+  example to pin the server certificate.
 - **Never scale the old operator or helm-controller back up.** Both management
   clusters would then fight over the same workload clusters.
 - Decommission the old cluster. Either delete it outright (for example `minikube delete`), or

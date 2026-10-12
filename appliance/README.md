@@ -5,13 +5,17 @@ A single container that is a complete akbench management cluster:
 - **k3s**, the management cluster itself (PID 1 of the container)
 - **Flux**, the root GitOps controllers: helm-controller and source-controller install
   every chart akbench renders, here and on workload clusters
-- **Cluster API**, with the kubeadm bootstrap/control-plane providers and the
-  **Incus provider** (CAPN), plus cert-manager, installed with `clusterctl`
+- **Cluster API**, with the kubeadm bootstrap/control-plane providers and
+  cert-manager, installed with `clusterctl`
 - **akbench**: the operator (via a Flux `HelmRelease` of its published chart)
   and the apiserver (web UI + kubectl shell)
 
-Incus is **not** part of the appliance. Workload clusters run on your own
-Incus server, which the appliance reaches over the network.
+The appliance is not tied to any infrastructure. Workload clusters run on
+infrastructure outside the container, through a Cluster API
+**infrastructure provider** you enable in the web UI, along with that
+provider's connection settings. Today that's **Incus** (cluster-api-provider-incus);
+the image ships every provider it supports, so others such as AWS can be
+added without changing how the appliance is run.
 
 ## Running it
 
@@ -19,8 +23,6 @@ Incus server, which the appliance reaches over the network.
 docker run -d --name akbench --privileged --restart unless-stopped \
   -v akbench:/var/lib/rancher/k3s \
   -p 8080:8080 -p 6443:6443 \
-  -e INCUS_SERVER=https://incus.example.com:8443 \
-  -e INCUS_SERVER_CERT=/run/incus/server.crt -v /path/to/incus-server.crt:/run/incus/server.crt:ro \
   ghcr.io/beryju/akbench-appliance:latest
 ```
 
@@ -30,19 +32,42 @@ Follow the first boot (2-5 minutes, mostly image pulls):
 docker logs -f akbench 2>&1 | grep '\[akbench\]'
 ```
 
-On first boot the appliance generates an **Incus client certificate**. Trust it
-on the Incus server:
-
-```sh
-docker exec akbench akbench-appliance incus-cert > akbench.crt
-incus config trust add-certificate akbench.crt --name akbench
-```
-
 Then open `http://<host>:8080/` and log in with the API token:
 
 ```sh
 docker exec akbench akbench-appliance token
 ```
+
+### Setting up infrastructure
+
+Everything infrastructure-specific happens on the web UI's **Infrastructure**
+page. For Incus:
+
+1. **Enable the provider:** click **Enable** next to *Incus / LXC*. The
+   appliance installs cluster-api-provider-incus with `clusterctl` within a
+   minute or two.
+2. **Add a connection:** go to **New connection** and enter the Incus API URL
+   (`https://incus.example.com:8443`) and, if you use one, the project. The
+   appliance generates a client certificate for it, or you can bring your own.
+3. **Test and trust it.** The connection page tests the connection straight away:
+   - If the server's (usually self-signed) certificate isn't trusted, it
+     shows the certificate's fingerprint. Compare it with `incus info` on the
+     server, then click **Pin this certificate**.
+   - If the server doesn't trust the client yet, run
+     `incus config trust add akbench-<name>` on the server and paste the
+     token. Alternatively, download the client certificate and run
+     `incus config trust add-certificate` on it.
+4. **Register a cluster:** register a workload cluster under **Clusters** and
+   pick the connection.
+
+Connections are plain Secrets in the akbench namespace, in the shape
+`WorkloadCluster.spec.incus.lxcSecretRef` expects. A Secret created by hand
+or migrated from an older setup shows up as soon as a cluster uses it.
+
+Enabled providers are never uninstalled: removing one would strand every
+cluster it provisioned.
+
+### kubectl
 
 `kubectl` is available inside the container (`docker exec -it akbench kubectl get workloadclusters -A`).
 To use it from outside, copy the admin kubeconfig. Its server is
@@ -57,34 +82,31 @@ docker exec akbench cat /etc/rancher/k3s/k3s.yaml > akbench.kubeconfig
 - Docker (or Podman) with **cgroup v2** and `--privileged`, the same as any
   k3s-in-Docker setup (k3d, Rancher's single-node install).
 - About 2 vCPU, 4 GiB RAM and 20 GiB disk for the management plane itself.
-  Workload clusters run on Incus, not here.
+  Workload clusters run on your infrastructure, not here.
 - **Outbound** network access from the Docker host to:
-  - the Incus API (`INCUS_SERVER`, usually `:8443`);
+  - your infrastructure's API (for Incus, usually `:8443`);
   - each workload cluster's API load balancer (`:6443`) and node IPs
-    (Grafana/Prometheus NodePorts) on the Incus instance network. If the
-    Incus network is NATed (the default `incusbr0`), route it to the Docker host or
-    bridge it onto your LAN.
+    (Grafana/Prometheus NodePorts). With Incus, those are on the instance
+    network. If that network is NATed (the default `incusbr0`), route it to the
+    Docker host or bridge it onto your LAN.
   - container registries (ghcr.io, docker.io, registry.k8s.io, quay.io) and
     the chart repositories akbench installs from.
 
   Nothing ever connects *into* the appliance except your browser, so the
   Docker NAT in front of it is fine.
 - No address overlap between k3s's own pod/service networks (`10.42.0.0/16` and
-  `10.43.0.0/16`) and your Incus instance network. If they do overlap, pass
-  `--cluster-cidr`/`--service-cidr` as extra arguments (see below). They take
-  effect on the first boot only.
+  `10.43.0.0/16`) and the network workload clusters run on. If they do overlap,
+  pass `--cluster-cidr`/`--service-cidr` as extra arguments (see below). They
+  take effect on the first boot only.
 
 ### Configuration
 
+The container's own configuration is limited to the appliance itself.
+Everything infrastructure-specific lives in the web UI.
+
 | Variable | Default | |
 |---|---|---|
-| `INCUS_SERVER` | | Incus API URL. If unset, the appliance does not manage the Incus Secret, for example when it was migrated over. |
-| `INCUS_PROJECT` | `default` | |
-| `INCUS_SERVER_CERT` | | Incus server certificate (PEM, or a path to one). |
-| `INCUS_INSECURE_SKIP_VERIFY` | `false` | Instead of `INCUS_SERVER_CERT`. |
-| `INCUS_CLIENT_CERT` / `INCUS_CLIENT_KEY` | generated | Bring your own client certificate instead of the generated one. |
-| `INCUS_SECRET_NAME` | `lxc-secret` | The Secret a `WorkloadCluster`'s `spec.incus.lxcSecretRef` names. |
-| `AKBENCH_NAMESPACE` | `default` | Namespace for your akbench objects. |
+| `AKBENCH_NAMESPACE` | `default` | Namespace for your akbench objects and infrastructure connections. |
 | `AKBENCH_UI_PORT` | `8080` | Port the web UI listens on (publish it with `-p`). |
 | `AKBENCH_API_TOKEN` | generated | Pin the web UI's bearer token. |
 | `AKBENCH_OIDC_ISSUER`, `AKBENCH_OIDC_CLIENT_ID`, `AKBENCH_OIDC_REQUIRED_GROUP`, `AKBENCH_OIDC_SCOPES` | | OIDC login for the web UI (see the main README). |
@@ -92,9 +114,8 @@ docker exec akbench cat /etc/rancher/k3s/k3s.yaml > akbench.kubeconfig
 
 Extra arguments to `docker run … <image> <args>` are passed to `k3s server`.
 
-The appliance writes its generated state (API token, Incus client
-certificate, k3s node identity) under `/var/lib/rancher/k3s/akbench` on the
-volume.
+The appliance writes its generated state (API token, k3s node identity)
+under `/var/lib/rancher/k3s/akbench` on the volume.
 
 ## Upgrading
 
@@ -109,8 +130,8 @@ docker run -d --name akbench … ghcr.io/beryju/akbench-appliance:<new>   # same
 
 This rolls out:
 - the new operator chart and apiserver image;
-- `clusterctl upgrade apply` for any Cluster API or Incus provider the new image ships a newer
-  version of (providers are never downgraded);
+- `clusterctl upgrade apply` for Cluster API and every enabled infrastructure
+  provider the new image ships a newer version of (providers are never downgraded);
 - the new Flux manifests;
 - the new k3s.
 
@@ -120,8 +141,8 @@ so don't skip appliance releases that bump k3s by more than one minor.
 ## Backups
 
 The appliance is a single node. If you lose the volume, your workload clusters
-keep running on Incus, but nothing manages them any more. Back the volume up,
-for example with the container stopped:
+keep running on your infrastructure, but nothing manages them any more. Back
+the volume up, for example with the container stopped:
 
 ```sh
 docker run --rm -v akbench:/data -v "$PWD:/backup" alpine tar czf /backup/akbench.tgz -C /data .
@@ -139,9 +160,14 @@ See [MIGRATION.md](MIGRATION.md).
 ```sh
 make appliance-dev                    # build + run locally (apiserver from this checkout)
 make docker-build-appliance           # just build the image
-make appliance-assets                 # re-pin Flux/clusterctl/CAPI/CAPN/cert-manager/k3s
+make appliance-assets                 # re-pin Flux/clusterctl/CAPI/cert-manager/k3s and the infrastructure providers
 ```
 
 Every upstream file the image ships is pinned with its checksum in
-`assets.lock`. To bump a version, edit it in `hack/update-appliance-assets.sh`
-and run `make appliance-assets`.
+`assets.lock`. To bump a version, or to ship another infrastructure provider
+(`INFRASTRUCTURE_PROVIDERS`), edit `hack/update-appliance-assets.sh` and run
+`make appliance-assets`. A provider the image ships can be enabled in the
+UI. Provisioning `WorkloadCluster`s through it additionally needs operator
+support (a new `spec.provider`) and an entry in
+`internal/api/infrastructure.go`'s `knownInfraProviders`, plus its own
+connection settings next to `internal/api/incus.go`.

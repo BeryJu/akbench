@@ -1,19 +1,3 @@
-/*
- * Copyright 2026
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
-
 import { lazy, StrictMode, Suspense } from 'react';
 import { createRoot } from 'react-dom/client';
 import { createBrowserRouter, Link, RouterProvider } from 'react-router';
@@ -51,6 +35,7 @@ const templates = () => import('./pages/TestCaseTemplates');
 const clusters = () => import('./pages/Clusters');
 const testRuns = () => import('./pages/TestRuns');
 const grafana = () => import('./pages/Grafana');
+const infrastructure = () => import('./pages/Infrastructure');
 
 function NotFound() {
   return (
@@ -91,6 +76,10 @@ const router = createBrowserRouter([
       { path: 'clusters/new', element: page(clusters, 'ClusterCreatePage') },
       { path: 'clusters/:name', element: page(clusters, 'ClusterViewPage') },
       { path: 'clusters/:name/edit', element: page(clusters, 'ClusterEditPage') },
+      { path: 'infrastructure', element: page(infrastructure, 'InfrastructurePage') },
+      { path: 'infrastructure/incus/new', element: page(infrastructure, 'IncusCredentialCreatePage') },
+      { path: 'infrastructure/incus/:name', element: page(infrastructure, 'IncusCredentialViewPage') },
+      { path: 'infrastructure/incus/:name/edit', element: page(infrastructure, 'IncusCredentialEditPage') },
       { path: 'testruns', element: page(testRuns, 'TestRunsPage') },
       { path: 'testruns/:name', element: page(testRuns, 'TestRunViewPage') },
       { path: 'compare', element: page(() => import('./pages/Compare'), 'ComparePage') },

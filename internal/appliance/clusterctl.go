@@ -3,6 +3,9 @@ package appliance
 import (
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 
 	utilversion "k8s.io/apimachinery/pkg/util/version"
 )
@@ -25,15 +28,99 @@ var providerFlags = map[string]string{
 	"InfrastructureProvider": "--infrastructure",
 }
 
-// PinnedProviders is the provider set this appliance image ships (served from
-// the clusterctl local repository baked into it - see Dockerfile.appliance).
-func PinnedProviders(cfg *Config) []Provider {
-	return []Provider{
-		{Type: "CoreProvider", Name: "cluster-api", Version: cfg.CAPIVersion},
-		{Type: "BootstrapProvider", Name: "kubeadm", Version: cfg.CAPIVersion},
-		{Type: "ControlPlaneProvider", Name: "kubeadm", Version: cfg.CAPIVersion},
-		{Type: "InfrastructureProvider", Name: "incus", Version: cfg.CAPNVersion},
+// Clusterctl provider-label prefixes of the local repository layout
+// (<repo>/<label>/<version>/...), as written by
+// hack/update-appliance-assets.sh.
+const (
+	coreLabel         = "cluster-api"
+	bootstrapLabel    = "bootstrap-kubeadm"
+	controlPlaneLabel = "control-plane-kubeadm"
+	infraLabelPrefix  = "infrastructure-"
+)
+
+// Shipped is the provider set baked into this appliance image's clusterctl
+// local repository - every infrastructure provider it *can* install, not
+// the ones it has been asked to.
+type Shipped struct {
+	// CAPIVersion is the core/kubeadm Cluster API version, always installed.
+	CAPIVersion string
+	// Infrastructure maps an infrastructure provider's clusterctl name
+	// (e.g. "incus") to the version this image ships.
+	Infrastructure map[string]string
+}
+
+// DiscoverShipped reads the shipped provider set from the local repository
+// under repoDir. Versions come from the image's own contents rather than
+// separate configuration, so adding a provider (e.g. AWS) is purely a
+// matter of adding it to appliance/assets.lock.
+func DiscoverShipped(repoDir string) (*Shipped, error) {
+	entries, err := os.ReadDir(repoDir)
+	if err != nil {
+		return nil, err
 	}
+	shipped := &Shipped{Infrastructure: map[string]string{}}
+	versions := map[string]string{}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		v, err := singleVersion(filepath.Join(repoDir, e.Name()))
+		if err != nil {
+			return nil, err
+		}
+		versions[e.Name()] = v
+		if name, ok := strings.CutPrefix(e.Name(), infraLabelPrefix); ok {
+			shipped.Infrastructure[name] = v
+		}
+	}
+	shipped.CAPIVersion = versions[coreLabel]
+	if shipped.CAPIVersion == "" || versions[bootstrapLabel] != shipped.CAPIVersion || versions[controlPlaneLabel] != shipped.CAPIVersion {
+		return nil, fmt.Errorf("%s must ship %s, %s and %s at one version", repoDir, coreLabel, bootstrapLabel, controlPlaneLabel)
+	}
+	return shipped, nil
+}
+
+func singleVersion(dir string) (string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return "", err
+	}
+	var versions []string
+	for _, e := range entries {
+		if e.IsDir() {
+			versions = append(versions, e.Name())
+		}
+	}
+	if len(versions) != 1 {
+		return "", fmt.Errorf("%s: want exactly one version directory, found %v", dir, versions)
+	}
+	return versions[0], nil
+}
+
+// Desired is the provider set to install: the core Cluster API providers,
+// plus the infrastructure providers enabled in the web UI. Enabled names
+// this image doesn't ship are returned in unknown rather than failing the
+// whole set.
+func (s *Shipped) Desired(enabled []string) (providers []Provider, unknown []string) {
+	providers = []Provider{
+		{Type: "CoreProvider", Name: "cluster-api", Version: s.CAPIVersion},
+		{Type: "BootstrapProvider", Name: "kubeadm", Version: s.CAPIVersion},
+		{Type: "ControlPlaneProvider", Name: "kubeadm", Version: s.CAPIVersion},
+	}
+	seen := map[string]bool{}
+	for _, name := range enabled {
+		if seen[name] {
+			continue
+		}
+		seen[name] = true
+		v, ok := s.Infrastructure[name]
+		if !ok {
+			unknown = append(unknown, name)
+			continue
+		}
+		providers = append(providers, Provider{Type: "InfrastructureProvider", Name: name, Version: v})
+	}
+	return providers, unknown
 }
 
 // ParseInventory reads `kubectl get providers.clusterctl.cluster.x-k8s.io -A
@@ -57,14 +144,14 @@ func ParseInventory(raw []byte) ([]Provider, error) {
 }
 
 // PlanClusterctl returns the clusterctl invocations (without the global
-// --config/--kubeconfig flags) that bring installed up to pinned: an `init`
+// --config/--kubeconfig flags) that bring installed up to desired: an `init`
 // for providers that are missing entirely and an `upgrade apply` for ones
-// older than pinned. Providers already newer than pinned are left alone -
+// older than desired. Providers already newer than desired are left alone -
 // e.g. a management cluster migrated from a setup that was ahead of this
 // image - and reported in skipped so the caller can warn.
-func PlanClusterctl(installed, pinned []Provider) (cmds [][]string, skipped []string, err error) {
+func PlanClusterctl(installed, desired []Provider) (cmds [][]string, skipped []string, err error) {
 	var initArgs, upgradeArgs []string
-	for _, want := range pinned {
+	for _, want := range desired {
 		flag, ok := providerFlags[want.Type]
 		if !ok {
 			return nil, nil, fmt.Errorf("unknown provider type %q", want.Type)

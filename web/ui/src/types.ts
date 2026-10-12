@@ -1,19 +1,3 @@
-/*
- * Copyright 2026
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
-
 // These mirror bench.goauthentik.io/v1alpha1 (api/v1alpha1/*_types.go)
 // deliberately partially: only the fields this UI renders or offers a guided
 // form for. cmd/apiserver passes CRs through untouched and the CRD schema
@@ -364,4 +348,61 @@ export interface TraceTarget {
 /** readyCondition is the one condition every list view renders. */
 export function readyCondition(conditions?: Condition[]): Condition | undefined {
   return conditions?.find(c => c.type === 'Ready');
+}
+
+// -- Infrastructure (internal/api/infrastructure.go, incus.go)
+
+export interface InfrastructureProviderInfo {
+  // clusterctl provider name, e.g. "incus".
+  id: string;
+  displayName: string;
+  // The WorkloadCluster spec.provider value this provider backs; absent when
+  // akbench can install it but not provision clusters with it yet.
+  clusterProvider?: InfrastructureProvider;
+  installedVersion?: string;
+  // What the appliance would install; absent outside the appliance.
+  availableVersion?: string;
+  enabled: boolean;
+}
+
+export interface Infrastructure {
+  // True inside the appliance, where providers are enabled from the UI.
+  managed: boolean;
+  providers: InfrastructureProviderInfo[];
+  syncError?: string;
+  syncedAt?: string;
+}
+
+export interface IncusCredential {
+  name: string;
+  server: string;
+  project?: string;
+  serverCert?: string;
+  insecureSkipVerify: boolean;
+  clientCert?: string;
+  clientCertFingerprint?: string;
+  hasClientKey: boolean;
+  usedBy: string[];
+  // False for a Secret created outside the UI that a cluster references.
+  labeled: boolean;
+}
+
+export interface IncusCredentialInput {
+  name?: string;
+  server: string;
+  project?: string;
+  serverCert?: string;
+  insecureSkipVerify: boolean;
+  clientCert?: string;
+  clientKey?: string;
+  regenerateClientCert?: boolean;
+}
+
+export interface IncusProbe {
+  reachable: boolean;
+  trusted: boolean;
+  serverVersion?: string;
+  serverCert?: string;
+  serverCertFingerprint?: string;
+  message?: string;
 }
