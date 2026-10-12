@@ -36,7 +36,8 @@ func crossDeploymentAntiAffinityTerm(deploymentName string) corev1.PodAffinityTe
 				{Key: benchv1alpha1.LabelDeployment, Operator: metav1.LabelSelectorOpNotIn, Values: []string{deploymentName}},
 			},
 		},
-		TopologyKey: topologyKeyHostname,
+		TopologyKey:       topologyKeyHostname,
+		NamespaceSelector: allNamespaces(),
 	}
 }
 
@@ -50,6 +51,15 @@ func sameDeploymentAntiAffinityTerm(deploymentName string) corev1.PodAffinityTer
 		LabelSelector: &metav1.LabelSelector{
 			MatchLabels: DeploymentLabels(deploymentName),
 		},
-		TopologyKey: topologyKeyHostname,
+		TopologyKey:       topologyKeyHostname,
+		NamespaceSelector: allNamespaces(),
 	}
+}
+
+// allNamespaces widens a PodAffinityTerm to every namespace. Without it a
+// term only ever matches pods in the scheduled pod's own namespace - and
+// every deployment (plus the k6 runners, in the TestCase's namespace) lives
+// in a namespace of its own, so both terms above silently matched nothing.
+func allNamespaces() *metav1.LabelSelector {
+	return &metav1.LabelSelector{}
 }

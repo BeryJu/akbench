@@ -7,6 +7,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
@@ -170,9 +171,31 @@ func (p K6WorkloadParams) volumes() ([]corev1.Volume, []corev1.VolumeMount) {
 	return volumes, mounts
 }
 
+// DefaultRunnerResources is what a k6 container gets when its TestCase sets
+// no runnerResources. The CPU request keeps the load generator from being
+// starved by a co-scheduled pod (a starved k6 under-reports throughput and
+// over-reports latency); there is deliberately no CPU limit, since CFS
+// throttling would skew the numbers the same way. Memory is capped at the
+// request so an oversized VU count OOMs loudly instead of swapping.
+func DefaultRunnerResources() corev1.ResourceRequirements {
+	return corev1.ResourceRequirements{
+		Requests: corev1.ResourceList{
+			corev1.ResourceCPU:    resource.MustParse("1"),
+			corev1.ResourceMemory: resource.MustParse("512Mi"),
+		},
+		Limits: corev1.ResourceList{
+			corev1.ResourceMemory: resource.MustParse("512Mi"),
+		},
+	}
+}
+
 // PodTemplate builds the k6 pod template shared by both the Quick Job and the
 // Burn Deployment.
 func (p K6WorkloadParams) PodTemplate() corev1.PodTemplateSpec {
+	resources := DefaultRunnerResources()
+	if p.TestCase.Spec.RunnerResources != nil {
+		resources = *p.TestCase.Spec.RunnerResources
+	}
 	volumes, mounts := p.volumes()
 	labels := map[string]string{
 		benchv1alpha1.LabelTestCase:   p.TestCase.Name,
@@ -190,6 +213,7 @@ func (p K6WorkloadParams) PodTemplate() corev1.PodTemplateSpec {
 					Args:         p.Args(),
 					Env:          p.EnvVars(),
 					VolumeMounts: mounts,
+					Resources:    resources,
 				},
 			},
 			Volumes: volumes,

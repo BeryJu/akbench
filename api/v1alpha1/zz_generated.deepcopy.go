@@ -5,7 +5,7 @@
 package v1alpha1
 
 import (
-	v1 "k8s.io/api/core/v1"
+	"k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 )
@@ -450,6 +450,11 @@ func (in *TestCaseSpec) DeepCopyInto(out *TestCaseSpec) {
 		for key, val := range *in {
 			(*out)[key] = val
 		}
+	}
+	if in.RunnerResources != nil {
+		in, out := &in.RunnerResources, &out.RunnerResources
+		*out = new(v1.ResourceRequirements)
+		(*in).DeepCopyInto(*out)
 	}
 	if in.Seed != nil {
 		in, out := &in.Seed, &out.Seed

@@ -110,6 +110,12 @@ type TestCaseSpec struct {
 	// +optional
 	ExtraTags map[string]string `json:"extraTags,omitempty"`
 
+	// runnerResources sets the k6 container's resources. Defaults to a
+	// 1 CPU / 512Mi reservation with no CPU limit (see
+	// render.DefaultRunnerResources) - raise it for high VU counts.
+	// +optional
+	RunnerResources *corev1.ResourceRequirements `json:"runnerResources,omitempty"`
+
 	// seed fixes the pseudo-random sequence a randomized script (e.g. the
 	// built-in "mixed-usage" template) draws from, passed to k6 as SEED.
 	// Defaults to a value derived from this TestCase's name (see

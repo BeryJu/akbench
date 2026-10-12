@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
@@ -118,5 +119,42 @@ func TestEnvVarsSeedIsFixedPerTestCase(t *testing.T) {
 	tc.Spec.Seed = &explicit
 	if got := seedOf(K6WorkloadParams{TestCase: tc}); got != "42" {
 		t.Errorf("SEED = %s, want explicit spec.seed 42", got)
+	}
+}
+
+// TestPodTemplateRunnerResources guards the k6 container's CPU reservation
+// (an unreserved load generator gets starved and skews every number it
+// reports) and that a TestCase's runnerResources override replaces it.
+func TestPodTemplateRunnerResources(t *testing.T) {
+	p := K6WorkloadParams{TestCase: &benchv1alpha1.TestCase{Name: "login-a"}}
+	got := p.PodTemplate().Spec.Containers[0].Resources
+	if got.Requests.Cpu().String() != "1" {
+		t.Errorf("default cpu request = %s, want 1", got.Requests.Cpu())
+	}
+	if _, ok := got.Limits[corev1.ResourceCPU]; ok {
+		t.Error("default has a cpu limit, want none (CFS throttling skews results)")
+	}
+
+	override := DefaultRunnerResources()
+	override.Requests[corev1.ResourceCPU] = resource.MustParse("4")
+	p.TestCase.Spec.RunnerResources = &override
+	if got := p.PodTemplate().Spec.Containers[0].Resources.Requests.Cpu().String(); got != "4" {
+		t.Errorf("overridden cpu request = %s, want 4", got)
+	}
+}
+
+// TestIsolationTermsSpanNamespaces guards the bug that let deployments (and
+// k6 runners) share nodes in a live cluster: a PodAffinityTerm without a
+// namespaceSelector only matches pods in its own namespace, and every
+// deployment and the k6 runners each live in a namespace of their own.
+func TestIsolationTermsSpanNamespaces(t *testing.T) {
+	for name, term := range map[string]corev1.PodAffinityTerm{
+		"cross": crossDeploymentAntiAffinityTerm("topo-a"),
+		"same":  sameDeploymentAntiAffinityTerm("topo-a"),
+	} {
+		sel := term.NamespaceSelector
+		if sel == nil || len(sel.MatchLabels) != 0 || len(sel.MatchExpressions) != 0 {
+			t.Errorf("%s term namespaceSelector = %v, want empty (all namespaces)", name, sel)
+		}
 	}
 }

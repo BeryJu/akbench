@@ -37,6 +37,16 @@ type CompareMetric struct {
 	Better string `json:"better"`
 }
 
+// fill renders Query for one label selector and range window. A query with
+// a range selector ("[%s]" or "[%[2]s]") takes both; one without (a plain
+// gauge) takes only the selector.
+func (m CompareMetric) fill(selector, window string) string {
+	if strings.Contains(m.Query, "[%") {
+		return fmt.Sprintf(m.Query, selector, window)
+	}
+	return fmt.Sprintf(m.Query, selector)
+}
+
 // betterHigher/betterLower are CompareMetric.Better's two directions.
 const (
 	betterHigher = "higher"
@@ -87,7 +97,12 @@ var compareMetrics = []CompareMetric{
 	},
 	{
 		Key: "http_req_failed", Label: "Failed requests", Unit: "ratio", Better: betterLower,
-		Query: `avg by (target) (k6_http_req_failed_rate{%s})`,
+		// From the counter, not k6_http_req_failed_rate: that gauge is k6's
+		// cumulative ratio since the pod started, so on a long Burn it
+		// barely moves no matter what the window holds. Same expression the
+		// k6 dashboard and the error-rate alert use.
+		Query: `sum by (target) (rate(k6_http_reqs_total{%[1]s, expected_response="false"}[%[2]s]))` +
+			` / sum by (target) (rate(k6_http_reqs_total{%[1]s}[%[2]s]))`,
 	},
 	{
 		Key: "checks", Label: "Passing checks", Unit: "ratio", Better: betterHigher,
@@ -348,12 +363,7 @@ func (s *Server) compare(w http.ResponseWriter, r *http.Request) {
 		}
 
 		for _, m := range compareMetrics {
-			query := m.Query
-			if strings.Count(query, "%s") == 2 {
-				query = fmt.Sprintf(query, selector, window)
-			} else {
-				query = fmt.Sprintf(query, selector)
-			}
+			query := m.fill(selector, window)
 			for _, baseURL := range baseURLs {
 				samples, err := s.promInstantMulti(r.Context(), baseURL, query, at)
 				if err != nil {
@@ -468,12 +478,7 @@ func (s *Server) metricsRange(w http.ResponseWriter, r *http.Request) {
 	resp := rangeResponse{Metric: *metric}
 	for _, id := range testids {
 		selector := fmt.Sprintf("testid=%q", id)
-		query := metric.Query
-		if strings.Count(query, "%s") == 2 {
-			query = fmt.Sprintf(query, selector, window)
-		} else {
-			query = fmt.Sprintf(query, selector)
-		}
+		query := metric.fill(selector, window)
 		var series []promSeries
 		for _, baseURL := range s.prometheusURLsForTestID(r.Context(), id) {
 			got, err := s.promRangeMulti(r.Context(), baseURL, query, start, end, step)
