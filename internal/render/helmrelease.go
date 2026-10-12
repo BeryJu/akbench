@@ -384,11 +384,9 @@ func HelmRelease(t *benchv1alpha1.AuthentikDeployment, kubeConfigSecretName stri
 			// helm-controller's own default (5m) isn't enough on a cold
 			// cluster: pulling the authentik/postgresql images and letting
 			// postgres finish its first-boot initdb can alone take longer
-			// than that, well before authentik itself is even up - and once
-			// an install attempt exceeds this and exhausts retries,
-			// helm-controller marks the release Stalled permanently (no
-			// more automatic retries) even if the workload goes healthy
-			// moments later.
+			// than that, well before authentik itself is even up. A timed
+			// out attempt is retried (retryOnFailure), but each one burns
+			// this long first.
 			Timeout: &metav1.Duration{Duration: helmInstallTimeout},
 			// Explicit, rather than Flux's default "[TargetNamespace-]Name"
 			// composition, so ServiceEndpoint's "<release>-server" naming
@@ -415,6 +413,33 @@ func HelmRelease(t *benchv1alpha1.AuthentikDeployment, kubeConfigSecretName stri
 			SecretRef: &fluxmeta.SecretKeyReference{Name: kubeConfigSecretName},
 		}
 	}
+	return retryOnFailure(hr)
+}
+
+// helmRetryInterval is how long helm-controller waits before retrying a
+// failed install/upgrade (retryOnFailure).
+const helmRetryInterval = 2 * time.Minute
+
+// retryOnFailure makes helm-controller keep retrying a failed install or
+// upgrade every helmRetryInterval, instead of its default
+// (RemediateOnFailure with zero retries): one failure - a rollout timing
+// out while a pool scales up from zero, a volume that can't attach yet, a
+// slow image pull - left the HelmRelease Stalled for good, needing a manual
+// `flux reconcile --force` even once the cause had cleared. RetryOnFailure
+// re-runs the same action without uninstalling or rolling back first, so
+// nothing already deployed (e.g. an embedded Postgres' data) is churned.
+// Every HelmRelease this package renders goes through it; existing
+// Install/Upgrade settings are kept.
+func retryOnFailure(hr *helmv2.HelmRelease) *helmv2.HelmRelease {
+	interval := &metav1.Duration{Duration: helmRetryInterval}
+	if hr.Spec.Install == nil {
+		hr.Spec.Install = &helmv2.Install{}
+	}
+	hr.Spec.Install.Strategy = &helmv2.InstallStrategy{Name: string(helmv2.ActionStrategyRetryOnFailure), RetryInterval: interval}
+	if hr.Spec.Upgrade == nil {
+		hr.Spec.Upgrade = &helmv2.Upgrade{}
+	}
+	hr.Spec.Upgrade.Strategy = &helmv2.UpgradeStrategy{Name: string(helmv2.ActionStrategyRetryOnFailure), RetryInterval: interval}
 	return hr
 }
 

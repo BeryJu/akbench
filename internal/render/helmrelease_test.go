@@ -2,6 +2,7 @@ package render
 
 import (
 	"encoding/json"
+	helmv2 "github.com/fluxcd/helm-controller/api/v2"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -445,4 +446,33 @@ func mustValues(t *testing.T, topo *benchv1alpha1.AuthentikDeployment) Authentik
 		t.Fatalf("HelmValues: %v", err)
 	}
 	return decodeValues(t, raw.Raw)
+}
+
+// Every HelmRelease this package renders must retry a failed install or
+// upgrade on its own (retryOnFailure) - helm-controller's default stalls
+// it for good after one failure.
+func TestHelmReleasesRetryOnFailure(t *testing.T) {
+	wc := addonTestCluster("c1")
+	for name, hr := range map[string]*helmv2.HelmRelease{
+		"authentik":             HelmRelease(exampleDeployment(), "c1-kubeconfig", nil),
+		"cni":                   CNIHelmRelease(wc),
+		"csi-incus":             CSIIncusHelmRelease(wc, nil),
+		"metrics-server":        MetricsServerHelmRelease(wc, nil),
+		"kube-prometheus-stack": KubePrometheusStackHelmRelease(wc, nil),
+		"descheduler":           DeschedulerHelmRelease(wc, nil),
+		"cluster-autoscaler":    ClusterAutoscalerHelmRelease(wc, nil),
+	} {
+		install, upgrade := hr.Spec.Install, hr.Spec.Upgrade
+		if install == nil || install.Strategy == nil || install.Strategy.Name != string(helmv2.ActionStrategyRetryOnFailure) || install.Strategy.RetryInterval == nil {
+			t.Errorf("%s: install strategy = %+v", name, install)
+		}
+		if upgrade == nil || upgrade.Strategy == nil || upgrade.Strategy.Name != string(helmv2.ActionStrategyRetryOnFailure) || upgrade.Strategy.RetryInterval == nil {
+			t.Errorf("%s: upgrade strategy = %+v", name, upgrade)
+		}
+	}
+	// Existing install/upgrade settings survive.
+	kps := KubePrometheusStackHelmRelease(wc, nil)
+	if !kps.Spec.Install.CreateNamespace || kps.Spec.Install.CRDs != helmv2.CreateReplace || kps.Spec.Upgrade.CRDs != helmv2.CreateReplace {
+		t.Errorf("kube-prometheus-stack lost its install/upgrade settings: %+v %+v", kps.Spec.Install, kps.Spec.Upgrade)
+	}
 }

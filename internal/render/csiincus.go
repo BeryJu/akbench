@@ -150,7 +150,7 @@ func CSIIncusHelmValues(source *corev1.Secret, wc *benchv1alpha1.WorkloadCluster
 // onto a workload cluster remotely, through wc's "<cluster>-kubeconfig" Secret CAPI writes (see
 // KubeconfigSecretName). Its object name is per-cluster (AddonHelmReleaseName).
 func CSIIncusHelmRelease(wc *benchv1alpha1.WorkloadCluster, values *apiextensionsv1.JSON) *helmv2.HelmRelease {
-	return &helmv2.HelmRelease{
+	return retryOnFailure(&helmv2.HelmRelease{
 		Name:      AddonHelmReleaseName(wc, CSIIncusHelmReleaseName),
 		Namespace: wc.Namespace,
 		Spec: helmv2.HelmReleaseSpec{
@@ -174,5 +174,5 @@ func CSIIncusHelmRelease(wc *benchv1alpha1.WorkloadCluster, values *apiextension
 				SecretRef: &fluxmeta.SecretKeyReference{Name: KubeconfigSecretName(wc)},
 			},
 		},
-	}
+	})
 }

@@ -49,7 +49,7 @@ func CNIHelmRepository(namespace string) *sourcev1.HelmRepository {
 // CreateNamespace is set since, unlike csi-incus's kube-system, kube-flannel
 // doesn't already exist on a fresh kubeadm cluster.
 func CNIHelmRelease(wc *benchv1alpha1.WorkloadCluster) *helmv2.HelmRelease {
-	return &helmv2.HelmRelease{
+	return retryOnFailure(&helmv2.HelmRelease{
 		Name:      AddonHelmReleaseName(wc, CNIHelmReleaseName),
 		Namespace: wc.Namespace,
 		Spec: helmv2.HelmReleaseSpec{
@@ -73,5 +73,5 @@ func CNIHelmRelease(wc *benchv1alpha1.WorkloadCluster) *helmv2.HelmRelease {
 				SecretRef: &fluxmeta.SecretKeyReference{Name: KubeconfigSecretName(wc)},
 			},
 		},
-	}
+	})
 }

@@ -98,7 +98,7 @@ func DeschedulerHelmValues(wc *benchv1alpha1.WorkloadCluster) (*apiextensionsv1.
 // descheduler onto a workload cluster remotely, through wc's "<cluster>-kubeconfig" Secret CAPI writes (see
 // KubeconfigSecretName). Its object name is per-cluster (AddonHelmReleaseName).
 func DeschedulerHelmRelease(wc *benchv1alpha1.WorkloadCluster, values *apiextensionsv1.JSON) *helmv2.HelmRelease {
-	return &helmv2.HelmRelease{
+	return retryOnFailure(&helmv2.HelmRelease{
 		Name:      AddonHelmReleaseName(wc, DeschedulerHelmReleaseName),
 		Namespace: wc.Namespace,
 		Spec: helmv2.HelmReleaseSpec{
@@ -122,5 +122,5 @@ func DeschedulerHelmRelease(wc *benchv1alpha1.WorkloadCluster, values *apiextens
 				SecretRef: &fluxmeta.SecretKeyReference{Name: KubeconfigSecretName(wc)},
 			},
 		},
-	}
+	})
 }

@@ -309,7 +309,7 @@ func KubePrometheusStackHelmValues(wc *benchv1alpha1.WorkloadCluster) (*apiexten
 // later should actually update them rather than silently stay on whatever
 // version first got installed.
 func KubePrometheusStackHelmRelease(wc *benchv1alpha1.WorkloadCluster, values *apiextensionsv1.JSON) *helmv2.HelmRelease {
-	return &helmv2.HelmRelease{
+	return retryOnFailure(&helmv2.HelmRelease{
 		Name:      AddonHelmReleaseName(wc, KubePrometheusStackHelmReleaseName),
 		Namespace: wc.Namespace,
 		Spec: helmv2.HelmReleaseSpec{
@@ -335,5 +335,5 @@ func KubePrometheusStackHelmRelease(wc *benchv1alpha1.WorkloadCluster, values *a
 				SecretRef: &fluxmeta.SecretKeyReference{Name: KubeconfigSecretName(wc)},
 			},
 		},
-	}
+	})
 }

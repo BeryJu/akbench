@@ -81,7 +81,7 @@ func MetricsServerHelmValues(wc *benchv1alpha1.WorkloadCluster) (*apiextensionsv
 // the "<cluster>-kubeconfig" Secret CAPI writes (see
 // render.KubeconfigSecretName).
 func MetricsServerHelmRelease(wc *benchv1alpha1.WorkloadCluster, values *apiextensionsv1.JSON) *helmv2.HelmRelease {
-	return &helmv2.HelmRelease{
+	return retryOnFailure(&helmv2.HelmRelease{
 		Name:      AddonHelmReleaseName(wc, MetricsServerHelmReleaseName),
 		Namespace: wc.Namespace,
 		Spec: helmv2.HelmReleaseSpec{
@@ -105,5 +105,5 @@ func MetricsServerHelmRelease(wc *benchv1alpha1.WorkloadCluster, values *apiexte
 				SecretRef: &fluxmeta.SecretKeyReference{Name: KubeconfigSecretName(wc)},
 			},
 		},
-	}
+	})
 }

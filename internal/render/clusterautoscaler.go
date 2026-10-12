@@ -152,7 +152,7 @@ func ClusterAutoscalerHelmValues(wc *benchv1alpha1.WorkloadCluster) (*apiextensi
 // in this package does.
 func ClusterAutoscalerHelmRelease(wc *benchv1alpha1.WorkloadCluster, values *apiextensionsv1.JSON) *helmv2.HelmRelease {
 	name := ClusterAutoscalerHelmReleaseName(wc)
-	return &helmv2.HelmRelease{
+	return retryOnFailure(&helmv2.HelmRelease{
 		Name:      name,
 		Namespace: wc.Namespace,
 		Spec: helmv2.HelmReleaseSpec{
@@ -174,5 +174,5 @@ func ClusterAutoscalerHelmRelease(wc *benchv1alpha1.WorkloadCluster, values *api
 			Install:         &helmv2.Install{CreateNamespace: true},
 			Values:          values,
 		},
-	}
+	})
 }
