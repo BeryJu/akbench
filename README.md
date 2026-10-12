@@ -79,13 +79,15 @@ Implemented so far:
 - **Fixtures**: `fixtures/gen-blueprint.py` ported unchanged.
 - **Test-case templates**: `TestCaseTemplate` is a real, UI-editable
   CRD (list/create/edit/delete, Monaco editor for the script) - the operator
-  seeds three built-in ones at startup (`login`; `oauth-oidc`, driving a
+  seeds four built-in ones at startup (`login`; `oauth-oidc`, driving a
   real OAuth2/OIDC authorization-code round trip through
   [BeryJu/oidc-test-client](https://github.com/BeryJu/oidc-test-client);
   `mixed-usage`, a weighted mix of logins, logins + API browsing, failed
   logins and flow page loads, drawn from a PRNG seeded per TestCase via
   `spec.seed` - defaulting to a hash of the TestCase name - so every run
-  replays the same sequence),
+  replays the same sequence; `breakpoint`, a test-until-failure login run
+  that adds `spec.vus` VUs every 2 minutes and aborts once authentik's error
+  rate or p95 latency crosses its thresholds),
   sourced from the exact same embedded `k6/scripts/*.ts` files the operator
   binary carries (create-only, so editing one in the UI is never
   clobbered by a later restart). A SAML template slot is reserved but not
