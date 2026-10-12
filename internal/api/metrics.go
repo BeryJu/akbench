@@ -667,6 +667,7 @@ type promVectorResponse struct {
 type promSample struct {
 	Target string
 	Value  float64
+	Labels map[string]string
 }
 
 // promInstantMulti runs an instant query and returns every distinct sample in
@@ -715,7 +716,7 @@ func (s *Server) promInstantMulti(ctx context.Context, baseURL, query, at string
 		if math.IsNaN(value) || math.IsInf(value, 0) {
 			continue
 		}
-		samples = append(samples, promSample{Target: result.Metric["target"], Value: value})
+		samples = append(samples, promSample{Target: result.Metric["target"], Value: value, Labels: result.Metric})
 	}
 	return samples, nil
 }

@@ -158,6 +158,7 @@ func (s *Server) Router() http.Handler {
 			r.Get("/metrics/resources", s.listResourceMetrics)
 
 			r.Get("/alerts", s.listAlerts)
+			r.Get("/placement", s.listPlacement)
 
 			r.Get("/shell/contexts", s.listShellContexts)
 			r.Post("/shell/sessions", s.createShellSession)

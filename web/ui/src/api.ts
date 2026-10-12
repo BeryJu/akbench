@@ -24,6 +24,7 @@ import {
   AuthentikDeploymentSpec,
   Cluster,
   CompareResponse,
+  PodPlacement,
   RangeResponse,
   TestCase,
   TestCaseSpec,
@@ -214,6 +215,7 @@ export const api = {
   // -- Alerts (internal/api/alerts.go) - aggregated across every workload
   // cluster's own Alertmanager, there is no central instance.
   alerts: () => request<List<Alert>>('/api/v1/alerts').then(r => r.items ?? []),
+  placement: () => request<List<PodPlacement>>('/api/v1/placement').then(r => r.items ?? []),
 
   // -- Shell (internal/api/shell.go)
   shellContexts: () => request<List<ShellContext>>('/api/v1/shell/contexts').then(r => r.items ?? []),

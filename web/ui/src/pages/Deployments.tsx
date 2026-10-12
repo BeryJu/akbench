@@ -20,6 +20,7 @@ import { api } from '../api';
 import { CodeEditor } from '../components/CodeEditor';
 import { MetricsGrid } from '../components/MetricsChart';
 import { ObjectYaml } from '../components/ObjectYaml';
+import { NodePlacement } from '../components/Placement';
 import { ConditionList, StatusBadge } from '../components/Status';
 import { Alert, confirmAndRun, Empty, errorMessage, Field, Page, Table } from '../components/ui';
 import { toast } from '../components/Toast';
@@ -614,6 +615,9 @@ export function DeploymentViewPage() {
               </Link>
             )}
           </div>
+
+          <h2>Node placement</h2>
+          <NodePlacement deployment={name} />
         </>
       )}
 

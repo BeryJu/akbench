@@ -101,16 +101,11 @@ func (s *Server) deploymentTargetsForTestID(ctx context.Context, testid string) 
 		if targetName == "" {
 			targetName = topo.Name
 		}
-		if topo.Spec.ClusterRef.Name == "" {
-			targets = append(targets, deploymentTarget{PrometheusURL: s.cfg.PrometheusURL, Namespace: topo.Spec.Namespace, Target: targetName})
+		promURL := s.prometheusURLForCluster(ctx, topo.Spec.ClusterRef.Name)
+		if topo.Spec.ClusterRef.Name != "" && promURL == "" {
 			continue
 		}
-		var wc benchv1alpha1.WorkloadCluster
-		wcKey := types.NamespacedName{Name: topo.Spec.ClusterRef.Name, Namespace: s.cfg.Namespace}
-		if err := s.client.Get(ctx, wcKey, &wc); err != nil || wc.Status.PrometheusURL == "" {
-			continue
-		}
-		targets = append(targets, deploymentTarget{PrometheusURL: wc.Status.PrometheusURL, Namespace: topo.Spec.Namespace, Target: targetName})
+		targets = append(targets, deploymentTarget{PrometheusURL: promURL, Namespace: topo.Spec.Namespace, Target: targetName})
 	}
 	return targets
 }

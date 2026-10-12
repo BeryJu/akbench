@@ -16,6 +16,7 @@
 
 import { Link } from 'react-router';
 import { api } from '../api';
+import { NodePlacement } from '../components/Placement';
 import { Badge } from '../components/Status';
 import { buildTargetRows, burningFor, TargetTable } from '../components/Targets';
 import { Alert, Empty, formatTimestamp, Page, Stat, Table } from '../components/ui';
@@ -192,6 +193,16 @@ export function DashboardPage() {
           </div>
         </>
       )}
+
+      <div className="section-head">
+        <div>
+          <h2>Node placement</h2>
+          <div className="muted">
+            Which node each deployment's pods run on. An outlined node holds more than one deployment.
+          </div>
+        </div>
+      </div>
+      <NodePlacement />
 
       <div className="section-head">
         <h2>Recent quick runs</h2>

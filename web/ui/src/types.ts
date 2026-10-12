@@ -42,6 +42,15 @@ export interface Alert {
   generatorURL?: string;
 }
 
+// PodPlacement is one deployment pod and the node it was scheduled onto
+// (internal/api/placement.go, read from each cluster's kube-state-metrics).
+export interface PodPlacement {
+  deployment: string;
+  cluster: string;
+  node: string;
+  pod: string;
+}
+
 export interface ObjectMeta {
   name: string;
   namespace?: string;

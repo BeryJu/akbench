@@ -192,3 +192,9 @@ details > summary { cursor: pointer; font-weight: 600; margin: 18px 0 8px; }
 .shell-panes { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .shell-pane { flex: 1; min-height: 0; display: none; flex-direction: column; }
 .shell-pane.active { display: flex; }
+
+.placement { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; padding: 12px; }
+.placement-node { border: 1px solid var(--border); border-radius: var(--radius); padding: 8px; overflow-wrap: anywhere; font-size: 12.5px; }
+.placement-node.shared { border-color: var(--warn); }
+.placement-pods { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.placement-pod { display: inline-block; width: 12px; height: 12px; border-radius: 3px; }
