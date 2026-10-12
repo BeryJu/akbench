@@ -9,6 +9,39 @@ import (
 	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
 )
 
+// TestCNPGClusterTargetsAuthentikPool guards the manual
+// corev1.Toleration->unstructured conversion in CNPGCluster: a
+// WorkloadCluster with an authentik-role pool must produce a real
+// spec.affinity.nodeSelector/tolerations on the rendered Cluster, in the
+// exact shape CNPG's own CRD expects.
+func TestCNPGClusterTargetsAuthentikPool(t *testing.T) {
+	topo := &benchv1alpha1.AuthentikDeployment{
+		Name: "authentik-1",
+		Spec: benchv1alpha1.AuthentikDeploymentSpec{
+			Namespace:  "authentik-1",
+			ClusterRef: corev1.LocalObjectReference{Name: "wc-1"},
+			Postgres:   benchv1alpha1.PostgresSpec{Mode: benchv1alpha1.PostgresCNPG},
+		},
+	}
+	wc := &benchv1alpha1.WorkloadCluster{Spec: benchv1alpha1.WorkloadClusterSpec{
+		WorkerPools: []benchv1alpha1.WorkerPoolSpec{{Name: "ak", Role: benchv1alpha1.WorkerPoolRoleAuthentik}},
+	}}
+	u := CNPGCluster(topo, wc)
+
+	sel, _, _ := unstructured.NestedStringMap(u.Object, "spec", "affinity", "nodeSelector")
+	if sel[NodePoolLabel] != "authentik" {
+		t.Errorf("spec.affinity.nodeSelector[%s] = %q, want authentik", NodePoolLabel, sel[NodePoolLabel])
+	}
+	tolerations, _, _ := unstructured.NestedSlice(u.Object, "spec", "affinity", "tolerations")
+	if len(tolerations) != 1 {
+		t.Fatalf("spec.affinity.tolerations = %v, want exactly one", tolerations)
+	}
+	tol, ok := tolerations[0].(map[string]any)
+	if !ok || tol["key"] != NodePoolLabel || tol["value"] != "authentik" || tol["effect"] != string(corev1.TaintEffectNoSchedule) {
+		t.Errorf("tolerations[0] = %+v, want a toleration matching {%s authentik NoSchedule}", tolerations[0], NodePoolLabel)
+	}
+}
+
 func TestCNPGClusterDefaults(t *testing.T) {
 	topo := &benchv1alpha1.AuthentikDeployment{
 		Name: "authentik-1",
@@ -18,7 +51,7 @@ func TestCNPGClusterDefaults(t *testing.T) {
 			Postgres:   benchv1alpha1.PostgresSpec{Mode: benchv1alpha1.PostgresCNPG},
 		},
 	}
-	u := CNPGCluster(topo)
+	u := CNPGCluster(topo, nil)
 
 	if got, want := u.GetName(), "authentik-1-postgres"; got != want {
 		t.Errorf("name = %q, want %q", got, want)
@@ -57,7 +90,7 @@ func TestCNPGClusterNoPodMonitorWithoutClusterRef(t *testing.T) {
 			Postgres:  benchv1alpha1.PostgresSpec{Mode: benchv1alpha1.PostgresCNPG},
 		},
 	}
-	u := CNPGCluster(topo)
+	u := CNPGCluster(topo, nil)
 
 	if _, found, _ := unstructured.NestedBool(u.Object, "spec", "monitoring", "enablePodMonitor"); found {
 		t.Error("spec.monitoring.enablePodMonitor was set with no clusterRef - the PodMonitor CRD won't exist on the management cluster")
@@ -74,7 +107,7 @@ func TestCNPGClusterHonorsSpec(t *testing.T) {
 			},
 		},
 	}
-	u := CNPGCluster(topo)
+	u := CNPGCluster(topo, nil)
 
 	instances, _, _ := unstructured.NestedInt64(u.Object, "spec", "instances")
 	if instances != 5 {
@@ -98,7 +131,7 @@ func TestCNPGClusterCrossDeploymentIsolation(t *testing.T) {
 			Postgres:  benchv1alpha1.PostgresSpec{Mode: benchv1alpha1.PostgresCNPG},
 		},
 	}
-	u := CNPGCluster(topo)
+	u := CNPGCluster(topo, nil)
 
 	labels, _, _ := unstructured.NestedStringMap(u.Object, "spec", "inheritedMetadata", "labels")
 	if labels["bench.goauthentik.io/deployment"] != "authentik-1" {

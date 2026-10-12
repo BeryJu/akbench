@@ -41,7 +41,22 @@ const (
 	grafanaDatasourcesConfigMapName = GrafanaServiceName + "-datasources"
 	grafanaDashboardsConfigMapName  = GrafanaServiceName + "-dashboards"
 	grafanaProvidersConfigMapName   = GrafanaServiceName + "-providers"
+
+	// GrafanaAdminUser is the one account Grafana has - see GrafanaObjects'
+	// own doc comment for why anonymous access was replaced with this.
+	GrafanaAdminUser = "admin"
 )
+
+// GrafanaAdminSecretName is the *management*-cluster Secret
+// (WorkloadClusterReconciler's own namespace, via ensureRandomSecret) holding
+// this workload cluster's generated Grafana admin password under key
+// "password" - readable by cmd/apiserver (internal/api/grafana_proxy.go,
+// traces.go) without it needing a client to the workload cluster itself,
+// unlike every other per-cluster credential in this project, which normally
+// only the operator ever reads.
+func GrafanaAdminSecretName(wc *benchv1alpha1.WorkloadCluster) string {
+	return wc.Name + "-grafana-admin"
+}
 
 func grafanaLabels() map[string]string {
 	return map[string]string{labelKeyApp: GrafanaServiceName}
@@ -147,18 +162,28 @@ var grafanaDashboardNodes []byte
 // GrafanaObjects returns the single-replica, no-HA Grafana
 // WorkloadClusterReconciler installs onto every workload cluster: datasource/
 // dashboard-provider/dashboard ConfigMaps, a Deployment, and a ClusterIP
-// Service (no NodePort - reached through the k8s API proxy chain, not
-// directly). Anonymous Admin auth (GF_AUTH_ANONYMOUS_ENABLED/
-// GF_AUTH_ANONYMOUS_ORG_ROLE, matching the reference harness's own
-// compose.yml) is what makes embedding a dashboard in an iframe work at all
-// without a login redirect. GF_SERVER_ROOT_URL/GF_SERVER_SERVE_FROM_SUB_PATH
-// are required once Grafana is reached through a proxy subpath - a
-// well-known Grafana-behind-a-reverse-proxy requirement, not something
-// specific to this proxy mechanism - otherwise its own asset/API links
-// break once loaded.
-func GrafanaObjects(wc *benchv1alpha1.WorkloadCluster) []client.Object {
+// Service. Also has a NodePort Service (GrafanaNodePortServiceName) purely so
+// cmd/apiserver's reverse proxy (internal/api/grafana_proxy.go), running on a
+// different cluster entirely, can reach it at all - which means anyone who
+// can reach a node's IP on that port can reach Grafana directly, bypassing
+// cmd/apiserver's own session/bearer-token gate entirely. This used to be
+// covered by anonymous Admin auth (matching the reference harness's own
+// compose.yml, which never needed to consider this - its Grafana was never
+// multi-hop), which made that bypass a full unauthenticated admin panel.
+// Grafana now requires real credentials (GF_SECURITY_ADMIN_USER/PASSWORD,
+// adminPassword generated once by ensureRandomSecret and never sent to a
+// browser): cmd/apiserver injects them as HTTP Basic auth on every request it
+// proxies (see stripProxyCredentials's caller), so the iframe still "just
+// works" with no login prompt, but reaching this NodePort by any other path
+// now hits Grafana's own login screen instead of an open admin session.
+// GF_SERVER_ROOT_URL/GF_SERVER_SERVE_FROM_SUB_PATH are required once Grafana
+// is reached through a proxy subpath - a well-known
+// Grafana-behind-a-reverse-proxy requirement, not something specific to this
+// proxy mechanism - otherwise its own asset/API links break once loaded.
+func GrafanaObjects(wc *benchv1alpha1.WorkloadCluster, adminPassword string) []client.Object {
 	labels := grafanaLabels()
 	rootURL := GrafanaProxyPathPrefix(wc)
+	monitoringNodeSelector, monitoringTolerations := MonitoringPoolPlacement(wc)
 	return []client.Object{
 		&corev1.Namespace{
 			Kind: kindNamespace, APIVersion: apiVersionV1,
@@ -199,8 +224,8 @@ func GrafanaObjects(wc *benchv1alpha1.WorkloadCluster) []client.Object {
 								Name:  "grafana",
 								Image: "grafana/grafana:11.4.0",
 								Env: []corev1.EnvVar{
-									{Name: "GF_AUTH_ANONYMOUS_ENABLED", Value: "true"},
-									{Name: "GF_AUTH_ANONYMOUS_ORG_ROLE", Value: "Admin"},
+									{Name: "GF_SECURITY_ADMIN_USER", Value: GrafanaAdminUser},
+									{Name: "GF_SECURITY_ADMIN_PASSWORD", Value: adminPassword},
 									// Grafana sends "X-Frame-Options: deny" on every
 									// response by default (confirmed live: curl -I
 									// against a stock grafana/grafana:11.4.0 container) -
@@ -234,6 +259,8 @@ func GrafanaObjects(wc *benchv1alpha1.WorkloadCluster) []client.Object {
 								},
 							},
 						},
+						NodeSelector: monitoringNodeSelector,
+						Tolerations:  monitoringTolerations,
 						Volumes: []corev1.Volume{
 							{
 								Name: "datasources",

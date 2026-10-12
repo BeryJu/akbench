@@ -73,7 +73,7 @@ func BlueprintJobName(t *benchv1alpha1.AuthentikDeployment, label, content strin
 // collect a completed import Job on its own; content-hashed names mean
 // these otherwise accumulate one object per distinct blueprint version
 // forever.
-func BlueprintJob(t *benchv1alpha1.AuthentikDeployment, name, sourceConfigMapName, sourceConfigMapKey string) *batchv1.Job {
+func BlueprintJob(t *benchv1alpha1.AuthentikDeployment, wc *benchv1alpha1.WorkloadCluster, name, sourceConfigMapName, sourceConfigMapKey string) *batchv1.Job {
 	targetPath := BlueprintMountPath + "/" + BlueprintFileName
 	sourcePath := blueprintSourceMountPath + "/" + sourceConfigMapKey
 	image := t.Spec.Authentik.Image
@@ -87,6 +87,7 @@ func BlueprintJob(t *benchv1alpha1.AuthentikDeployment, name, sourceConfigMapNam
 		tag = "latest"
 	}
 
+	nodeSelector, tolerations := AuthentikPoolPlacement(wc)
 	return &batchv1.Job{
 		Kind: "Job", APIVersion: "batch/v1",
 		Name: name, Namespace: t.Spec.Namespace,
@@ -97,6 +98,8 @@ func BlueprintJob(t *benchv1alpha1.AuthentikDeployment, name, sourceConfigMapNam
 				ObjectMeta: metav1.ObjectMeta{Labels: DeploymentLabels(t.Name)},
 				Spec: corev1.PodSpec{
 					RestartPolicy: corev1.RestartPolicyNever,
+					NodeSelector:  nodeSelector,
+					Tolerations:   tolerations,
 					// A freshly provisioned csi-incus block volume is
 					// root:root-owned, unwritable by the authentik image's
 					// non-root user without this - the same fix HelmValues

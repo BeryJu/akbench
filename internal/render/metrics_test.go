@@ -7,7 +7,50 @@ import (
 
 	helmv2 "github.com/fluxcd/helm-controller/api/v2"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+
+	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
 )
+
+// TestKubePrometheusStackHelmValuesTargetsMonitoringPool confirms Prometheus/
+// Alertmanager/the operator/kube-state-metrics all get scoped to the
+// cluster's own monitoring-role pool, while prometheus-node-exporter - a
+// DaemonSet that exists specifically to report every node's own metrics,
+// authentik/k6 pools included - is left completely untouched.
+func TestKubePrometheusStackHelmValuesTargetsMonitoringPool(t *testing.T) {
+	wc := &benchv1alpha1.WorkloadCluster{Spec: benchv1alpha1.WorkloadClusterSpec{
+		WorkerPools: []benchv1alpha1.WorkerPoolSpec{{Name: "mon", Role: benchv1alpha1.WorkerPoolRoleMonitoring}},
+	}}
+	raw, err := KubePrometheusStackHelmValues(wc)
+	if err != nil {
+		t.Fatalf("KubePrometheusStackHelmValues: %v", err)
+	}
+	var values map[string]any
+	if err := json.Unmarshal(raw.Raw, &values); err != nil {
+		t.Fatalf("unmarshal values: %v", err)
+	}
+
+	assertPoolSelector := func(path ...string) {
+		t.Helper()
+		m, _, _ := unstructured.NestedStringMap(values, append(append([]string{}, path...), "nodeSelector")...)
+		if m[NodePoolLabel] != "monitoring" {
+			t.Errorf("%v.nodeSelector[%s] = %v, want monitoring", path, NodePoolLabel, m[NodePoolLabel])
+		}
+	}
+	assertPoolSelector("prometheus", "prometheusSpec")
+	assertPoolSelector("alertmanager", "alertmanagerSpec")
+	assertPoolSelector("prometheusOperator")
+	assertPoolSelector("kube-state-metrics")
+	// The admission-webhook cert patch is a separate one-shot Helm-hook Job,
+	// not the operator Deployment itself - a real live-cluster regression
+	// once every node in a cluster carries one of the three pool taints:
+	// with no toleration of its own, this hook couldn't schedule anywhere
+	// at all, blocking the whole HelmRelease upgrade.
+	assertPoolSelector("prometheusOperator", "admissionWebhooks", "patch")
+
+	if _, ok := values["prometheus-node-exporter"]; ok {
+		t.Error(`"prometheus-node-exporter" values were set - it must stay untouched (chart defaults), since it has to report every node's metrics regardless of pool`)
+	}
+}
 
 func TestKubePrometheusStackHelmRepository(t *testing.T) {
 	repo := KubePrometheusStackHelmRepository("default")
@@ -33,7 +76,7 @@ func TestKubePrometheusStackHelmRepository(t *testing.T) {
 // PrometheusServiceName/PrometheusNodePortServiceName/
 // AlertmanagerServiceName/AlertmanagerNodePortServiceName expects.
 func TestKubePrometheusStackHelmValues(t *testing.T) {
-	raw, err := KubePrometheusStackHelmValues()
+	raw, err := KubePrometheusStackHelmValues(nil)
 	if err != nil {
 		t.Fatalf("KubePrometheusStackHelmValues: %v", err)
 	}
@@ -216,7 +259,7 @@ func TestDefaultAlertRules(t *testing.T) {
 }
 
 func TestKubePrometheusStackHelmRelease(t *testing.T) {
-	values, err := KubePrometheusStackHelmValues()
+	values, err := KubePrometheusStackHelmValues(nil)
 	if err != nil {
 		t.Fatalf("KubePrometheusStackHelmValues: %v", err)
 	}

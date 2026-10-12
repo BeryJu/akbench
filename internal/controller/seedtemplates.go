@@ -63,6 +63,14 @@ func defaultTestCaseTemplates(namespace string) []benchv1alpha1.TestCaseTemplate
 				Script: mustEmbeddedScript("mixed.ts"),
 			},
 		},
+		{
+			Name: "breakpoint", Namespace: namespace,
+			Spec: benchv1alpha1.TestCaseTemplateSpec{
+				Description: "Test until failure: logs in like login, adding spec.vus VUs every 2 minutes " +
+					"until error rate or p95 latency thresholds trip, then aborts. Run as a Quick TestRun.",
+				Script: mustEmbeddedScript("breakpoint.ts"),
+			},
+		},
 	}
 }
 

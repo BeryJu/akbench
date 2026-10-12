@@ -4,6 +4,8 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.21.0
+  labels:
+    clusterctl.cluster.x-k8s.io/move-hierarchy: "true"
   name: workloadclusters.bench.goauthentik.io
 spec:
   group: bench.goauthentik.io
@@ -127,10 +129,32 @@ spec:
                 - Incus
                 type: string
               workerPools:
+                default:
+                - incus:
+                    flavor: c2-m4
+                  name: authentik
+                  replicas: 2
+                  role: Authentik
+                - incus:
+                    flavor: c2-m4
+                  name: k6
+                  replicas: 2
+                  role: K6
+                - incus:
+                    flavor: c2-m4
+                  name: monitoring
+                  replicas: 1
+                  role: Monitoring
                 description: |-
                   workerPools are the WorkloadCluster's worker machine groups - at least
                   one is required. See WorkerPoolSpec for how editing this list after
-                  creation behaves.
+                  creation behaves. Omitting it entirely (rather than submitting an
+                  empty list, which MinItems below still rejects) defaults to three
+                  pools - one each for the three roles this project's own workloads
+                  actually use (Authentik/K6/Monitoring) - applied by the API server's
+                  own structural-schema defaulting before MinItems is even checked, not
+                  by this operator's own code, so it works the same whether the object
+                  is created via kubectl, the web UI, or any other client.
                 items:
                   description: |-
                     WorkerPoolSpec is one named, independently-sized group of worker machines,
@@ -174,6 +198,9 @@ spec:
                       required:
                       - maxReplicas
                       type: object
+                      x-kubernetes-validations:
+                      - message: minReplicas must not exceed maxReplicas
+                        rule: '!has(self.minReplicas) || self.minReplicas <= self.maxReplicas'
                     incus:
                       description: |-
                         incus is this pool's Incus-specific sizing. Required when
@@ -199,6 +226,29 @@ spec:
                       format: int32
                       minimum: 1
                       type: integer
+                    role:
+                      default: Generic
+                      description: |-
+                        role declares which of this project's own workloads this pool's nodes
+                        are meant for - WorkloadClusterReconciler taints every node registered
+                        into a non-Generic pool (see render.NodePoolLabel) with
+                        bench.goauthentik.io/pool=<role>:NoSchedule and the matching node
+                        label, and every workload this project renders for that role
+                        (AuthentikDeployment's server/worker/postgres pods for Authentik, a
+                        TestCase's k6 runner for K6, the observability/addon stack for
+                        Monitoring) is given a matching nodeSelector plus a toleration for
+                        that one taint - a toleration alone only ever *permits* scheduling
+                        onto a tainted node, it never *attracts* a pod there, so both are
+                        needed together. Generic (the zero value) carries no taint and no
+                        label at all, so every pool created before this field existed, or any
+                        pool a user adds without a role, keeps behaving exactly as it always
+                        did - nothing here is retroactive.
+                      enum:
+                      - Generic
+                      - Authentik
+                      - K6
+                      - Monitoring
+                      type: string
                   required:
                   - name
                   type: object

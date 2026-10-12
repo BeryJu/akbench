@@ -1,19 +1,4 @@
-/*
- * Copyright 2026
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
-
+import { ActivityLog } from '../components/ActivityLog';
 import { FormEvent, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { api } from '../api';
@@ -194,6 +179,11 @@ export function TestCaseTemplateViewPage() {
         <div className="row" style={{ marginBottom: 8 }}>
           <StatusBadge kind="testcasetemplate" name={name} namespace={t.metadata.namespace} phase={t.status?.phase} conditions={t.status?.conditions} />
           {t.spec.requiresOAuthClient && <span className="muted">Provisions an OAuth client</span>}
+        </div>
+      )}
+      {t && (
+        <div className="panel">
+          <ActivityLog path="testcasetemplates" name={name} />
         </div>
       )}
       <h2>Used by</h2>

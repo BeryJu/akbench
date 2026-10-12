@@ -19,6 +19,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
+	controlplanev1 "sigs.k8s.io/cluster-api/api/controlplane/kubeadm/v1beta2"
 	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 	capikubeconfig "sigs.k8s.io/cluster-api/util/kubeconfig"
 
@@ -146,6 +147,22 @@ func (r *WorkloadClusterReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 			benchv1alpha1.ReasonReconciling, "waiting for the load balancer's controlPlaneEndpoint before creating the control plane")
 		return ctrl.Result{RequeueAfter: 2 * time.Second}, r.Status().Update(ctx, &wc)
 	}
+	// Only before the control plane exists - see preferIPv4Endpoint.
+	var kcp controlplanev1.KubeadmControlPlane
+	kcpKey := client.ObjectKeyFromObject(render.KubeadmControlPlane(&wc))
+	if err := r.Get(ctx, kcpKey, &kcp); apierrors.IsNotFound(err) {
+		wait, err := r.preferIPv4Endpoint(ctx, &wc, &existing)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+		if wait {
+			setCondition(r.Recorder, &wc, &wc.Status.Conditions, wc.Generation, benchv1alpha1.ConditionReady, metav1.ConditionFalse,
+				benchv1alpha1.ReasonReconciling, "waiting for the load balancer's IPv4 address before creating the control plane")
+			return ctrl.Result{RequeueAfter: 5 * time.Second}, r.Status().Update(ctx, &wc)
+		}
+	} else if err != nil {
+		return ctrl.Result{}, fmt.Errorf("get KubeadmControlPlane: %w", err)
+	}
 
 	if err := applyCreateOnly(ctx, r.Client, r.Scheme, &wc, render.KubeadmControlPlane(&wc)); err != nil {
 		return ctrl.Result{}, fmt.Errorf("apply KubeadmControlPlane: %w", err)
@@ -251,6 +268,7 @@ func (r *WorkloadClusterReconciler) ensureAddons(ctx context.Context, wc *benchv
 		{"Pyroscope", r.ensurePyroscope},
 		{"Tempo", r.ensureTempo},
 		{"Grafana", r.ensureGrafana},
+		{"descheduler", r.ensureDescheduler},
 	}
 	for _, addon := range addons {
 		if err := addon.ensure(ctx, wc); err != nil {
@@ -322,7 +340,7 @@ func (r *WorkloadClusterReconciler) ensureCSIIncus(ctx context.Context, wc *benc
 	if err := r.Get(ctx, types.NamespacedName{Name: wc.Spec.Incus.LXCSecretRef.Name, Namespace: wc.Namespace}, &source); err != nil {
 		return fmt.Errorf("get incus credentials secret: %w", err)
 	}
-	values, err := render.CSIIncusHelmValues(&source)
+	values, err := render.CSIIncusHelmValues(&source, wc)
 	if err != nil {
 		return err
 	}
@@ -336,11 +354,31 @@ func (r *WorkloadClusterReconciler) ensureCSIIncus(ctx context.Context, wc *benc
 	return nil
 }
 
+// ensureDescheduler installs kubernetes-sigs/descheduler onto the workload
+// cluster via its own official Helm chart - same Flux HelmRepository +
+// HelmRelease mechanism as ensureCNI/ensureCSIIncus/ensureMetricsServer. See
+// render.DeschedulerHelmValues' own doc comment for why it exists and what
+// (little) is overridden from the chart's own defaults.
+func (r *WorkloadClusterReconciler) ensureDescheduler(ctx context.Context, wc *benchv1alpha1.WorkloadCluster) error {
+	values, err := render.DeschedulerHelmValues(wc)
+	if err != nil {
+		return err
+	}
+	if err := applyOwned(ctx, r.Client, r.Scheme, wc, render.DeschedulerHelmRepository(wc.Namespace)); err != nil {
+		return fmt.Errorf("apply descheduler HelmRepository: %w", err)
+	}
+	hr := render.DeschedulerHelmRelease(wc.Namespace, render.KubeconfigSecretName(wc), values)
+	if err := applyOwned(ctx, r.Client, r.Scheme, wc, hr); err != nil {
+		return fmt.Errorf("apply descheduler HelmRelease: %w", err)
+	}
+	return nil
+}
+
 // ensureMetricsServer installs kubernetes-sigs/metrics-server onto the
 // workload cluster via its own official Helm chart - same Flux
 // HelmRepository + HelmRelease mechanism as ensureCNI/ensureCSIIncus.
 func (r *WorkloadClusterReconciler) ensureMetricsServer(ctx context.Context, wc *benchv1alpha1.WorkloadCluster) error {
-	values, err := render.MetricsServerHelmValues()
+	values, err := render.MetricsServerHelmValues(wc)
 	if err != nil {
 		return err
 	}
@@ -408,7 +446,7 @@ func reachableNodeIP(ctx context.Context, remoteClient client.Client) (string, e
 // name/NodePort (see render.PrometheusServiceName's own doc comment for why
 // no other consumer needed to change).
 func (r *WorkloadClusterReconciler) ensurePrometheus(ctx context.Context, wc *benchv1alpha1.WorkloadCluster) error {
-	values, err := render.KubePrometheusStackHelmValues()
+	values, err := render.KubePrometheusStackHelmValues(wc)
 	if err != nil {
 		return err
 	}
@@ -491,7 +529,7 @@ func (r *WorkloadClusterReconciler) ensurePyroscope(ctx context.Context, wc *ben
 	if err != nil {
 		return err
 	}
-	return createAll(ctx, remoteClient, render.PyroscopeObjects())
+	return createAll(ctx, remoteClient, render.PyroscopeObjects(wc))
 }
 
 // ensureTempo installs a single-replica Grafana Tempo onto the workload
@@ -502,7 +540,7 @@ func (r *WorkloadClusterReconciler) ensureTempo(ctx context.Context, wc *benchv1
 	if err != nil {
 		return err
 	}
-	return createAll(ctx, remoteClient, render.TempoObjects())
+	return createAll(ctx, remoteClient, render.TempoObjects(wc))
 }
 
 // ensureGrafana installs a single-replica Grafana onto the workload cluster
@@ -518,7 +556,18 @@ func (r *WorkloadClusterReconciler) ensureGrafana(ctx context.Context, wc *bench
 	if err != nil {
 		return err
 	}
-	if err := createAll(ctx, remoteClient, render.GrafanaObjects(wc)); err != nil {
+	// Generated once on the management cluster (not the remote one): both
+	// cmd/apiserver (which proxies to Grafana) and this Deployment's own env
+	// need the exact same value, and only the management cluster is
+	// somewhere cmd/apiserver can already read a Secret from directly - see
+	// render.GrafanaAdminSecretName's own doc comment.
+	adminPassword, err := ensureRandomSecret(ctx, r.Client,
+		types.NamespacedName{Name: render.GrafanaAdminSecretName(wc), Namespace: wc.Namespace},
+		"password", 16)
+	if err != nil {
+		return fmt.Errorf("ensure Grafana admin password: %w", err)
+	}
+	if err := createAll(ctx, remoteClient, render.GrafanaObjects(wc, adminPassword)); err != nil {
 		return err
 	}
 	nodeIP, err := reachableNodeIP(ctx, remoteClient)

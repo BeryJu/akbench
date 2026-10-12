@@ -86,7 +86,7 @@ func PostgresRoleFixJobName(t *benchv1alpha1.AuthentikDeployment) string {
 // comment) and self-waiting (`until pg_isready`) rather than relying
 // purely on BackoffLimit retries, since this typically races the
 // postgresql pod's own first startup.
-func PostgresRoleFixJob(t *benchv1alpha1.AuthentikDeployment) *batchv1.Job {
+func PostgresRoleFixJob(t *benchv1alpha1.AuthentikDeployment, wc *benchv1alpha1.WorkloadCluster) *batchv1.Job {
 	host := embeddedPostgresServiceName(t)
 	psql := fmt.Sprintf(`psql -h %s -U authentik -d authentik`, host)
 	// The SQL is piped into psql's stdin (printf ... | psql ...), not passed
@@ -109,6 +109,7 @@ else
 fi
 `, host, psql, psql, psql)
 
+	nodeSelector, tolerations := AuthentikPoolPlacement(wc)
 	return &batchv1.Job{
 		Kind: "Job", APIVersion: "batch/v1",
 		Name: PostgresRoleFixJobName(t), Namespace: t.Spec.Namespace,
@@ -119,6 +120,8 @@ fi
 				ObjectMeta: metav1.ObjectMeta{Labels: DeploymentLabels(t.Name)},
 				Spec: corev1.PodSpec{
 					RestartPolicy: corev1.RestartPolicyOnFailure,
+					NodeSelector:  nodeSelector,
+					Tolerations:   tolerations,
 					Containers: []corev1.Container{{
 						Name:    "fix-postgres-role",
 						Image:   postgresRoleFixImage,

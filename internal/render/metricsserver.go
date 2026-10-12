@@ -9,6 +9,8 @@ import (
 	sourcev1 "github.com/fluxcd/source-controller/api/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
 )
 
 // metrics-server is installed via its own official Helm chart now
@@ -55,11 +57,19 @@ func MetricsServerHelmRepository(namespace string) *sourcev1.HelmRepository {
 }
 
 // MetricsServerHelmValues builds spec.values for the metrics-server chart
-// install: just --kubelet-insecure-tls, see this file's own doc comment.
-func MetricsServerHelmValues() (*apiextensionsv1.JSON, error) {
-	raw, err := json.Marshal(map[string]any{
+// install: --kubelet-insecure-tls (see this file's own doc comment) plus
+// this cluster's own monitoring-pool nodeSelector/tolerations (top-level
+// keys on this chart, confirmed against its own values.yaml), when it has
+// one.
+func MetricsServerHelmValues(wc *benchv1alpha1.WorkloadCluster) (*apiextensionsv1.JSON, error) {
+	values := map[string]any{
 		"args": []string{"--kubelet-insecure-tls"},
-	})
+	}
+	if sel, tol := MonitoringPoolPlacement(wc); len(sel) > 0 || len(tol) > 0 {
+		values["nodeSelector"] = sel
+		values["tolerations"] = tol
+	}
+	raw, err := json.Marshal(values)
 	if err != nil {
 		return nil, fmt.Errorf("marshal metrics-server helm values: %w", err)
 	}

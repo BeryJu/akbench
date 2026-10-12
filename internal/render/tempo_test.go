@@ -8,7 +8,7 @@ import (
 )
 
 func TestTempoObjectsMatchesDefaultTracingEndpoint(t *testing.T) {
-	objs := TempoObjects()
+	objs := TempoObjects(nil)
 	found := map[string]bool{"Namespace": false, "ConfigMap": false, "Deployment": false, "Service": false, "ServiceMonitor": false}
 	for _, obj := range objs {
 		if obj.GetName() == "" {
@@ -41,7 +41,7 @@ func TestTempoObjectsExposesQueryPort(t *testing.T) {
 	if TempoQueryPort != 3200 {
 		t.Errorf("TempoQueryPort = %d, want 3200", TempoQueryPort)
 	}
-	for _, obj := range TempoObjects() {
+	for _, obj := range TempoObjects(nil) {
 		svc, ok := obj.(*corev1.Service)
 		if !ok {
 			continue
@@ -62,7 +62,7 @@ func TestTempoObjectsExposesQueryPort(t *testing.T) {
 // port: Tempo's /metrics lives on its HTTP API port (tempo-query/3200,
 // server.http_listen_port), not the OTLP ingest port.
 func TestTempoServiceMonitorTargetsQueryPort(t *testing.T) {
-	for _, obj := range TempoObjects() {
+	for _, obj := range TempoObjects(nil) {
 		u, ok := obj.(*unstructured.Unstructured)
 		if !ok || u.GetKind() != serviceMonitorKind {
 			continue
@@ -83,7 +83,7 @@ func TestTempoServiceMonitorTargetsQueryPort(t *testing.T) {
 // TestTempoServiceIsLabeledForItsServiceMonitor guards the same
 // selector-matches-object-labels requirement as Pyroscope's own test.
 func TestTempoServiceIsLabeledForItsServiceMonitor(t *testing.T) {
-	for _, obj := range TempoObjects() {
+	for _, obj := range TempoObjects(nil) {
 		if svc, ok := obj.(*corev1.Service); ok {
 			if svc.Labels["app"] != TempoServiceName {
 				t.Errorf("tempo Service.Labels = %v, want app=%q so its ServiceMonitor can find it", svc.Labels, TempoServiceName)

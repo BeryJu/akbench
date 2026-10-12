@@ -1,19 +1,3 @@
-/*
- * Copyright 2026
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
-
 // Thin fetch wrapper over cmd/apiserver's REST API (internal/api/server.go's
 // route table). The app is served by cmd/apiserver itself, so every path is
 // same-origin and the credential is a plain Authorization: Bearer header -
@@ -24,11 +8,16 @@ import {
   AuthentikDeploymentSpec,
   Cluster,
   CompareResponse,
+  IncusCredential,
+  IncusCredentialInput,
+  IncusProbe,
+  Infrastructure,
   PodPlacement,
   RangeResponse,
   TestCase,
   TestCaseSpec,
   TestCaseTemplate,
+  ObjectEvent,
   TestCaseTemplateSpec,
   TestRun,
   TraceBreakdown,
@@ -105,6 +94,10 @@ interface ObjectInput<Spec> {
 const json = (method: string, body: unknown): RequestInit => ({ method, body: JSON.stringify(body) });
 const seg = encodeURIComponent;
 
+/** ResourcePath is a bench kind's /api/v1/<path> segment
+ * (internal/api/resources.go's resourceKinds). */
+export type ResourcePath = 'deployments' | 'testcases' | 'testcasetemplates' | 'testruns' | 'workloadclusters';
+
 export interface AuthConfig {
   oidc?: { issuer: string; clientId: string; scopes: string[] };
 }
@@ -131,6 +124,27 @@ export const api = {
     request<WorkloadCluster>(`/api/v1/workloadclusters/${seg(name)}`, json('PUT', obj)),
   kickWorkloadCluster: (name: string) =>
     request<WorkloadCluster>(`/api/v1/workloadclusters/${seg(name)}/reconcile`, json('POST', {})),
+
+  // -- Infrastructure: internal/api/infrastructure.go (providers) and
+  // incus.go (Incus connections, i.e. the Secrets spec.incus.lxcSecretRef
+  // names). The client key is write-only - never returned.
+  infrastructure: () => request<Infrastructure>('/api/v1/infrastructure'),
+  enableInfrastructureProvider: (id: string) =>
+    request<Infrastructure>(`/api/v1/infrastructure/providers/${seg(id)}/enable`, json('POST', {})),
+  incusCredentials: () =>
+    request<List<IncusCredential>>('/api/v1/infrastructure/incus/credentials').then(r => r.items ?? []),
+  incusCredential: (name: string) =>
+    request<IncusCredential>(`/api/v1/infrastructure/incus/credentials/${seg(name)}`),
+  createIncusCredential: (input: IncusCredentialInput) =>
+    request<IncusCredential>('/api/v1/infrastructure/incus/credentials', json('POST', input)),
+  updateIncusCredential: (name: string, input: IncusCredentialInput) =>
+    request<IncusCredential>(`/api/v1/infrastructure/incus/credentials/${seg(name)}`, json('PUT', input)),
+  deleteIncusCredential: (name: string) =>
+    request<void>(`/api/v1/infrastructure/incus/credentials/${seg(name)}`, { method: 'DELETE' }),
+  testIncusCredential: (name: string) =>
+    request<IncusProbe>(`/api/v1/infrastructure/incus/credentials/${seg(name)}/test`, json('POST', {})),
+  trustIncusCredential: (name: string, token: string) =>
+    request<IncusProbe>(`/api/v1/infrastructure/incus/credentials/${seg(name)}/trust`, json('POST', { token })),
 
   // -- Deployments
   deployments: () => request<List<AuthentikDeployment>>('/api/v1/deployments').then(r => r.items ?? []),
@@ -211,6 +225,11 @@ export const api = {
   // target, from each target's own workload cluster Tempo.
   traceBreakdown: (testid: string, window: string) =>
     request<TraceBreakdown>(`/api/v1/traces/breakdown?testid=${seg(testid)}&window=${seg(window)}`),
+
+  // -- Kubernetes Events about one bench object, newest first
+  // (internal/api/objectevents.go).
+  objectEvents: (path: ResourcePath, name: string) =>
+    request<List<ObjectEvent>>(`/api/v1/${path}/${seg(name)}/events`).then(r => r.items ?? []),
 
   // -- Alerts (internal/api/alerts.go) - aggregated across every workload
   // cluster's own Alertmanager, there is no central instance.

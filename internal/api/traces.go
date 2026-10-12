@@ -101,9 +101,10 @@ type traceBreakdownCache struct {
 // its traces: its own workload cluster's, reached through that cluster's
 // Grafana datasource proxy.
 type tempoTarget struct {
-	Target   string
-	TempoURL string
-	Error    string
+	Target        string
+	TempoURL      string
+	AdminPassword string
+	Error         string
 }
 
 func (s *Server) tempoTargetsForTestID(ctx context.Context, tc *benchv1alpha1.TestCase) []tempoTarget {
@@ -138,8 +139,14 @@ func (s *Server) tempoTargetsForTestID(ctx context.Context, tc *benchv1alpha1.Te
 		case wc.Status.GrafanaURL == "":
 			target.Error = "workload cluster has no Grafana yet"
 		default:
+			adminPassword, err := s.grafanaAdminPassword(ctx, &wc)
+			if err != nil {
+				target.Error = err.Error()
+				break
+			}
 			target.TempoURL = strings.TrimSuffix(wc.Status.GrafanaURL, "/") +
 				render.GrafanaProxyPathPrefix(&wc) + "api/datasources/proxy/uid/" + render.TempoDatasourceUID
+			target.AdminPassword = adminPassword
 		}
 		targets = append(targets, target)
 	}
@@ -183,7 +190,7 @@ func (s *Server) traceBreakdown(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		wg.Go(func() {
-			result, err := s.searchTraceSpans(r.Context(), target.TempoURL, testid, target.Target, end.Add(-span), end)
+			result, err := s.searchTraceSpans(r.Context(), target.TempoURL, target.AdminPassword, testid, target.Target, end.Add(-span), end)
 			if err != nil {
 				resp.Targets[i].Error = err.Error()
 				return
@@ -245,7 +252,7 @@ func traceBreakdownQuery(testid, target string) string {
 		` | select(kind, span.name, span.db.statement)`, testid, target)
 }
 
-func (s *Server) searchTraceSpans(ctx context.Context, tempoURL, testid, target string, start, end time.Time) (*tempoSearchResponse, error) {
+func (s *Server) searchTraceSpans(ctx context.Context, tempoURL, adminPassword, testid, target string, start, end time.Time) (*tempoSearchResponse, error) {
 	q := url.Values{}
 	q.Set("q", traceBreakdownQuery(testid, target))
 	q.Set("limit", strconv.Itoa(traceBreakdownLimit))
@@ -256,6 +263,10 @@ func (s *Server) searchTraceSpans(ctx context.Context, tempoURL, testid, target 
 	if err != nil {
 		return nil, err
 	}
+	// This request reaches Grafana's datasource-proxy endpoint directly
+	// (Grafana's own NodePort, not through grafanaProxy's handler), so it
+	// needs the same real credentials that handler injects for the browser.
+	req.SetBasicAuth(render.GrafanaAdminUser, adminPassword)
 	res, err := s.http.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("query Tempo: %w", err)

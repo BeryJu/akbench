@@ -280,6 +280,8 @@ func (r *TestCaseReconciler) reconcileTarget(ctx context.Context, tc *benchv1alp
 		}
 	}
 
+	runnerWC := resolveWorkloadCluster(ctx, r.Client, tc.Namespace, result.runnerCluster)
+	nodeSelector, tolerations := render.K6PoolPlacement(runnerWC)
 	params := render.K6WorkloadParams{
 		TestCase:            tc,
 		DeploymentName:      ref.Name,
@@ -291,6 +293,8 @@ func (r *TestCaseReconciler) reconcileTarget(ctx context.Context, tc *benchv1alp
 		FixturesSecretName:  fixturesSecretName,
 		OAuthTestClientHost: oauthHost,
 		OAuthTestClientPort: oauthPort,
+		NodeSelector:        nodeSelector,
+		Tolerations:         tolerations,
 	}
 
 	if tc.Spec.Profile == benchv1alpha1.ProfileBurn {

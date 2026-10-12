@@ -189,6 +189,8 @@ func (r *TestRunReconciler) start(ctx context.Context, run *benchv1alpha1.TestRu
 		}
 	}
 
+	runnerWC := resolveWorkloadCluster(ctx, r.Client, run.Namespace, runnerClusterName(&tc, topo))
+	nodeSelector, tolerations := render.K6PoolPlacement(runnerWC)
 	params := render.K6WorkloadParams{
 		TestCase:            resolvedTC,
 		DeploymentName:      deploymentRef.Name,
@@ -200,6 +202,8 @@ func (r *TestRunReconciler) start(ctx context.Context, run *benchv1alpha1.TestRu
 		FixturesSecretName:  fixturesSecretName,
 		OAuthTestClientHost: oauthHost,
 		OAuthTestClientPort: oauthPort,
+		NodeSelector:        nodeSelector,
+		Tolerations:         tolerations,
 	}
 	jobName := "testrun-" + run.Name
 	job := render.QuickJob(jobName, run.Namespace, params)

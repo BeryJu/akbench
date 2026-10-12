@@ -13,6 +13,7 @@ package api
 import (
 	"io/fs"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -53,6 +54,11 @@ type Config struct {
 	// management cluster itself.
 	CAPIAvailable bool
 
+	// Appliance is true when running inside the single-container appliance
+	// (Dockerfile.appliance), where infrastructure providers are enabled
+	// from the UI (infrastructure.go). Elsewhere they're installed by hand.
+	Appliance bool
+
 	// HTTPClient is used for Prometheus calls. Defaults to a 30s client.
 	HTTPClient *http.Client
 
@@ -70,10 +76,17 @@ type Server struct {
 	http   *http.Client
 	shell  *shellState
 	// grafanaKey signs the Grafana proxy's session cookies (grafana_session.go).
-	grafanaKey    []byte
-	traces        *traceBreakdownCache
-	events        *eventHub
-	eventsTickets *eventsState
+	grafanaKey []byte
+	// grafanaAdminMu/grafanaAdminCache cache each workload cluster's
+	// generated Grafana admin password (grafana_proxy.go), keyed by cluster
+	// name - read-only and create-once at the source, so a cached value
+	// never goes stale short of a manual rotation, which a process restart
+	// would pick up anyway.
+	grafanaAdminMu    sync.Mutex
+	grafanaAdminCache map[string]string
+	traces            *traceBreakdownCache
+	events            *eventHub
+	eventsTickets     *eventsState
 }
 
 // New builds a Server. The client must be backed by the management cluster
@@ -90,9 +103,10 @@ func New(c client.WithWatch, cfg Config) *Server {
 	}
 	return &Server{
 		client: c, cfg: cfg, http: httpClient, shell: newShellState(), grafanaKey: newGrafanaSessionKey(),
-		traces:        &traceBreakdownCache{entries: map[string]TraceBreakdown{}},
-		events:        newEventHub(),
-		eventsTickets: newEventsState(),
+		grafanaAdminCache: map[string]string{},
+		traces:            &traceBreakdownCache{entries: map[string]TraceBreakdown{}},
+		events:            newEventHub(),
+		eventsTickets:     newEventsState(),
 	}
 }
 
@@ -144,6 +158,7 @@ func (s *Server) Router() http.Handler {
 				r.Put("/"+path+"/{name}", s.replaceResource(kind))
 				r.Delete("/"+path+"/{name}", s.deleteResource(kind))
 				r.Get("/"+path+"/{name}/status", s.getResourceStatus(kind))
+				r.Get("/"+path+"/{name}/events", s.listObjectEvents(kind))
 				r.Post("/"+path+"/{name}/reconcile", s.kickResource(kind))
 			}
 
@@ -156,6 +171,16 @@ func (s *Server) Router() http.Handler {
 			r.Get("/metrics/compare", s.compare)
 			r.Get("/metrics/range", s.metricsRange)
 			r.Get("/metrics/resources", s.listResourceMetrics)
+
+			r.Get("/infrastructure", s.getInfrastructure)
+			r.Post("/infrastructure/providers/{id}/enable", s.enableInfrastructureProvider)
+			r.Get("/infrastructure/incus/credentials", s.listIncusCredentials)
+			r.Post("/infrastructure/incus/credentials", s.createIncusCredential)
+			r.Get("/infrastructure/incus/credentials/{name}", s.getIncusCredential)
+			r.Put("/infrastructure/incus/credentials/{name}", s.updateIncusCredential)
+			r.Delete("/infrastructure/incus/credentials/{name}", s.deleteIncusCredential)
+			r.Post("/infrastructure/incus/credentials/{name}/test", s.testIncusCredential)
+			r.Post("/infrastructure/incus/credentials/{name}/trust", s.trustIncusCredential)
 
 			r.Get("/alerts", s.listAlerts)
 			r.Get("/placement", s.listPlacement)

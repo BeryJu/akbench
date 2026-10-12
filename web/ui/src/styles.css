@@ -64,7 +64,10 @@ h3 { font-size: 13px; margin: 0 0 8px; color: var(--muted); font-weight: 600; }
 .nav-sep { height: 1px; background: var(--border); margin: 8px 4px; }
 .nav-section-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); padding: 18px 12px 6px; }
 .nav-section-label:first-child { padding-top: 0; }
-.sidebar-foot { margin-top: auto; padding: 8px; color: var(--muted); font-size: 12px; display: flex; flex-direction: column; gap: 6px; }
+/* Infrastructure is set up once and rarely touched - pushed to the bottom,
+ * away from the day-to-day load-test navigation. */
+.nav-bottom { margin-top: auto; padding-top: 16px; border-top: 1px solid var(--border); }
+.sidebar-foot { padding: 12px 8px 0; color: var(--muted); font-size: 12px; display: flex; flex-direction: column; gap: 6px; }
 .main { margin-left: 236px; padding: 20px 28px 48px; min-width: 0; }
 .main.full { padding: 0; display: flex; flex-direction: column; height: 100vh; }
 .page-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
@@ -104,6 +107,10 @@ button:disabled { opacity: .55; cursor: default; }
 .field { display: flex; flex-direction: column; gap: 4px; font-weight: 600; font-size: 13px; }
 .field .help { font-weight: 400; color: var(--muted); font-size: 12px; }
 label.check { display: flex; gap: 8px; align-items: center; }
+.pool { border: 1px solid var(--border); border-radius: var(--radius); background: var(--panel); padding: 12px; margin-bottom: 12px; }
+.pool > .fields { grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: start; }
+@media (max-width: 720px) { .pool > .fields { grid-template-columns: 1fr; } }
+.pool-footer { display: flex; justify-content: space-between; align-items: center; }
 input, select, textarea { font: inherit; padding: 6px 8px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg); color: var(--text); font-weight: 400; }
 input:disabled, select:disabled { opacity: .6; }
 .form-actions { display: flex; gap: 8px; margin-top: 20px; }
@@ -154,7 +161,8 @@ legend { font-weight: 700; font-size: 15px; margin: 18px 0 8px; padding: 0; }
 .alert.error { color: var(--err); border-color: var(--err); }
 .alert.info { color: var(--info-text); border-color: var(--info); }
 .alert.success { color: var(--ok); border-color: var(--ok); }
-.toast-host { position: fixed; z-index: 50; top: 16px; right: 16px; display: flex; flex-direction: column; gap: 8px; max-width: 360px; }
+/* Bottom right: at the top it covered the page-head action buttons. */
+.toast-host { position: fixed; z-index: 50; bottom: 16px; right: 16px; display: flex; flex-direction: column; gap: 8px; max-width: 360px; }
 .toast { padding: 10px 14px; border-radius: var(--radius); border: 1px solid var(--border); background: var(--panel); box-shadow: 0 6px 24px rgba(0,0,0,.18); cursor: pointer; font-size: 13px; }
 .toast.success { border-color: var(--ok); }
 .toast.error { border-color: var(--err); }
@@ -172,6 +180,17 @@ legend { font-weight: 700; font-size: 15px; margin: 18px 0 8px; padding: 0; }
 .conditions { display: grid; grid-template-columns: auto max-content minmax(0, 1fr); gap: 6px 12px; align-items: baseline; }
 .conditions .cond { display: contents; }
 .conditions .cond-type { font-weight: 600; white-space: nowrap; }
+
+/* -- activity log */
+.activity { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); }
+.activity:first-child { margin-top: 0; padding-top: 0; border-top: none; }
+.log { list-style: none; margin: 0; padding: 0; max-height: 320px; overflow-y: auto; font-size: 13px; }
+.log li { display: grid; grid-template-columns: max-content minmax(120px, max-content) minmax(0, 1fr); gap: 12px; padding: 5px 8px; border-radius: 4px; align-items: baseline; }
+.log li:nth-child(odd) { background: var(--bg); }
+.log time { color: var(--muted); font-family: var(--ak-global--font-family--monospace); font-size: 12px; white-space: nowrap; }
+.log .reason { font-weight: 600; white-space: nowrap; }
+.log .count { color: var(--muted); }
+.log li.warning .reason, .log li.warning .message { color: var(--err); }
 
 /* -- code / yaml / editor */
 pre.yaml { background: var(--code-bg); padding: 12px; border-radius: var(--radius); overflow: auto; max-height: 520px; margin: 0; }

@@ -76,6 +76,12 @@ type K6WorkloadParams struct {
 	// at all, so a non-oauth script never sees them.
 	OAuthTestClientHost string
 	OAuthTestClientPort int32
+	// NodeSelector/Tolerations target this TestCase's own k6-pool node (see
+	// render.K6PoolPlacement), resolved by the caller from the runner's own
+	// WorkloadCluster - empty when that cluster has no K6-role pool (or when
+	// the runner is the management cluster itself).
+	NodeSelector map[string]string
+	Tolerations  []corev1.Toleration
 }
 
 // EnvVars builds the exact environment contract k6/scripts/login.ts reads,
@@ -216,7 +222,9 @@ func (p K6WorkloadParams) PodTemplate() corev1.PodTemplateSpec {
 					Resources:    resources,
 				},
 			},
-			Volumes: volumes,
+			Volumes:      volumes,
+			NodeSelector: p.NodeSelector,
+			Tolerations:  p.Tolerations,
 			// The load generator must never land on the same node as the
 			// deployment it's driving - otherwise it competes with the very
 			// system it's measuring for that node's CPU, skewing the

@@ -36,7 +36,7 @@ func TestCSIIncusHelmValuesRemapsKeys(t *testing.T) {
 		},
 	}
 
-	raw, err := CSIIncusHelmValues(source)
+	raw, err := CSIIncusHelmValues(source, nil)
 	if err != nil {
 		t.Fatalf("CSIIncusHelmValues: %v", err)
 	}
@@ -98,7 +98,7 @@ func TestCSIIncusHelmValuesRemapsKeys(t *testing.T) {
 }
 
 func TestCSIIncusHelmRelease(t *testing.T) {
-	values, err := CSIIncusHelmValues(&corev1.Secret{Data: map[string][]byte{}})
+	values, err := CSIIncusHelmValues(&corev1.Secret{Data: map[string][]byte{}}, nil)
 	if err != nil {
 		t.Fatalf("CSIIncusHelmValues: %v", err)
 	}

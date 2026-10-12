@@ -1,28 +1,13 @@
-/*
- * Copyright 2026
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
-
-import { FormEvent, useState } from 'react';
+import { FormEvent, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { api, MANAGEMENT_CLUSTER } from '../api';
 import { ObjectYaml } from '../components/ObjectYaml';
+import { ActivityLog } from '../components/ActivityLog';
 import { Badge, ConditionList, StatusBadge } from '../components/Status';
 import { Alert, confirmAndRun, errorMessage, Field, Page, Table } from '../components/ui';
 import { toast } from '../components/Toast';
 import { shellLinkForCluster } from '../shell/links';
-import { WorkerPoolSpec, WorkloadCluster, WorkloadClusterSpec } from '../types';
+import { WorkerPoolRole, WorkerPoolSpec, WorkloadCluster, WorkloadClusterSpec } from '../types';
 import { useResource } from '../useResource';
 
 export function ClustersPage() {
@@ -106,6 +91,14 @@ const KUBERNETES_VERSIONS = ['v1.36.4', 'v1.35.8', 'v1.34.11', 'v1.33.13', 'v1.3
 // cluster-api-provider-incus's own "cX-mY" flavors (X vCPUs, Y GiB RAM).
 const INSTANCE_FLAVORS = ['c1-m2', 'c2-m4', 'c4-m8', 'c8-m16', 'c16-m32'];
 
+// Mirrors api/v1alpha1.WorkerPoolRole's own enum - Generic first, since it's
+// the zero value and what every pool defaults to.
+const WORKER_POOL_ROLES: WorkerPoolRole[] = ['Generic', 'Authentik', 'K6', 'Monitoring'];
+
+function roleLabel(role: WorkerPoolRole | undefined): string {
+  return role && role !== 'Generic' ? role : 'Generic (no pool taint)';
+}
+
 function flavorLabel(flavor: string): string {
   const match = /^c(\d+)-m(\d+)$/.exec(flavor);
   return match ? `${flavor} - ${match[1]} vCPU, ${match[2]} GiB RAM` : flavor;
@@ -122,7 +115,8 @@ function emptySpec(): WorkloadClusterSpec {
     controlPlane: { replicas: 1 },
     workerPools: [emptyPool('workers')],
     incus: {
-      lxcSecretRef: { name: 'lxc-secret' },
+      // Filled in with the first Incus connection once they've loaded.
+      lxcSecretRef: { name: '' },
       image: 'ubuntu:24.04',
       profiles: ['default'],
       controlPlane: { flavor: 'c2-m4' },
@@ -144,6 +138,22 @@ function ClusterForm({ existing }: { existing?: WorkloadCluster }) {
   const [error, setError] = useState<string>();
   const [saving, setSaving] = useState(false);
   const locked = Boolean(existing);
+  const infra = useResource(() => api.infrastructure(), [], 15000);
+  const incusConnections = useResource(() => api.incusCredentials(), [], 15000);
+  const providers = (infra.data?.providers ?? []).filter(p => p.clusterProvider);
+  const selectedProvider = providers.find(p => p.clusterProvider === spec.provider);
+
+  // A new cluster defaults to the first Incus connection there is.
+  const firstConnection = incusConnections.data?.[0]?.name;
+  useEffect(() => {
+    if (!locked && firstConnection) {
+      setSpec(current =>
+        current.incus && !current.incus.lxcSecretRef.name
+          ? { ...current, incus: { ...current.incus, lxcSecretRef: { name: firstConnection } } }
+          : current
+      );
+    }
+  }, [locked, firstConnection]);
 
   const patch = (changes: Partial<WorkloadClusterSpec>) => setSpec(current => ({ ...current, ...changes }));
   const patchIncus = (changes: Partial<NonNullable<WorkloadClusterSpec['incus']>>) =>
@@ -200,12 +210,27 @@ function ClusterForm({ existing }: { existing?: WorkloadCluster }) {
                 ))}
               </select>
             </Field>
-            <Field label="Infrastructure provider">
-              <select disabled value={spec.provider}>
-                <option value="Incus">Incus / LXC</option>
+            <Field label="Infrastructure provider" help={<Link to="/infrastructure">Manage infrastructure</Link>}>
+              <select
+                disabled={locked || providers.length <= 1}
+                value={spec.provider}
+                onChange={e => patch({ provider: e.target.value as WorkloadClusterSpec['provider'] })}
+              >
+                {providers.length === 0 && <option value="Incus">Incus / LXC</option>}
+                {providers.map(p => (
+                  <option key={p.id} value={p.clusterProvider}>
+                    {p.displayName}
+                  </option>
+                ))}
               </select>
             </Field>
           </div>
+          {!locked && selectedProvider && !selectedProvider.installedVersion && (
+            <Alert kind="info">
+              The {selectedProvider.displayName} provider isn't installed on the management cluster yet, so this cluster
+              won't start provisioning until it is - <Link to="/infrastructure">set it up under Infrastructure</Link>.
+            </Alert>
+          )}
         </fieldset>
 
         <fieldset>
@@ -239,35 +264,96 @@ function ClusterForm({ existing }: { existing?: WorkloadCluster }) {
 
         <fieldset>
           <legend>Worker pools</legend>
+          <p className="muted">
+            A role reserves a pool for one of this project's own workloads: its nodes get a matching taint/label, and
+            that workload gets a matching nodeSelector/toleration. Generic schedules anywhere.
+          </p>
           {spec.workerPools.map((pool, i) => (
-            <div className="fields" key={i} style={{ alignItems: 'end' }}>
-              <Field label="Pool name">
-                <input required value={pool.name} onChange={e => patchPool(i, { name: e.target.value })} />
-              </Field>
-              <Field
-                label="Replicas"
-                help={pool.autoscaling && `Autoscaled ${pool.autoscaling.minReplicas ?? 0}-${pool.autoscaling.maxReplicas}; this only sizes the pool at creation`}
-              >
-                <input
-                  type="number"
-                  min={1}
-                  value={pool.replicas}
-                  onChange={e => patchPool(i, { replicas: Number(e.target.value) })}
-                />
-              </Field>
-              <Field label="Flavor">
-                <select
-                  value={pool.incus?.flavor ?? INSTANCE_FLAVORS[1]}
-                  onChange={e => patchPool(i, { incus: { ...pool.incus, flavor: e.target.value } })}
+            <div className="pool" key={i}>
+              <div className="fields">
+                <Field label="Pool name">
+                  <input required value={pool.name} onChange={e => patchPool(i, { name: e.target.value })} />
+                </Field>
+                <Field label="Role">
+                  <select
+                    value={pool.role ?? 'Generic'}
+                    onChange={e => patchPool(i, { role: e.target.value as WorkerPoolRole })}
+                  >
+                    {WORKER_POOL_ROLES.map(r => (
+                      <option key={r} value={r}>
+                        {roleLabel(r)}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+                <Field label="Flavor">
+                  <select
+                    value={pool.incus?.flavor ?? INSTANCE_FLAVORS[1]}
+                    onChange={e => patchPool(i, { incus: { ...pool.incus, flavor: e.target.value } })}
+                  >
+                    {INSTANCE_FLAVORS.map(f => (
+                      <option key={f} value={f}>
+                        {flavorLabel(f)}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+              </div>
+              <div className="fields">
+                <Field
+                  label={pool.autoscaling ? 'Initial replicas' : 'Replicas'}
+                  help={pool.autoscaling && 'Only sizes the pool at creation; cluster-autoscaler owns it after that'}
                 >
-                  {INSTANCE_FLAVORS.map(f => (
-                    <option key={f} value={f}>
-                      {flavorLabel(f)}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-              <div>
+                  <input
+                    type="number"
+                    min={1}
+                    value={pool.replicas}
+                    onChange={e => patchPool(i, { replicas: Number(e.target.value) })}
+                  />
+                </Field>
+                {pool.autoscaling && (
+                  <>
+                    <Field label="Min nodes" help="0 lets the pool scale to zero when idle">
+                      <input
+                        type="number"
+                        required
+                        min={0}
+                        max={pool.autoscaling.maxReplicas}
+                        value={pool.autoscaling.minReplicas ?? 0}
+                        onChange={e =>
+                          patchPool(i, { autoscaling: { ...pool.autoscaling!, minReplicas: Number(e.target.value) } })
+                        }
+                      />
+                    </Field>
+                    <Field label="Max nodes">
+                      <input
+                        type="number"
+                        required
+                        min={Math.max(1, pool.autoscaling.minReplicas ?? 0)}
+                        value={pool.autoscaling.maxReplicas}
+                        onChange={e =>
+                          patchPool(i, { autoscaling: { ...pool.autoscaling!, maxReplicas: Number(e.target.value) } })
+                        }
+                      />
+                    </Field>
+                  </>
+                )}
+              </div>
+              <div className="pool-footer">
+                <label className="check">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(pool.autoscaling)}
+                    onChange={e =>
+                      patchPool(i, {
+                        autoscaling: e.target.checked
+                          ? { minReplicas: pool.replicas, maxReplicas: Math.max(pool.replicas, 3) }
+                          : undefined,
+                      })
+                    }
+                  />
+                  Autoscale
+                </label>
                 <button
                   type="button"
                   className="small danger"
@@ -292,14 +378,34 @@ function ClusterForm({ existing }: { existing?: WorkloadCluster }) {
             <legend>Incus / LXC</legend>
             {locked && <p className="muted">Image and profiles apply to new or edited worker pools only.</p>}
             <div className="fields">
-              <Field label="LXC daemon connection secret">
-                <input
+              <Field
+                label="Incus connection"
+                help={
+                  <Link to={incusConnections.data?.length === 0 ? '/infrastructure/incus/new' : '/infrastructure'}>
+                    {incusConnections.data?.length === 0 ? 'Create a connection first' : 'Manage connections'}
+                  </Link>
+                }
+              >
+                <select
                   required
                   disabled={locked}
                   value={spec.incus?.lxcSecretRef.name ?? ''}
-                  placeholder="lxc-secret"
                   onChange={e => patchIncus({ lxcSecretRef: { name: e.target.value } })}
-                />
+                >
+                  <option value="" disabled>
+                    {incusConnections.data === undefined ? 'Loading…' : 'Select a connection'}
+                  </option>
+                  {/* An existing cluster's connection may not be listed (e.g. deleted since). */}
+                  {spec.incus?.lxcSecretRef.name &&
+                    !incusConnections.data?.some(c => c.name === spec.incus?.lxcSecretRef.name) && (
+                      <option value={spec.incus.lxcSecretRef.name}>{spec.incus.lxcSecretRef.name}</option>
+                    )}
+                  {incusConnections.data?.map(c => (
+                    <option key={c.name} value={c.name}>
+                      {c.name} ({c.server})
+                    </option>
+                  ))}
+                </select>
               </Field>
               <Field label="Image">
                 <input
@@ -450,6 +556,7 @@ export function ClusterViewPage() {
               <span className="muted">Kubernetes {wc.data.spec.kubernetesVersion}</span>
             </div>
             <ConditionList conditions={status?.conditions} />
+            <ActivityLog path="workloadclusters" name={name} />
           </div>
 
           <h2>Worker pools</h2>
@@ -459,6 +566,7 @@ export function ClusterViewPage() {
             empty="No worker pools."
             columns={[
               { label: 'Pool', render: p => p.name },
+              { label: 'Role', render: p => <Badge value={roleLabel(p.role)} /> },
               {
                 label: 'Size',
                 render: p =>

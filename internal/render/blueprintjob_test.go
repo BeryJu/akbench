@@ -7,6 +7,26 @@ import (
 	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
 )
 
+// TestBlueprintJobTargetsAuthentikPool guards a real live-cluster bug: this
+// Job must reach the authentik pool (it needs the same namespace/PVC/Secret
+// the server/worker pods there have), but originally had no pool placement
+// at all - once a cluster's nodes were all tainted by pool, it couldn't
+// schedule anywhere ("0/N nodes are available: N node(s) had untolerated
+// taint(s)"), silently blocking every fixtures/OAuth blueprint import.
+func TestBlueprintJobTargetsAuthentikPool(t *testing.T) {
+	topo := exampleBlueprintDeployment()
+	wc := &benchv1alpha1.WorkloadCluster{Spec: benchv1alpha1.WorkloadClusterSpec{
+		WorkerPools: []benchv1alpha1.WorkerPoolSpec{{Name: "ak", Role: benchv1alpha1.WorkerPoolRoleAuthentik}},
+	}}
+	job := BlueprintJob(topo, wc, "blueprint-x", "cm", "key")
+	if job.Spec.Template.Spec.NodeSelector[NodePoolLabel] != "authentik" {
+		t.Errorf("nodeSelector[%s] = %v, want authentik", NodePoolLabel, job.Spec.Template.Spec.NodeSelector[NodePoolLabel])
+	}
+	if len(job.Spec.Template.Spec.Tolerations) != 1 {
+		t.Errorf("tolerations = %v, want exactly one", job.Spec.Template.Spec.Tolerations)
+	}
+}
+
 func exampleBlueprintDeployment() *benchv1alpha1.AuthentikDeployment {
 	return &benchv1alpha1.AuthentikDeployment{
 		Name: "authentik-1",
@@ -56,7 +76,7 @@ func TestBlueprintJobNameChangesWithContent(t *testing.T) {
 // single-attach volume) motivated this move.
 func TestBlueprintJobMountsConfigMapAndPVCNotDeployment(t *testing.T) {
 	topo := exampleBlueprintDeployment()
-	job := BlueprintJob(topo, "authentik-1-blueprint-fixtures-abcd1234", "bench-fixtures-blueprint", "blueprint.yaml")
+	job := BlueprintJob(topo, nil, "authentik-1-blueprint-fixtures-abcd1234", "bench-fixtures-blueprint", "blueprint.yaml")
 
 	if job.Namespace != "authentik-1" {
 		t.Errorf("job namespace = %q, want %q", job.Namespace, "authentik-1")

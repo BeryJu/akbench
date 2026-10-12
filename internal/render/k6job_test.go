@@ -10,6 +10,25 @@ import (
 	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
 )
 
+// TestPodTemplateAppliesK6PoolPlacement confirms PodTemplate passes
+// NodeSelector/Tolerations straight through onto the pod spec - the
+// controller resolves these via K6PoolPlacement before building
+// K6WorkloadParams, so this just guards the rendering side of that wiring.
+func TestPodTemplateAppliesK6PoolPlacement(t *testing.T) {
+	p := K6WorkloadParams{
+		TestCase:     &benchv1alpha1.TestCase{Name: "login-a"},
+		NodeSelector: map[string]string{NodePoolLabel: "k6"},
+		Tolerations:  []corev1.Toleration{{Key: NodePoolLabel, Value: "k6", Effect: corev1.TaintEffectNoSchedule}},
+	}
+	tmpl := p.PodTemplate()
+	if tmpl.Spec.NodeSelector[NodePoolLabel] != "k6" {
+		t.Errorf("NodeSelector = %v, want %s=k6", tmpl.Spec.NodeSelector, NodePoolLabel)
+	}
+	if len(tmpl.Spec.Tolerations) != 1 || tmpl.Spec.Tolerations[0].Value != "k6" {
+		t.Errorf("Tolerations = %v, want one matching k6", tmpl.Spec.Tolerations)
+	}
+}
+
 // TestPodTemplateNeverSharesNodeWithItsDeployment guards the k6 runner's own
 // required anti-affinity: it must never land on the same node as the
 // deployment it's driving (DeploymentName, not TargetName, which is only a

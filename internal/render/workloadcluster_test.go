@@ -117,6 +117,52 @@ func TestMultiplePoolsGetDistinctNames(t *testing.T) {
 	}
 }
 
+// TestWorkerKubeadmConfigTemplateTaintsByRole guards the node-pool
+// taint/label scheme itself: a non-Generic pool's worker nodes must register
+// with both the matching taint (what a workload's toleration permits) and
+// the matching node label (what a workload's nodeSelector actually matches
+// against) - and a Generic pool (the zero value, and every pool created
+// before this field existed) must get neither, so it schedules exactly as
+// it always did.
+func TestWorkerKubeadmConfigTemplateTaintsByRole(t *testing.T) {
+	wc := &benchv1alpha1.WorkloadCluster{Name: "wc-a", Namespace: "default"}
+
+	k6Pool := benchv1alpha1.WorkerPoolSpec{Name: "k6", Role: benchv1alpha1.WorkerPoolRoleK6, Incus: benchv1alpha1.IncusMachineSpec{Flavor: "c2-m4"}}
+	tmpl := WorkerKubeadmConfigTemplate(wc, k6Pool)
+	nodeReg := tmpl.Spec.Template.Spec.JoinConfiguration.NodeRegistration
+	if nodeReg.Taints == nil || len(*nodeReg.Taints) != 1 {
+		t.Fatalf("taints = %v, want exactly one", nodeReg.Taints)
+	}
+	taint := (*nodeReg.Taints)[0]
+	if taint.Key != NodePoolLabel || taint.Value != "k6" || taint.Effect != corev1.TaintEffectNoSchedule {
+		t.Errorf("taint = %+v, want {%s k6 NoSchedule}", taint, NodePoolLabel)
+	}
+	var sawLabel bool
+	for _, arg := range nodeReg.KubeletExtraArgs {
+		if arg.Name == "node-labels" {
+			sawLabel = true
+			if arg.Value == nil || *arg.Value != NodePoolLabel+"=k6" {
+				t.Errorf("node-labels = %v, want %s=k6", arg.Value, NodePoolLabel)
+			}
+		}
+	}
+	if !sawLabel {
+		t.Error("no --node-labels kubelet arg set for a K6-role pool")
+	}
+
+	genericPool := benchv1alpha1.WorkerPoolSpec{Name: "generic", Incus: benchv1alpha1.IncusMachineSpec{Flavor: "c2-m4"}}
+	generic := WorkerKubeadmConfigTemplate(wc, genericPool)
+	genericReg := generic.Spec.Template.Spec.JoinConfiguration.NodeRegistration
+	if genericReg.Taints == nil || len(*genericReg.Taints) != 0 {
+		t.Fatalf("Generic pool taints = %v, want an explicit empty slice", genericReg.Taints)
+	}
+	for _, arg := range genericReg.KubeletExtraArgs {
+		if arg.Name == "node-labels" {
+			t.Errorf("Generic pool got a --node-labels arg: %v", arg.Value)
+		}
+	}
+}
+
 // TestWorkerMachineTemplateNameChangesWithFlavor guards the day-2 "change a
 // pool's instance type" path: WorkloadClusterReconciler relies on the
 // template's *name* changing to get Cluster API to roll the pool's machines
@@ -170,5 +216,15 @@ func TestMachineDeploymentAutoscalingAnnotations(t *testing.T) {
 	fixedMD := MachineDeployment(wcWithPools(fixed), fixed)
 	if _, ok := fixedMD.Annotations[ClusterAutoscalerMinSizeAnnotation]; ok {
 		t.Errorf("non-autoscaled pool got the min-size annotation anyway: %v", fixedMD.Annotations)
+	}
+}
+
+func TestLoadBalancerInstanceName(t *testing.T) {
+	// Pinned against cluster-api-provider-incus's own
+	// LXCCluster.GetLoadBalancerInstanceName for namespace "default".
+	wc := &benchv1alpha1.WorkloadCluster{}
+	wc.Name, wc.Namespace = "bench-prod-incus", "default"
+	if got := LoadBalancerInstanceName(wc); got != "bench-prod-incus-37a8e-lb" {
+		t.Errorf("got %q", got)
 	}
 }
