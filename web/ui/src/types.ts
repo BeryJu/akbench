@@ -259,8 +259,17 @@ export interface AutoscalingSpec {
   maxReplicas: number;
 }
 
+// WorkerPoolRole reserves a pool's nodes for one of this project's own
+// workloads - WorkloadClusterReconciler taints/labels a non-Generic pool's
+// nodes (bench.goauthentik.io/pool=<role>), and every workload rendered for
+// that role gets a matching nodeSelector/toleration. Generic (the zero
+// value / unset) means no taint, no label - schedules anywhere, same as a
+// pool created before this field existed.
+export type WorkerPoolRole = 'Generic' | 'Authentik' | 'K6' | 'Monitoring';
+
 export interface WorkerPoolSpec {
   name: string;
+  role?: WorkerPoolRole;
   replicas: number;
   incus?: IncusMachineSpec;
   // autoscaling hands this pool's replica count over to cluster-autoscaler

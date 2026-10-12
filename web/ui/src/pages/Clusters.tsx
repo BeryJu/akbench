@@ -22,7 +22,7 @@ import { Badge, ConditionList, StatusBadge } from '../components/Status';
 import { Alert, confirmAndRun, errorMessage, Field, Page, Table } from '../components/ui';
 import { toast } from '../components/Toast';
 import { shellLinkForCluster } from '../shell/links';
-import { WorkerPoolSpec, WorkloadCluster, WorkloadClusterSpec } from '../types';
+import { WorkerPoolRole, WorkerPoolSpec, WorkloadCluster, WorkloadClusterSpec } from '../types';
 import { useResource } from '../useResource';
 
 export function ClustersPage() {
@@ -105,6 +105,14 @@ const KUBERNETES_VERSIONS = ['v1.36.4', 'v1.35.8', 'v1.34.11', 'v1.33.13', 'v1.3
 
 // cluster-api-provider-incus's own "cX-mY" flavors (X vCPUs, Y GiB RAM).
 const INSTANCE_FLAVORS = ['c1-m2', 'c2-m4', 'c4-m8', 'c8-m16', 'c16-m32'];
+
+// Mirrors api/v1alpha1.WorkerPoolRole's own enum - Generic first, since it's
+// the zero value and what every pool defaults to.
+const WORKER_POOL_ROLES: WorkerPoolRole[] = ['Generic', 'Authentik', 'K6', 'Monitoring'];
+
+function roleLabel(role: WorkerPoolRole | undefined): string {
+  return role && role !== 'Generic' ? role : 'Generic (no pool taint)';
+}
 
 function flavorLabel(flavor: string): string {
   const match = /^c(\d+)-m(\d+)$/.exec(flavor);
@@ -243,6 +251,21 @@ function ClusterForm({ existing }: { existing?: WorkloadCluster }) {
             <div className="fields" key={i} style={{ alignItems: 'end' }}>
               <Field label="Pool name">
                 <input required value={pool.name} onChange={e => patchPool(i, { name: e.target.value })} />
+              </Field>
+              <Field
+                label="Role"
+                help="Reserves this pool for one of this project's own workloads: its nodes get a matching taint/label, and that workload gets a matching nodeSelector/toleration. Generic schedules anywhere."
+              >
+                <select
+                  value={pool.role ?? 'Generic'}
+                  onChange={e => patchPool(i, { role: e.target.value as WorkerPoolRole })}
+                >
+                  {WORKER_POOL_ROLES.map(r => (
+                    <option key={r} value={r}>
+                      {roleLabel(r)}
+                    </option>
+                  ))}
+                </select>
               </Field>
               <Field
                 label="Replicas"
@@ -459,6 +482,7 @@ export function ClusterViewPage() {
             empty="No worker pools."
             columns={[
               { label: 'Pool', render: p => p.name },
+              { label: 'Role', render: p => <Badge value={roleLabel(p.role)} /> },
               {
                 label: 'Size',
                 render: p =>
