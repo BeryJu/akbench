@@ -1,17 +1,35 @@
-// One xterm.js terminal bound to one backend shell (internal/api/shell.go).
+// One ghostty-web terminal bound to one backend shell (internal/api/shell.go).
+// ghostty-web is Ghostty's own VT parser compiled to WebAssembly behind an
+// xterm.js-compatible API - the terminal emulation is the native app's, not
+// a JavaScript reimplementation.
 // Connecting is two steps: mint a single-use ticket with an ordinary
 // bearer-authenticated request, then open the WebSocket with it - the
 // browser's WebSocket API can't send an Authorization header, and the
 // long-lived token must never appear in a URL.
-import '@xterm/xterm/css/xterm.css';
-import { FitAddon } from '@xterm/addon-fit';
-import { WebLinksAddon } from '@xterm/addon-web-links';
-import { Terminal } from '@xterm/xterm';
+import { FitAddon, init, Terminal } from 'ghostty-web';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api';
 import { errorMessage } from '../components/ui';
 
 export type SessionStatus = 'connecting' | 'connected' | 'closed';
+
+// The WebAssembly module is inlined in ghostty-web's own bundle; init()
+// compiles it once, shared by every terminal on the page.
+let ghosttyReady: Promise<void> | undefined;
+
+// authentik's own monospace face (@goauthentik/fonts). ghostty-web draws to a
+// canvas and measures the cell size once at open(), so the face must be
+// loaded before then or the grid is measured against the fallback font.
+const FONT_FAMILY = "RedHatMono, ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace";
+const FONT_SIZE = 13;
+
+function loadTerminal(): Promise<void> {
+  ghosttyReady ??= Promise.all([
+    init(),
+    document.fonts.load(`${FONT_SIZE}px RedHatMono`).catch(() => undefined),
+  ]).then(() => undefined);
+  return ghosttyReady;
+}
 
 const theme = {
   background: '#0f1115',
@@ -39,6 +57,9 @@ export function TerminalSession({
   const [attempt, setAttempt] = useState(0);
   const [status, setStatus] = useState<SessionStatus>('connecting');
   const [error, setError] = useState<string>();
+  // Set once the WebAssembly module has loaded and the terminal exists -
+  // nothing can connect before then.
+  const [ready, setReady] = useState(false);
 
   // Held in a ref: the parent passes a fresh closure every render, and the
   // connection effect below must not reconnect because of that.
@@ -51,49 +72,76 @@ export function TerminalSession({
 
   // The terminal itself lives as long as the pane.
   useEffect(() => {
-    const term = new Terminal({
-      cursorBlink: true,
-      fontFamily: "ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace",
-      fontSize: 13,
-      scrollback: 10000,
-      theme,
-    });
-    const fit = new FitAddon();
-    term.loadAddon(fit);
-    term.loadAddon(new WebLinksAddon());
-    term.open(hostRef.current!);
-    termRef.current = term;
-    fitRef.current = fit;
+    let disposed = false;
+    const cleanups: (() => void)[] = [];
 
-    const send = (msg: object) => {
-      const ws = socketRef.current;
-      if (ws?.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify(msg));
-      }
-    };
-    const dataSub = term.onData(data => send({ type: 'data', data }));
-    const resizeSub = term.onResize(({ cols, rows }) => send({ type: 'resize', cols, rows }));
+    loadTerminal()
+      .then(() => {
+        if (disposed) {
+          return;
+        }
+        const term = new Terminal({
+          cursorBlink: true,
+          fontFamily: FONT_FAMILY,
+          fontSize: FONT_SIZE,
+          scrollback: 10000,
+          theme,
+        });
+        const fit = new FitAddon();
+        term.loadAddon(fit);
+        // URL and OSC 8 hyperlink detection are built in (Cmd/Ctrl+click
+        // opens them) - no web-links addon needed, unlike xterm.js.
+        term.open(hostRef.current!);
+        termRef.current = term;
+        fitRef.current = fit;
 
-    const observer = new ResizeObserver(() => {
-      // A hidden pane measures 0x0; fitting it would shrink the remote
-      // shell to nothing.
-      if (hostRef.current && hostRef.current.offsetParent !== null) {
-        fit.fit();
-      }
-    });
-    observer.observe(hostRef.current!);
+        const send = (msg: object) => {
+          const ws = socketRef.current;
+          if (ws?.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify(msg));
+          }
+        };
+        const dataSub = term.onData(data => send({ type: 'data', data }));
+        const resizeSub = term.onResize(({ cols, rows }) => send({ type: 'resize', cols, rows }));
+
+        const observer = new ResizeObserver(() => {
+          // A hidden pane measures 0x0; fitting it would shrink the remote
+          // shell to nothing.
+          if (hostRef.current && hostRef.current.offsetParent !== null) {
+            fit.fit();
+          }
+        });
+        observer.observe(hostRef.current!);
+
+        cleanups.push(() => {
+          observer.disconnect();
+          dataSub.dispose();
+          resizeSub.dispose();
+          term.dispose();
+          termRef.current = undefined;
+          fitRef.current = undefined;
+        });
+        setReady(true);
+      })
+      .catch(err => {
+        if (!disposed) {
+          setError(`Could not load the terminal: ${errorMessage(err)}`);
+          updateStatus('closed');
+        }
+      });
 
     return () => {
-      observer.disconnect();
-      dataSub.dispose();
-      resizeSub.dispose();
-      term.dispose();
+      disposed = true;
+      cleanups.forEach(cleanup => cleanup());
     };
-  }, []);
+  }, [updateStatus]);
 
   // One backend session per attempt.
   useEffect(() => {
-    const term = termRef.current!;
+    const term = termRef.current;
+    if (!ready || !term) {
+      return;
+    }
     let cancelled = false;
     let ws: WebSocket | undefined;
     updateStatus('connecting');
@@ -163,17 +211,17 @@ export function TerminalSession({
     };
     // prefill is only for the first attempt; it must not reconnect.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [context, attempt, updateStatus]);
+  }, [context, attempt, updateStatus, ready]);
 
   useEffect(() => {
-    if (active) {
+    if (active && ready) {
       // Became visible: size to the real container now.
       requestAnimationFrame(() => {
         fitRef.current?.fit();
         termRef.current?.focus();
       });
     }
-  }, [active]);
+  }, [active, ready]);
 
   return (
     <>

@@ -5,7 +5,7 @@ import { buildLabel } from './format';
 import { useAuth } from './auth';
 import { useResource } from './useResource';
 
-// xterm.js only loads once the shell is first opened.
+// The terminal (ghostty-web and its WebAssembly) only loads once the shell is first opened.
 const ShellWorkspace = lazy(async () => ({ default: (await import('./shell/ShellWorkspace')).ShellWorkspace }));
 
 // Grouped by what you're doing with it: overview first, then setting up
