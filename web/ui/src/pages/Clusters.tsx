@@ -100,6 +100,18 @@ function roleLabel(role: WorkerPoolRole | undefined): string {
   return role && role !== 'Generic' ? role : 'Generic (no pool taint)';
 }
 
+// The monitoring pool runs the whole observability stack (Prometheus,
+// Grafana, Tempo, Pyroscope, Alertmanager, ...) and scrapes every node plus
+// k6's remote writes - on 4 GiB it ran out of memory under load and took the
+// node down with it. Choosing the Monitoring role bumps a smaller flavor to
+// this one.
+const MIN_MONITORING_FLAVOR = 'c4-m8';
+
+function flavorMemoryGi(flavor: string | undefined): number {
+  const match = /^c\d+-m(\d+)$/.exec(flavor ?? '');
+  return match ? Number(match[1]) : 0;
+}
+
 function flavorLabel(flavor: string): string {
   const match = /^c(\d+)-m(\d+)$/.exec(flavor);
   return match ? `${flavor} - ${match[1]} vCPU, ${match[2]} GiB RAM` : flavor;
@@ -278,7 +290,16 @@ function ClusterForm({ existing }: { existing?: WorkloadCluster }) {
                 <Field label="Role">
                   <select
                     value={pool.role ?? 'Generic'}
-                    onChange={e => patchPool(i, { role: e.target.value as WorkerPoolRole })}
+                    onChange={e => {
+                      const role = e.target.value as WorkerPoolRole;
+                      const flavor = pool.incus?.flavor ?? INSTANCE_FLAVORS[1];
+                      patchPool(i, {
+                        role,
+                        ...(role === 'Monitoring' && flavorMemoryGi(flavor) < flavorMemoryGi(MIN_MONITORING_FLAVOR)
+                          ? { incus: { ...pool.incus, flavor: MIN_MONITORING_FLAVOR } }
+                          : {}),
+                      });
+                    }}
                   >
                     {WORKER_POOL_ROLES.map(r => (
                       <option key={r} value={r}>
@@ -287,7 +308,15 @@ function ClusterForm({ existing }: { existing?: WorkloadCluster }) {
                     ))}
                   </select>
                 </Field>
-                <Field label="Flavor">
+                <Field
+                  label="Flavor"
+                  help={
+                    pool.role === 'Monitoring' &&
+                    flavorMemoryGi(pool.incus?.flavor ?? INSTANCE_FLAVORS[1]) < flavorMemoryGi(MIN_MONITORING_FLAVOR)
+                      ? `Too small for the monitoring stack under load - use ${MIN_MONITORING_FLAVOR} or larger`
+                      : undefined
+                  }
+                >
                   <select
                     value={pool.incus?.flavor ?? INSTANCE_FLAVORS[1]}
                     onChange={e => patchPool(i, { incus: { ...pool.incus, flavor: e.target.value } })}

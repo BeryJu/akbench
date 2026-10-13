@@ -105,7 +105,8 @@ func TempoObjects(wc *benchv1alpha1.WorkloadCluster) []client.Object {
 			Name: tempoConfigMapName, Namespace: ObservabilityNamespace,
 			Data: map[string]string{"tempo.yaml": tempoConfig},
 		},
-		&appsv1.Deployment{
+		observabilityPVC(wc, "tempo-data", TempoStorageSize),
+		withPersistentData(&appsv1.Deployment{
 			Kind: kindDeployment, APIVersion: apiVersionAppsV1,
 			Name: TempoServiceName, Namespace: ObservabilityNamespace, Labels: labels,
 			Spec: appsv1.DeploymentSpec{
@@ -130,7 +131,6 @@ func TempoObjects(wc *benchv1alpha1.WorkloadCluster) []client.Object {
 								},
 								VolumeMounts: []corev1.VolumeMount{
 									{Name: "config", MountPath: "/etc/tempo"},
-									{Name: "data", MountPath: "/var/tempo"},
 								},
 							},
 						},
@@ -143,15 +143,11 @@ func TempoObjects(wc *benchv1alpha1.WorkloadCluster) []client.Object {
 									Name: tempoConfigMapName,
 								},
 							},
-							{
-								Name:     "data",
-								EmptyDir: &corev1.EmptyDirVolumeSource{},
-							},
 						},
 					},
 				},
 			},
-		},
+		}, "tempo-data", "/var/tempo", 10001),
 		&corev1.Service{
 			Kind: kindService, APIVersion: apiVersionV1,
 			Name: TempoServiceName, Namespace: ObservabilityNamespace, Labels: labels,

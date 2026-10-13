@@ -1,7 +1,9 @@
 package render
 
 import (
+	appsv1 "k8s.io/api/apps/v1"
 	"maps"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"strings"
 	"testing"
 
@@ -293,5 +295,73 @@ func TestMachineDeploymentScaleFromZeroAnnotations(t *testing.T) {
 	pool.Autoscaling = nil
 	if got := MachineDeployment(wc, pool).Annotations; len(got) != 0 {
 		t.Errorf("non-autoscaled pool annotations = %v", got)
+	}
+}
+
+func TestMachineHealthCheck(t *testing.T) {
+	wc := addonTestCluster("c1")
+	pool := benchv1alpha1.WorkerPoolSpec{Name: "monitoring", Replicas: 1}
+	mhc := MachineHealthCheck(wc, pool)
+	md := MachineDeployment(wc, pool)
+	if mhc.Name != md.Name || mhc.Spec.ClusterName != "c1" || !maps.Equal(mhc.Spec.Selector.MatchLabels, md.Spec.Selector.MatchLabels) {
+		t.Errorf("MachineHealthCheck doesn't target the pool's machines: %+v", mhc)
+	}
+	if len(mhc.Spec.Checks.UnhealthyNodeConditions) != 2 || mhc.Spec.Checks.NodeStartupTimeoutSeconds == nil {
+		t.Errorf("checks = %+v", mhc.Spec.Checks)
+	}
+	// A one-node pool must stay remediable.
+	if mhc.Spec.Remediation.TriggerIf.UnhealthyLessThanOrEqualTo != nil {
+		t.Error("an unhealthy percentage limit would block remediating a single-node pool")
+	}
+}
+
+func TestObservabilityStorage(t *testing.T) {
+	wc := addonTestCluster("c1")
+	wc.Spec.Incus = &benchv1alpha1.IncusProviderSpec{}
+	for name, objs := range map[string][]client.Object{
+		"tempo":     TempoObjects(wc),
+		"pyroscope": PyroscopeObjects(wc),
+		"grafana":   GrafanaObjects(wc, "pw"),
+	} {
+		var pvc *corev1.PersistentVolumeClaim
+		var deploy *appsv1.Deployment
+		for _, o := range objs {
+			switch o := o.(type) {
+			case *corev1.PersistentVolumeClaim:
+				pvc = o
+			case *appsv1.Deployment:
+				deploy = o
+			}
+		}
+		if pvc == nil || deploy == nil {
+			t.Fatalf("%s: pvc %v deployment %v", name, pvc, deploy)
+		}
+		if pvc.Spec.StorageClassName == nil || *pvc.Spec.StorageClassName != CSIIncusStorageClassName {
+			t.Errorf("%s: storage class %v", name, pvc.Spec.StorageClassName)
+		}
+		pod := deploy.Spec.Template.Spec
+		claimed := false
+		for _, v := range pod.Volumes {
+			if v.PersistentVolumeClaim != nil && v.PersistentVolumeClaim.ClaimName == pvc.Name {
+				claimed = true
+			}
+			if v.EmptyDir != nil {
+				t.Errorf("%s: still has an emptyDir volume %q", name, v.Name)
+			}
+		}
+		if !claimed || deploy.Spec.Strategy.Type != appsv1.RecreateDeploymentStrategyType || pod.SecurityContext == nil || pod.SecurityContext.FSGroup == nil {
+			t.Errorf("%s: claimed %v strategy %v securityContext %+v", name, claimed, deploy.Spec.Strategy.Type, pod.SecurityContext)
+		}
+	}
+
+	values, err := KubePrometheusStackHelmValues(wc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := string(values.Raw)
+	for _, want := range []string{`"storageSpec":{"volumeClaimTemplate"`, `"storage":{"volumeClaimTemplate"`, `"storage":"20Gi"`, `"retentionSize":"16GB"`, `"storageClassName":"incus-block"`} {
+		if !strings.Contains(raw, want) {
+			t.Errorf("kube-prometheus-stack values missing %s", want)
+		}
 	}
 }

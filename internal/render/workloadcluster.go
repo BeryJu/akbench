@@ -427,6 +427,40 @@ func scaleFromZeroAnnotations(pool benchv1alpha1.WorkerPoolSpec) map[string]stri
 	return annotations
 }
 
+// Health checking for worker pools: how long a node may be NotReady, or a
+// new machine take to join, before Cluster API replaces it.
+const (
+	machineUnhealthyTimeoutSeconds   int32 = 300
+	machineNodeStartupTimeoutSeconds int32 = 900
+)
+
+// MachineHealthCheck replaces a worker pool's machine whose node stopped
+// being Ready (or never joined). Without it a node that hangs - say a
+// monitoring node starved of memory until its kubelet stops reporting -
+// stays in the cluster as NotReady indefinitely, and a StatefulSet pod on it
+// (Prometheus, Alertmanager) never gets replaced: Kubernetes can't confirm
+// the old pod is gone. There's deliberately no unhealthy-percentage limit:
+// any percentage of a one-node pool rounds down to zero, which would leave
+// exactly that pool unremediable.
+func MachineHealthCheck(wc *benchv1alpha1.WorkloadCluster, pool benchv1alpha1.WorkerPoolSpec) *clusterv1.MachineHealthCheck {
+	unhealthy := machineUnhealthyTimeoutSeconds
+	return &clusterv1.MachineHealthCheck{
+		Name:      MachineDeploymentName(wc, pool),
+		Namespace: wc.Namespace,
+		Spec: clusterv1.MachineHealthCheckSpec{
+			ClusterName: wc.Name,
+			Selector:    metav1.LabelSelector{MatchLabels: machineDeploymentSelectorLabels(wc, pool)},
+			Checks: clusterv1.MachineHealthCheckChecks{
+				NodeStartupTimeoutSeconds: new(machineNodeStartupTimeoutSeconds),
+				UnhealthyNodeConditions: []clusterv1.UnhealthyNodeCondition{
+					{Type: corev1.NodeReady, Status: corev1.ConditionUnknown, TimeoutSeconds: &unhealthy},
+					{Type: corev1.NodeReady, Status: corev1.ConditionFalse, TimeoutSeconds: &unhealthy},
+				},
+			},
+		},
+	}
+}
+
 // MachineDeployment renders one worker pool. When pool.Autoscaling is set,
 // the rendered object carries cluster-autoscaler's own min/max-size
 // annotations - replicas is still set (it's this pool's initial size at

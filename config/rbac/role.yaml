@@ -124,6 +124,7 @@ rules:
   resources:
   - clusters
   - machinedeployments
+  - machinehealthchecks
   verbs:
   - create
   - delete

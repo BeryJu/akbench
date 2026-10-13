@@ -2,12 +2,16 @@ package controller
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"slices"
 	"strings"
 	"time"
 
 	helmv2 "github.com/fluxcd/helm-controller/api/v2"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -55,7 +59,7 @@ type WorkloadClusterReconciler struct {
 // +kubebuilder:rbac:groups=bench.goauthentik.io,resources=workloadclusters,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=bench.goauthentik.io,resources=workloadclusters/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=bench.goauthentik.io,resources=workloadclusters/finalizers,verbs=update
-// +kubebuilder:rbac:groups=cluster.x-k8s.io,resources=clusters;machinedeployments,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=cluster.x-k8s.io,resources=clusters;machinedeployments;machinehealthchecks,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=controlplane.cluster.x-k8s.io,resources=kubeadmcontrolplanes,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=bootstrap.cluster.x-k8s.io,resources=kubeadmconfigtemplates,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=lxcclusters;lxcmachinetemplates,verbs=get;list;watch;create;update;patch;delete
@@ -152,6 +156,11 @@ func (r *WorkloadClusterReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		desiredPools[pool.Name] = true
 		if err := applyMachineDeploymentPool(ctx, r.Client, r.Scheme, &wc, render.MachineDeployment(&wc, pool)); err != nil {
 			return ctrl.Result{}, fmt.Errorf("apply MachineDeployment for pool %q: %w", pool.Name, err)
+		}
+		// Create-only, like the CAPI objects above: Cluster API defaults
+		// fields of its own into the spec.
+		if err := applyCreateOnly(ctx, r.Client, r.Scheme, &wc, render.MachineHealthCheck(&wc, pool)); err != nil {
+			return ctrl.Result{}, fmt.Errorf("apply MachineHealthCheck for pool %q: %w", pool.Name, err)
 		}
 	}
 	if err := r.deleteRemovedWorkerPools(ctx, &wc, desiredPools); err != nil {
@@ -618,8 +627,14 @@ func createAll(ctx context.Context, c client.Client, objs []client.Object) error
 func createIfMissing(ctx context.Context, c client.Client, obj client.Object) error {
 	gvk := obj.GetObjectKind().GroupVersionKind()
 	key := client.ObjectKeyFromObject(obj)
+	if d, ok := obj.(*appsv1.Deployment); ok {
+		setSpecHash(d)
+	}
 	existing := obj.DeepCopyObject().(client.Object)
 	if err := c.Get(ctx, key, existing); err == nil {
+		if d, ok := obj.(*appsv1.Deployment); ok {
+			return updateDeploymentIfChanged(ctx, c, existing.(*appsv1.Deployment), d)
+		}
 		return nil
 	} else if !apierrors.IsNotFound(err) {
 		return fmt.Errorf("get %s %s/%s: %w", gvk.Kind, key.Namespace, key.Name, err)
@@ -636,6 +651,39 @@ func createIfMissing(ctx context.Context, c client.Client, obj client.Object) er
 		return nil
 	}
 	return fmt.Errorf("create %s %s/%s: %w", gvk.Kind, key.Namespace, key.Name, err)
+}
+
+// specHashAnnotation records the hash of the spec this operator last
+// rendered for an add-on Deployment, so a changed render (e.g. a new
+// volume) reaches clusters that already have the Deployment - createAll is
+// otherwise create-only - without comparing against fields the apiserver
+// defaults.
+const specHashAnnotation = "bench.goauthentik.io/spec-hash"
+
+func setSpecHash(d *appsv1.Deployment) {
+	raw, _ := json.Marshal(d.Spec)
+	sum := sha256.Sum256(raw)
+	if d.Annotations == nil {
+		d.Annotations = map[string]string{}
+	}
+	d.Annotations[specHashAnnotation] = hex.EncodeToString(sum[:8])
+}
+
+// updateDeploymentIfChanged replaces existing's spec with desired's when
+// desired was rendered differently from what existing was last given.
+func updateDeploymentIfChanged(ctx context.Context, c client.Client, existing, desired *appsv1.Deployment) error {
+	if existing.Annotations[specHashAnnotation] == desired.Annotations[specHashAnnotation] {
+		return nil
+	}
+	existing.Spec = desired.Spec
+	if existing.Annotations == nil {
+		existing.Annotations = map[string]string{}
+	}
+	existing.Annotations[specHashAnnotation] = desired.Annotations[specHashAnnotation]
+	if err := c.Update(ctx, existing); err != nil {
+		return fmt.Errorf("update Deployment %s/%s: %w", existing.Namespace, existing.Name, err)
+	}
+	return nil
 }
 
 // ensureControlPlane creates the KubeadmControlPlane once it is safe to.
@@ -699,6 +747,10 @@ func (r *WorkloadClusterReconciler) deleteRemovedWorkerPools(ctx context.Context
 		}
 		if err := r.Delete(ctx, md); err != nil && !apierrors.IsNotFound(err) {
 			return fmt.Errorf("delete MachineDeployment %s: %w", md.Name, err)
+		}
+		mhc := &clusterv1.MachineHealthCheck{Name: md.Name, Namespace: md.Namespace}
+		if err := r.Delete(ctx, mhc); err != nil && !apierrors.IsNotFound(err) {
+			return fmt.Errorf("delete MachineHealthCheck %s: %w", md.Name, err)
 		}
 	}
 	return nil

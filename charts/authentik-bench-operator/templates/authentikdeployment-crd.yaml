@@ -119,7 +119,8 @@ spec:
               clusterRef:
                 description: |-
                   clusterRef names a cluster.x-k8s.io/v1beta1 Cluster this deployment is
-                  deployed onto. Empty means the cluster the operator itself runs on.
+                  deployed onto. Deploying onto the management cluster itself is not
+                  allowed.
                 properties:
                   name:
                     default: ""
@@ -132,6 +133,10 @@ spec:
                     type: string
                 type: object
                 x-kubernetes-map-type: atomic
+                x-kubernetes-validations:
+                - message: clusterRef.name must name a workload cluster; deploying onto
+                    the management cluster is not allowed
+                  rule: has(self.name) && self.name != ''
               namespace:
                 description: |-
                   namespace is the namespace this deployment is installed into on the
@@ -423,6 +428,7 @@ spec:
                     type: object
                 type: object
             required:
+            - clusterRef
             - namespace
             - postgres
             - server

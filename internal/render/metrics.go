@@ -3,6 +3,7 @@ package render
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
 
 	helmv2 "github.com/fluxcd/helm-controller/api/v2"
 	fluxmeta "github.com/fluxcd/pkg/apis/meta"
@@ -218,8 +219,16 @@ func KubePrometheusStackHelmValues(wc *benchv1alpha1.WorkloadCluster) (*apiexten
 		"serviceMonitorSelectorNilUsesHelmValues": false,
 		"podMonitorSelectorNilUsesHelmValues":     false,
 		"ruleSelectorNilUsesHelmValues":           false,
+		"resources":                               prometheusResources(wc),
+		// Persistent, and capped below the volume's size so a long Burn run
+		// can't fill it.
+		"storageSpec":   volumeClaimTemplate(wc, PrometheusStorageSize),
+		"retentionSize": prometheusRetentionSize,
 	}
-	alertmanagerSpec := map[string]any{}
+	alertmanagerSpec := map[string]any{
+		// Silences and notification state survive a restart.
+		"storage": volumeClaimTemplate(wc, AlertmanagerStorageSize),
+	}
 	prometheusOperator := map[string]any{}
 	kubeStateMetrics := map[string]any{}
 	if len(poolSelector) > 0 || len(poolTolerations) > 0 {
@@ -336,4 +345,38 @@ func KubePrometheusStackHelmRelease(wc *benchv1alpha1.WorkloadCluster, values *a
 			},
 		},
 	})
+}
+
+// prometheusMemoryShare is the fraction of a monitoring pool node's memory
+// Prometheus may use, leaving the rest for everything else the pool runs
+// (Grafana, Tempo, Pyroscope, Alertmanager, the operator, csi-incus'
+// controller, kubelet).
+const prometheusMemoryShare = 0.6
+
+// prometheusResources sizes Prometheus from its node. Without any requests
+// or limits the scheduler had no idea what it needed, and a monitoring node
+// under load (k6 remote write, scraping every node) ran out of memory as a
+// whole - starving the kubelet until the node went NotReady and took the
+// entire observability stack down with it. With a limit, Prometheus alone
+// is OOM-killed and restarted instead. The limit tracks the monitoring
+// pool's flavor (cX-mY); with no dedicated monitoring pool, or a flavor
+// that isn't cX-mY, it falls back to a conservative fixed size.
+func prometheusResources(wc *benchv1alpha1.WorkloadCluster) map[string]any {
+	limitMi := 2048
+	if wc != nil {
+		for _, pool := range wc.Spec.WorkerPools {
+			if pool.Role != benchv1alpha1.WorkerPoolRoleMonitoring {
+				continue
+			}
+			if m := incusFlavorPattern.FindStringSubmatch(pool.Incus.Flavor); m != nil {
+				gi, _ := strconv.Atoi(m[2])
+				limitMi = int(float64(gi*1024) * prometheusMemoryShare)
+			}
+			break
+		}
+	}
+	return map[string]any{
+		"requests": map[string]any{"cpu": "250m", "memory": fmt.Sprintf("%dMi", limitMi/2)},
+		"limits":   map[string]any{"memory": fmt.Sprintf("%dMi", limitMi)},
+	}
 }

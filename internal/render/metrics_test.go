@@ -288,3 +288,26 @@ func TestKubePrometheusStackHelmRelease(t *testing.T) {
 		t.Errorf("upgrade.crds = %v, want CreateReplace", hr.Spec.Upgrade)
 	}
 }
+
+func TestPrometheusResourcesFollowMonitoringPool(t *testing.T) {
+	wc := addonTestCluster("c1")
+	if got := prometheusResources(wc); got["limits"].(map[string]any)["memory"] != "2048Mi" {
+		t.Errorf("no monitoring pool: %v", got)
+	}
+	wc.Spec.WorkerPools = []benchv1alpha1.WorkerPoolSpec{
+		{Name: "ak", Role: benchv1alpha1.WorkerPoolRoleAuthentik, Incus: benchv1alpha1.IncusMachineSpec{Flavor: "c16-m32"}},
+		{Name: "monitoring", Role: benchv1alpha1.WorkerPoolRoleMonitoring, Incus: benchv1alpha1.IncusMachineSpec{Flavor: "c4-m8"}},
+	}
+	got := prometheusResources(wc)
+	if got["limits"].(map[string]any)["memory"] != "4915Mi" || got["requests"].(map[string]any)["memory"] != "2457Mi" {
+		t.Errorf("c4-m8 monitoring pool: %v", got)
+	}
+
+	values, err := KubePrometheusStackHelmValues(wc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(values.Raw), `"retentionSize":"16GB"`) || !strings.Contains(string(values.Raw), `"memory":"4915Mi"`) {
+		t.Errorf("values missing resources/retentionSize: %s", values.Raw)
+	}
+}

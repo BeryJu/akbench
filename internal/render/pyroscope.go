@@ -44,7 +44,8 @@ func PyroscopeObjects(wc *benchv1alpha1.WorkloadCluster) []client.Object {
 			Kind: kindNamespace, APIVersion: apiVersionV1,
 			Name: ObservabilityNamespace,
 		},
-		&appsv1.Deployment{
+		observabilityPVC(wc, "pyroscope-data", PyroscopeStorageSize),
+		withPersistentData(&appsv1.Deployment{
 			Kind: kindDeployment, APIVersion: apiVersionAppsV1,
 			Name: PyroscopeServiceName, Namespace: ObservabilityNamespace, Labels: labels,
 			Spec: appsv1.DeploymentSpec{
@@ -65,7 +66,7 @@ func PyroscopeObjects(wc *benchv1alpha1.WorkloadCluster) []client.Object {
 					},
 				},
 			},
-		},
+		}, "pyroscope-data", "/data", 10001),
 		&corev1.Service{
 			Kind: kindService, APIVersion: apiVersionV1,
 			Name: PyroscopeServiceName, Namespace: ObservabilityNamespace, Labels: labels,

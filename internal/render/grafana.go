@@ -208,7 +208,8 @@ func GrafanaObjects(wc *benchv1alpha1.WorkloadCluster, adminPassword string) []c
 				"nodes.json":         string(grafanaDashboardNodes),
 			},
 		},
-		&appsv1.Deployment{
+		observabilityPVC(wc, "grafana-data", GrafanaStorageSize),
+		withPersistentData(&appsv1.Deployment{
 			Kind: kindDeployment, APIVersion: apiVersionAppsV1,
 			Name: GrafanaServiceName, Namespace: ObservabilityNamespace, Labels: labels,
 			Spec: appsv1.DeploymentSpec{
@@ -282,7 +283,7 @@ func GrafanaObjects(wc *benchv1alpha1.WorkloadCluster, adminPassword string) []c
 					},
 				},
 			},
-		},
+		}, "grafana-data", "/var/lib/grafana", 472),
 		&corev1.Service{
 			Kind: kindService, APIVersion: apiVersionV1,
 			Name: GrafanaServiceName, Namespace: ObservabilityNamespace, Labels: labels,

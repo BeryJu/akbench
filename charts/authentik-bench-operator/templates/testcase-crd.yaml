@@ -362,6 +362,12 @@ spec:
                           type: string
                       type: object
                       x-kubernetes-map-type: atomic
+                    burningSince:
+                      description: |-
+                        burningSince is the burn Deployment's creationTimestamp - when this
+                        target started burning, unaffected by operator restarts or Ready flaps.
+                      format: date-time
+                      type: string
                     name:
                       description: name is the AuthentikDeployment object name (one
                         of TestCase.Deployments()).
