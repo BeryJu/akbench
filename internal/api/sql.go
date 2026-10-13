@@ -55,14 +55,30 @@ const (
 
 // sqlPsqlScript runs psql over the pod's local socket. Nothing from the
 // request is ever interpolated into it: the query arrives on stdin, and the
-// only argv extension ("$@") comes from the fixed sqlFormatArgs table. The
-// env fallbacks cover both pod shapes - the embedded chart's official
-// postgres image sets POSTGRES_USER/PASSWORD/DB, a CNPG instance runs as the
-// postgres OS user with peer auth and sets none of them.
-const sqlPsqlScript = `PGPASSWORD="$POSTGRES_PASSWORD" ` +
-	`PGOPTIONS='-c default_transaction_read_only=on -c statement_timeout=` + sqlStatementTimeout + `' ` +
-	`exec psql -X -v ON_ERROR_STOP=1 -P pager=off ` +
-	`-U "${POSTGRES_USER:-postgres}" -d "${POSTGRES_DB:-authentik}" -f - "$@"`
+// only argv extension ("$@") comes from the fixed sqlFormatArgs table.
+//
+// The local socket is not trust-authenticated in the embedded chart's pod,
+// and which env var holds which role's password differs between chart
+// versions (plain vs _FILE, the app role vs the postgres superuser that
+// PostgresRoleFixJob creates), so each known user/password pairing is probed
+// with a no-op connection (-w: never prompt) and the first that works is
+// used. A CNPG instance runs as the postgres OS user with peer auth, which
+// the final, empty-password candidate covers. If none work, the real psql
+// below fails with the server's own authentication error.
+const sqlPsqlScript = `DB="${POSTGRES_DB:-authentik}"
+rd() { if [ -n "$1" ] && [ -r "$1" ]; then cat "$1"; fi; }
+try() { PGPASSWORD="$2" psql -X -w -U "$1" -d "$DB" -c '\q' >/dev/null 2>&1; }
+for c in \
+  "${POSTGRES_USER:-postgres}|${POSTGRES_PASSWORD:-}" \
+  "${POSTGRES_USER:-postgres}|$(rd "${POSTGRES_PASSWORD_FILE:-}")" \
+  "postgres|${POSTGRES_POSTGRES_PASSWORD:-}" \
+  "postgres|$(rd "${POSTGRES_POSTGRES_PASSWORD_FILE:-}")" \
+  "postgres|${POSTGRES_PASSWORD:-}" \
+  "postgres|"; do
+  if try "${c%%|*}" "${c#*|}"; then export PGUSER="${c%%|*}" PGPASSWORD="${c#*|}"; break; fi
+done
+PGOPTIONS='-c default_transaction_read_only=on -c statement_timeout=` + sqlStatementTimeout + `' ` +
+	`exec psql -X -w -v ON_ERROR_STOP=1 -P pager=off -d "$DB" -f - "$@"`
 
 var sqlFormatArgs = map[string][]string{
 	sqlFormatAligned: nil,
