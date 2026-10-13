@@ -18,7 +18,10 @@ const ManagementClusterName = "management"
 
 // capiClusterGVK is the Cluster API kind the operator resolves clusterRef
 // against from M4 on.
-var capiClusterGVK = schema.GroupVersionKind{Group: "cluster.x-k8s.io", Version: "v1beta2", Kind: "Cluster"}
+var (
+	capiGV         = schema.GroupVersion{Group: "cluster.x-k8s.io", Version: "v1beta2"}
+	capiClusterGVK = capiGV.WithKind("Cluster")
+)
 
 // Cluster is the UI's view of somewhere a deployment can be deployed.
 type Cluster struct {

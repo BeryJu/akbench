@@ -258,7 +258,7 @@ ENVTEST_K8S_VERSION ?= $(shell v='$(call gomodver,k8s.io/api)'; \
 # that IR builder predates. Fixed upstream in staticcheck v0.8.0 (bundled
 # from golangci-lint v2.13.2) - confirmed against this exact panic, not
 # guessed.
-GOLANGCI_LINT_VERSION ?= v2.13.2
+GOLANGCI_LINT_VERSION ?= v2.14.0
 .PHONY: kustomize
 kustomize: $(KUSTOMIZE) ## Download kustomize locally if necessary.
 $(KUSTOMIZE): $(LOCALBIN)

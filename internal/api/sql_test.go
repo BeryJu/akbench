@@ -8,7 +8,6 @@ import (
 	"strings"
 	"testing"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
@@ -16,7 +15,7 @@ import (
 
 func sqlDeployment(name string, mode benchv1alpha1.PostgresMode, cluster string) *benchv1alpha1.AuthentikDeployment {
 	d := &benchv1alpha1.AuthentikDeployment{
-		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: testNamespace},
+		Name: name, Namespace: testNamespace,
 		Spec: benchv1alpha1.AuthentikDeploymentSpec{
 			Namespace: name + "-ns",
 		},

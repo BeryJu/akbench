@@ -76,6 +76,10 @@ linters:
         # are the point in tests - a shared const would trade readability at
         # each call site for less duplication that was never the risk here.
       - linters:
+          - goconst
+        path: internal/fixtures/fixtures\.go
+        # Group names in the synthetic org chart are data, not shared concepts.
+      - linters:
           - staticcheck
         path: cmd/main\.go
         text: "GetEventRecorderFor is deprecated"

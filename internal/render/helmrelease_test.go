@@ -2,8 +2,9 @@ package render
 
 import (
 	"encoding/json"
-	helmv2 "github.com/fluxcd/helm-controller/api/v2"
 	"testing"
+
+	helmv2 "github.com/fluxcd/helm-controller/api/v2"
 
 	corev1 "k8s.io/api/core/v1"
 

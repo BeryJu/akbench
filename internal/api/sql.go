@@ -279,8 +279,7 @@ func execInPod(ctx context.Context, req podExecRequest) (podExecResult, error) {
 	res := podExecResult{Pod: pod}
 	err = executor.StreamWithContext(ctx, remotecommand.StreamOptions{Stdin: req.Stdin, Stdout: stdout, Stderr: stderr})
 	res.Stdout, res.Stderr = stdout.Bytes(), stderr.Bytes()
-	var exitErr utilexec.ExitError
-	if errors.As(err, &exitErr) {
+	if exitErr, ok := errors.AsType[utilexec.ExitError](err); ok {
 		// psql itself failed (bad SQL, ON_ERROR_STOP): its stderr says why,
 		// which is the caller's answer rather than a gateway error.
 		res.ExitCode = exitErr.ExitStatus()

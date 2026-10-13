@@ -231,7 +231,9 @@ func main() {
 	// Not fatal: without them only test cases are blocked, and they say so.
 	if users, seed, err := fixtureSettings(); err != nil {
 		setupLog.Error(err, "Invalid test user settings; not seeding test users")
-	} else if err := controller.SeedFixtures(ctx, seedClient, envOr("BENCH_NAMESPACE", "default"), users, seed); err != nil {
+	} else if err := controller.SeedFixtures(
+		ctx, seedClient, envOr("BENCH_NAMESPACE", "default"), users, seed,
+	); err != nil {
 		setupLog.Error(err, "Failed to seed test users")
 	}
 

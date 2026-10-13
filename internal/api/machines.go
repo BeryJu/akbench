@@ -8,7 +8,6 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -20,8 +19,8 @@ import (
 // yet) and works while the cluster's API is unreachable.
 
 var (
-	capiMachineListGVK           = schema.GroupVersionKind{Group: "cluster.x-k8s.io", Version: "v1beta2", Kind: "MachineList"}
-	capiMachineDeploymentListGVK = schema.GroupVersionKind{Group: "cluster.x-k8s.io", Version: "v1beta2", Kind: "MachineDeploymentList"}
+	capiMachineListGVK           = capiGV.WithKind("MachineList")
+	capiMachineDeploymentListGVK = capiGV.WithKind("MachineDeploymentList")
 )
 
 const (
