@@ -308,11 +308,12 @@ func (r *TestCaseReconciler) reconcileTarget(ctx context.Context, tc *benchv1alp
 	}
 
 	if tc.Spec.Profile == benchv1alpha1.ProfileBurn {
-		name, err := r.reconcileBurn(ctx, rc, remote, tc, ref.Name, params)
+		dep, err := r.reconcileBurn(ctx, rc, remote, tc, ref.Name, params)
 		if err != nil {
 			return targetResult{}, fmt.Errorf("reconcile burn deployment for %q: %w", ref.Name, err)
 		}
-		result.status.BurnWorkloadRef = &corev1.LocalObjectReference{Name: name}
+		result.status.BurnWorkloadRef = &corev1.LocalObjectReference{Name: dep.Name}
+		result.status.BurningSince = dep.CreationTimestamp.DeepCopy()
 	}
 	// Quick: execution is a TestRun's job, nothing to reconcile continuously
 	// here. An unrecognized profile is likewise a no-op - Reconcile checks
@@ -434,16 +435,16 @@ func deleteLegacyBurnDeployment(ctx context.Context, rc client.Client, tc *bench
 }
 
 // reconcileBurn applies one target's k6 burn Deployment via rc, returning
-// its name. An ownerReference is only set when the Deployment lives on the
+// it as stored on the cluster. An ownerReference is only set when the Deployment lives on the
 // local cluster (remote==false): a cross-cluster ownerReference would carry
 // a UID the remote cluster's garbage collector can never recognize, so
 // remote cleanup instead goes through cleanupStaleBurnDeployments above.
-func (r *TestCaseReconciler) reconcileBurn(ctx context.Context, rc client.Client, remote bool, tc *benchv1alpha1.TestCase, deploymentName string, params render.K6WorkloadParams) (string, error) {
+func (r *TestCaseReconciler) reconcileBurn(ctx context.Context, rc client.Client, remote bool, tc *benchv1alpha1.TestCase, deploymentName string, params render.K6WorkloadParams) (*appsv1.Deployment, error) {
 	name := render.BurnDeploymentName(tc.Name, deploymentName)
 	dep := render.BurnDeployment(name, tc.Namespace, params)
 	if !remote {
 		if err := controllerutil.SetControllerReference(tc, dep, r.Scheme); err != nil {
-			return "", err
+			return nil, err
 		}
 	}
 	existing := &appsv1.Deployment{}
@@ -451,17 +452,18 @@ func (r *TestCaseReconciler) reconcileBurn(ctx context.Context, rc client.Client
 	switch {
 	case apierrors.IsNotFound(err):
 		if err := rc.Create(ctx, dep); err != nil {
-			return "", err
+			return nil, err
 		}
+		return dep, nil
 	case err != nil:
-		return "", err
+		return nil, err
 	default:
 		existing.Spec = dep.Spec
 		if err := rc.Update(ctx, existing); err != nil {
-			return "", err
+			return nil, err
 		}
 	}
-	return name, nil
+	return existing, nil
 }
 
 // ensureScriptConfigMap mirrors the resolved script content - a

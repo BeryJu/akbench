@@ -9,7 +9,6 @@ import {
   CompareMetric,
   CompareResponse,
   RangePoint,
-  readyCondition,
   TestCase,
   testCaseDeployments,
 } from '../types';
@@ -54,14 +53,14 @@ export function buildTargetRows(
   });
 }
 
-/** burningFor is how long a Burn test has been Ready - its Ready
- * condition's last transition, so a restart or a target change resets it. */
+/** burningFor is how long a Burn test has been running - since its oldest
+ * target's burn Deployment was created, so operator restarts don't reset it. */
 export function burningFor(tc: TestCase, now = Date.now()): string | undefined {
-  const ready = readyCondition(tc.status?.conditions);
-  if (ready?.status !== 'True' || !ready.lastTransitionTime) {
+  const since = (tc.status?.deployments ?? []).flatMap(d => (d.burningSince ? [Date.parse(d.burningSince)] : []));
+  if (since.length === 0) {
     return undefined;
   }
-  return formatDuration((now - Date.parse(ready.lastTransitionTime)) / 1000);
+  return formatDuration((now - Math.min(...since)) / 1000);
 }
 
 /** targetLetter is a short, stable handle for a target (A, B, C...) - the

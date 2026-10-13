@@ -77,6 +77,8 @@ var _ = Describe("TestCase Controller", func() {
 			Expect(depStatus.Ready).To(BeTrue())
 			Expect(depStatus.BurnWorkloadRef).NotTo(BeNil())
 			Expect(depStatus.BurnWorkloadRef.Name).To(Equal(depName))
+			Expect(depStatus.BurningSince).NotTo(BeNil())
+			Expect(depStatus.BurningSince.Equal(&dep.CreationTimestamp)).To(BeTrue())
 			ready := meta.FindStatusCondition(tc.Status.Conditions, benchv1alpha1.ConditionReady)
 			Expect(ready).NotTo(BeNil())
 			Expect(ready.Status).To(Equal(metav1.ConditionTrue))

@@ -141,6 +141,11 @@ type TestCaseDeploymentStatus struct {
 	// profile is Burn.
 	// +optional
 	BurnWorkloadRef *corev1.LocalObjectReference `json:"burnWorkloadRef,omitempty"`
+
+	// burningSince is the burn Deployment's creationTimestamp - when this
+	// target started burning, unaffected by operator restarts or Ready flaps.
+	// +optional
+	BurningSince *metav1.Time `json:"burningSince,omitempty"`
 }
 
 // TestCaseStatus defines the observed state of TestCase.

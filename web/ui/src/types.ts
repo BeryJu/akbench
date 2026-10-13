@@ -141,6 +141,7 @@ export interface TestCaseDeploymentStatus {
   name: string;
   ready: boolean;
   burnWorkloadRef?: { name: string };
+  burningSince?: string;
 }
 
 export interface TestCase {
