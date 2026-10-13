@@ -62,7 +62,7 @@ export function DashboardPage() {
       .reduce<(typeof targets)[number] | undefined>((w, r) => (!w || r.values[key] > w.values[key] ? r : w), undefined);
   const slowest = worst('iteration_duration_p95');
   const mostFailing = worst('http_req_failed');
-  const firing = (alerts.data ?? []).filter(a => a.state === 'active');
+  const firing = (alerts.data?.items ?? []).filter(a => a.state === 'active');
 
   const quickRuns = [...(runs.data ?? [])].sort((a, b) =>
     (b.metadata.creationTimestamp ?? '').localeCompare(a.metadata.creationTimestamp ?? '')

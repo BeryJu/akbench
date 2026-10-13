@@ -9,8 +9,8 @@
 // own cluster/namespace is exactly the scope a human investigating it is
 // about to `kubectl` into, so that's the natural way to scan a page that can
 // otherwise mix a dozen unrelated components' alerts together. A handful of
-// alerts are cluster-scoped and carry no namespace at all (Watchdog, etcd,
-// node-level alerts) - those get their own "(cluster-scoped)" group per
+// alerts are cluster-scoped and carry no namespace at all (etcd, node-level
+// alerts) - those get their own "(cluster-scoped)" group per
 // cluster rather than being dropped or miscategorized.
 import { Link } from 'react-router';
 import { api } from '../api';
@@ -86,7 +86,7 @@ function alertColumns(cluster: string) {
 
 export function AlertsPage() {
   const alerts = useResource(() => api.alerts(), [], 15000);
-  const grouped = alerts.data && groupByClusterThenNamespace(alerts.data);
+  const grouped = alerts.data && groupByClusterThenNamespace(alerts.data.items);
 
   return (
     <Page
@@ -94,6 +94,11 @@ export function AlertsPage() {
       subtitle="Firing alerts across every workload cluster's own Alertmanager - there is no notification channel configured yet, so this is the only place to see them."
     >
       <AlertBanner>{alerts.error}</AlertBanner>
+      {Object.entries(alerts.data?.unhealthy ?? {}).map(([cluster, reason]) => (
+        <AlertBanner key={cluster}>
+          <Link to={`/clusters/${cluster}`}>{cluster}</Link>: {reason}
+        </AlertBanner>
+      ))}
       {grouped && grouped.length === 0 && <p className="muted">No alerts firing right now.</p>}
       {grouped?.map(([cluster, byNamespace]) => (
         <div key={cluster} className="panel">

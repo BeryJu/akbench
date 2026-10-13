@@ -37,7 +37,7 @@ func fakeAlertmanager(t *testing.T, alertnames ...string) *httptest.Server {
 // reconciled AlertmanagerURL is queried and the results merged, tagged with
 // which cluster produced them.
 func TestListAlertsAggregatesAcrossClusters(t *testing.T) {
-	am1 := fakeAlertmanager(t, "AuthentikBenchPostgresDown")
+	am1 := fakeAlertmanager(t, "AuthentikBenchPostgresDown", "Watchdog", "InfoInhibitor")
 	defer am1.Close()
 	am2 := fakeAlertmanager(t, "AuthentikBenchServiceScrapeDown", "AuthentikBenchWorkerTaskErrors")
 	defer am2.Close()
@@ -60,8 +60,14 @@ func TestListAlertsAggregatesAcrossClusters(t *testing.T) {
 	requireStatus(t, rec, http.StatusOK)
 
 	body := decodeBody[struct {
-		Items []Alert `json:"items"`
+		Items     []Alert           `json:"items"`
+		Unhealthy map[string]string `json:"unhealthy"`
 	}](t, rec)
+	// Watchdog/InfoInhibitor are dropped; wc2 has no Watchdog so it's
+	// unhealthy, wc3 isn't reconciled so it's neither.
+	if _, ok := body.Unhealthy["wc2"]; !ok || len(body.Unhealthy) != 1 {
+		t.Fatalf("got unhealthy %v, want only wc2", body.Unhealthy)
+	}
 	if len(body.Items) != 3 {
 		t.Fatalf("got %d alerts, want 3: %+v", len(body.Items), body.Items)
 	}
@@ -81,7 +87,7 @@ func TestListAlertsAggregatesAcrossClusters(t *testing.T) {
 // decision: one cluster's Alertmanager being unreachable must not blank out
 // every other cluster's alerts.
 func TestListAlertsSkipsUnreachableCluster(t *testing.T) {
-	am := fakeAlertmanager(t, "AuthentikBenchPostgresDown")
+	am := fakeAlertmanager(t, "AuthentikBenchPostgresDown", "Watchdog")
 	defer am.Close()
 
 	reachable := &benchv1alpha1.WorkloadCluster{
@@ -98,8 +104,12 @@ func TestListAlertsSkipsUnreachableCluster(t *testing.T) {
 	requireStatus(t, rec, http.StatusOK)
 
 	body := decodeBody[struct {
-		Items []Alert `json:"items"`
+		Items     []Alert           `json:"items"`
+		Unhealthy map[string]string `json:"unhealthy"`
 	}](t, rec)
+	if _, ok := body.Unhealthy["unreachable"]; !ok || len(body.Unhealthy) != 1 {
+		t.Fatalf("got unhealthy %v, want only unreachable", body.Unhealthy)
+	}
 	if len(body.Items) != 1 {
 		t.Fatalf("got %d alerts, want 1 (from the reachable cluster only): %+v", len(body.Items), body.Items)
 	}

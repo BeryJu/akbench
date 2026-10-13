@@ -249,7 +249,13 @@ export const api = {
 
   // -- Alerts (internal/api/alerts.go) - aggregated across every workload
   // cluster's own Alertmanager, there is no central instance.
-  alerts: () => request<List<Alert>>('/api/v1/alerts').then(r => r.items ?? []),
+  // unhealthy maps cluster -> why its alerts can't be trusted (Alertmanager
+  // unreachable or Watchdog not firing).
+  alerts: () =>
+    request<List<Alert> & { unhealthy?: Record<string, string> }>('/api/v1/alerts').then(r => ({
+      items: r.items ?? [],
+      unhealthy: r.unhealthy ?? {},
+    })),
   placement: () => request<List<PodPlacement>>('/api/v1/placement').then(r => r.items ?? []),
 
   // -- Shell (internal/api/shell.go)

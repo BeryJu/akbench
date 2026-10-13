@@ -39,6 +39,16 @@ type Alert struct {
 	GeneratorURL string            `json:"generatorURL"`
 }
 
+// Meta-alerts kube-prometheus-stack ships that fire by design rather than
+// reporting a problem: Watchdog always fires to prove the pipeline is alive,
+// InfoInhibitor fires whenever an info-severity alert exists so Alertmanager
+// can mute it. Neither is shown as an alert; a missing Watchdog is reported
+// via listAlerts' unhealthy map instead.
+const (
+	watchdogAlert      = "Watchdog"
+	infoInhibitorAlert = "InfoInhibitor"
+)
+
 // alertmanagerAlert is Alertmanager's own GET /api/v2/alerts response shape -
 // trimmed to the fields listAlerts actually uses.
 type alertmanagerAlert struct {
@@ -55,8 +65,10 @@ type alertmanagerAlert struct {
 // listAlerts aggregates every workload cluster's own Alertmanager - there is
 // no central instance, see Alert's own doc comment. A cluster whose
 // Alertmanager hasn't reconciled a URL yet, or isn't reachable right now, is
-// silently skipped rather than failing the whole request: one cluster having
-// a bad day shouldn't blank out every other cluster's alerts.
+// skipped rather than failing the whole request: one cluster having a bad day
+// shouldn't blank out every other cluster's alerts. Instead it, and any
+// cluster whose Watchdog isn't firing, lands in the "unhealthy" map
+// (cluster -> reason) so the UI can say its alerts can't be trusted.
 func (s *Server) listAlerts(w http.ResponseWriter, r *http.Request) {
 	var clusters benchv1alpha1.WorkloadClusterList
 	if err := s.client.List(r.Context(), &clusters, client.InNamespace(s.cfg.Namespace)); err != nil {
@@ -65,20 +77,37 @@ func (s *Server) listAlerts(w http.ResponseWriter, r *http.Request) {
 	}
 
 	alerts := []Alert{}
+	unhealthy := map[string]string{}
 	for _, wc := range clusters.Items {
 		if wc.Status.AlertmanagerURL == "" {
 			continue
 		}
 		fetched, err := s.fetchAlerts(r.Context(), wc.Name, wc.Status.AlertmanagerURL)
 		if err != nil {
+			unhealthy[wc.Name] = "Alertmanager unreachable: " + err.Error()
 			continue
 		}
-		alerts = append(alerts, fetched...)
+		watchdog := false
+		for _, a := range fetched {
+			switch a.Labels["alertname"] {
+			case watchdogAlert:
+				watchdog = true
+			case infoInhibitorAlert:
+			default:
+				alerts = append(alerts, a)
+			}
+		}
+		if !watchdog {
+			unhealthy[wc.Name] = "Watchdog alert not firing, the alerting pipeline may be broken"
+		}
 	}
 	// Newest first - an alert that just started firing is the one worth
 	// seeing without scrolling.
 	slices.SortFunc(alerts, func(a, b Alert) int { return strings.Compare(b.StartsAt, a.StartsAt) })
-	writeItems(w, r, alerts)
+	writeJSON(w, r, http.StatusOK, struct {
+		Items     []Alert           `json:"items"`
+		Unhealthy map[string]string `json:"unhealthy"`
+	}{alerts, unhealthy})
 }
 
 func (s *Server) fetchAlerts(ctx context.Context, cluster, baseURL string) ([]Alert, error) {
