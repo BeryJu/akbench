@@ -20,12 +20,11 @@ change hands.
 | Infrastructure providers | The script enables, on the appliance, every infrastructure provider the source has installed, the same way the Infrastructure page's **Enable** button does, and waits until they're installed. |
 | Operator-generated Secrets, the `HelmRelease`s of `AuthentikDeployment`s | Not copied. The appliance's operator regenerates them. helm-controller finds each existing helm release on its cluster and upgrades it in place, so nothing is reinstalled. |
 
-**What does not carry over:** any `AuthentikDeployment` or `TestCase` that
-runs on the **old management cluster itself** (no `clusterRef` /
-`runnerClusterRef`). Its definition is copied, but the appliance installs it
-fresh onto its own k3s. An embedded or CNPG Postgres starts empty, and
-metrics stored in the old cluster's Prometheus stay behind. The script lists
-these before asking to proceed.
+**What does not carry over:** any `AuthentikDeployment` that runs on the
+**old management cluster itself** (no `clusterRef`). The appliance does not
+allow those, so the script stops until they're deleted or recreated on a
+workload cluster. Metrics stored in the old cluster's Prometheus stay
+behind.
 
 ## Before you start
 

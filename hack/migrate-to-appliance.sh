@@ -219,13 +219,17 @@ info "namespaces: ${NAMESPACES[*]}"
 controllers="$(source_controllers)"
 [[ -n "$controllers" ]] || info "no operator/apiserver/helm-controller Deployments found on the source"
 
+local_deployments=""
 local_targets=""
 for ns in "${NAMESPACES[@]}"; do
-    local_targets+="$(src -n "$ns" get "authentikdeployments.$BENCH_GROUP" -o json |
+    local_deployments+="$(src -n "$ns" get "authentikdeployments.$BENCH_GROUP" -o json |
         jq -r '.items[] | select((.spec.clusterRef.name // "") == "") | "    AuthentikDeployment \(.metadata.namespace)/\(.metadata.name)\n"')"
     local_targets+="$(src -n "$ns" get "testcases.$BENCH_GROUP" -o json |
         jq -r '.items[] | select((.spec.runnerClusterRef.name // "") == "") | "    TestCase \(.metadata.namespace)/\(.metadata.name)\n"')"
 done
+# The appliance rejects AuthentikDeployments without a clusterRef.
+[[ -z "$local_deployments" ]] ||
+    die "$(printf 'these AuthentikDeployments run on the old management cluster itself, which the appliance does not allow - delete them or recreate them on a workload cluster first:\n%b' "$local_deployments")"
 
 if ! $SKIP_NETCHECK; then
     # The appliance must reach each workload cluster's API through its load

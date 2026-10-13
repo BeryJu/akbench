@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	. "github.com/onsi/gomega"
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -49,6 +50,7 @@ func createReadyDeployment(ctx context.Context, name, targetName, host string) *
 	topo := &benchv1alpha1.AuthentikDeployment{
 		Name: name, Namespace: "default",
 		Spec: benchv1alpha1.AuthentikDeploymentSpec{
+			ClusterRef: corev1.LocalObjectReference{Name: testClusterName},
 			TargetName: targetName,
 			Namespace:  "authentik-" + name,
 			Server:     benchv1alpha1.WorkloadSpec{Replicas: 1},

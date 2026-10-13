@@ -44,7 +44,8 @@ Implemented so far:
 - **`clusterRef`/`runnerClusterRef`**: `AuthentikDeploymentReconciler`,
   `TestCaseReconciler`, and `TestRunReconciler` all resolve these to a live
   client via `internal/multicluster.Tracker` (wrapping Cluster API's
-  `ClusterCache`), falling back to the management cluster when unset.
+  `ClusterCache`). An AuthentikDeployment must set `clusterRef`: the
+  management cluster is rejected at admission.
   Cross-cluster objects (namespace, CNPG `Cluster`, k6 workloads, generated
   Secrets) skip ownerReferences - a remote cluster's garbage collector can't
   recognize a UID from a different cluster's etcd - and clean up through each

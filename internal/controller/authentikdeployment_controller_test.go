@@ -30,10 +30,11 @@ var _ = Describe("AuthentikDeployment Controller", func() {
 			topo := &benchv1alpha1.AuthentikDeployment{
 				Name: resourceName, Namespace: "default",
 				Spec: benchv1alpha1.AuthentikDeploymentSpec{
-					Namespace: "authentik-" + resourceName,
-					Server:    benchv1alpha1.WorkloadSpec{Replicas: 2},
-					Worker:    benchv1alpha1.WorkloadSpec{Replicas: 1},
-					Postgres:  benchv1alpha1.PostgresSpec{Mode: benchv1alpha1.PostgresEmbedded},
+					ClusterRef: corev1.LocalObjectReference{Name: testClusterName},
+					Namespace:  "authentik-" + resourceName,
+					Server:     benchv1alpha1.WorkloadSpec{Replicas: 2},
+					Worker:     benchv1alpha1.WorkloadSpec{Replicas: 1},
+					Postgres:   benchv1alpha1.PostgresSpec{Mode: benchv1alpha1.PostgresEmbedded},
 				},
 			}
 			Expect(k8sClient.Create(ctx, topo)).To(Succeed())
@@ -44,7 +45,7 @@ var _ = Describe("AuthentikDeployment Controller", func() {
 		})
 
 		It("renders a HelmRepository and a HelmRelease with the deployment's values", func() {
-			r := &AuthentikDeploymentReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Recorder: record.NewFakeRecorder(100)}
+			r := &AuthentikDeploymentReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Recorder: record.NewFakeRecorder(100), Tracker: testTracker}
 			_, err := r.Reconcile(context.Background(), reconcile.Request{NamespacedName: typeNamespacedName})
 			Expect(err).NotTo(HaveOccurred())
 
@@ -52,7 +53,8 @@ var _ = Describe("AuthentikDeployment Controller", func() {
 			Expect(k8sClient.Get(context.Background(), typeNamespacedName, &hr)).To(Succeed())
 			Expect(hr.Spec.TargetNamespace).To(Equal("authentik-" + resourceName))
 			Expect(hr.Spec.Chart.Spec.Chart).To(Equal("authentik"))
-			Expect(hr.Spec.KubeConfig).To(BeNil(), "M1 deployments deploy to the local cluster")
+			Expect(hr.Spec.KubeConfig).NotTo(BeNil())
+			Expect(hr.Spec.KubeConfig.SecretRef.Name).To(Equal(kubeconfigSecretName(testClusterName)))
 
 			var values render.AuthentikDeploymentHelmValues
 			Expect(hr.Spec.Values).NotTo(BeNil())
@@ -84,7 +86,7 @@ var _ = Describe("AuthentikDeployment Controller", func() {
 		// The Job must appear once the postgres StatefulSet itself is
 		// ready, independent of the rest of the release.
 		It("creates the postgres role-fix Job once the postgres StatefulSet is ready, even if the HelmRelease overall isn't", func() {
-			r := &AuthentikDeploymentReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Recorder: record.NewFakeRecorder(100)}
+			r := &AuthentikDeploymentReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Recorder: record.NewFakeRecorder(100), Tracker: testTracker}
 			_, err := r.Reconcile(context.Background(), reconcile.Request{NamespacedName: typeNamespacedName})
 			Expect(err).NotTo(HaveOccurred())
 
@@ -133,11 +135,12 @@ var _ = Describe("AuthentikDeployment Controller", func() {
 			topo := &benchv1alpha1.AuthentikDeployment{
 				Name: resourceName, Namespace: "default",
 				Spec: benchv1alpha1.AuthentikDeploymentSpec{
-					Namespace: "authentik-" + resourceName,
-					Server:    benchv1alpha1.WorkloadSpec{Replicas: 1},
-					Worker:    benchv1alpha1.WorkloadSpec{Replicas: 1},
-					Postgres:  benchv1alpha1.PostgresSpec{Mode: benchv1alpha1.PostgresEmbedded},
-					Placement: benchv1alpha1.PlacementSpec{Mode: benchv1alpha1.PlacementDedicated},
+					ClusterRef: corev1.LocalObjectReference{Name: testClusterName},
+					Namespace:  "authentik-" + resourceName,
+					Server:     benchv1alpha1.WorkloadSpec{Replicas: 1},
+					Worker:     benchv1alpha1.WorkloadSpec{Replicas: 1},
+					Postgres:   benchv1alpha1.PostgresSpec{Mode: benchv1alpha1.PostgresEmbedded},
+					Placement:  benchv1alpha1.PlacementSpec{Mode: benchv1alpha1.PlacementDedicated},
 				},
 			}
 			Expect(k8sClient.Create(ctx, topo)).To(Succeed())
@@ -148,7 +151,7 @@ var _ = Describe("AuthentikDeployment Controller", func() {
 		})
 
 		It("renders a required pod anti-affinity directly on server/worker", func() {
-			r := &AuthentikDeploymentReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Recorder: record.NewFakeRecorder(100)}
+			r := &AuthentikDeploymentReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Recorder: record.NewFakeRecorder(100), Tracker: testTracker}
 			_, err := r.Reconcile(context.Background(), reconcile.Request{NamespacedName: typeNamespacedName})
 			Expect(err).NotTo(HaveOccurred())
 
@@ -191,9 +194,10 @@ var _ = Describe("AuthentikDeployment Controller", func() {
 			topo := &benchv1alpha1.AuthentikDeployment{
 				Name: resourceName, Namespace: "default",
 				Spec: benchv1alpha1.AuthentikDeploymentSpec{
-					Namespace: targetNs,
-					Server:    benchv1alpha1.WorkloadSpec{Replicas: 1},
-					Worker:    benchv1alpha1.WorkloadSpec{Replicas: 1},
+					ClusterRef: corev1.LocalObjectReference{Name: testClusterName},
+					Namespace:  targetNs,
+					Server:     benchv1alpha1.WorkloadSpec{Replicas: 1},
+					Worker:     benchv1alpha1.WorkloadSpec{Replicas: 1},
 					Postgres: benchv1alpha1.PostgresSpec{
 						Mode:     benchv1alpha1.PostgresExternal,
 						External: &benchv1alpha1.ExternalPostgresSpec{SecretRef: corev1.LocalObjectReference{Name: "external-pg"}},
@@ -209,7 +213,7 @@ var _ = Describe("AuthentikDeployment Controller", func() {
 		})
 
 		It("wires the referenced secret's connection into the chart values without touching CNPG", func() {
-			r := &AuthentikDeploymentReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Recorder: record.NewFakeRecorder(100)}
+			r := &AuthentikDeploymentReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Recorder: record.NewFakeRecorder(100), Tracker: testTracker}
 			_, err := r.Reconcile(context.Background(), reconcile.Request{NamespacedName: typeNamespacedName})
 			Expect(err).NotTo(HaveOccurred())
 
@@ -228,6 +232,19 @@ var _ = Describe("AuthentikDeployment Controller", func() {
 			Expect(postgresReady).NotTo(BeNil())
 			Expect(postgresReady.Status).To(Equal(metav1.ConditionTrue))
 		})
+	})
+
+	It("rejects a deployment without a clusterRef (the management cluster)", func() {
+		topo := &benchv1alpha1.AuthentikDeployment{
+			Name: "deployment-management", Namespace: "default",
+			Spec: benchv1alpha1.AuthentikDeploymentSpec{
+				Namespace: "authentik-deployment-management",
+				Server:    benchv1alpha1.WorkloadSpec{Replicas: 1},
+				Worker:    benchv1alpha1.WorkloadSpec{Replicas: 1},
+				Postgres:  benchv1alpha1.PostgresSpec{Mode: benchv1alpha1.PostgresEmbedded},
+			},
+		}
+		Expect(k8sClient.Create(ctx, topo)).To(MatchError(ContainSubstring("management cluster is not allowed")))
 	})
 
 	Context("clusterRef set without a multicluster tracker wired up", func() {

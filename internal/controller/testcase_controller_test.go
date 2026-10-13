@@ -50,7 +50,7 @@ var _ = Describe("TestCase Controller", func() {
 		})
 
 		It("owns a Deployment tagged with the testid/target/profile contract", func() {
-			r := &TestCaseReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Recorder: record.NewFakeRecorder(100)}
+			r := &TestCaseReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Recorder: record.NewFakeRecorder(100), Tracker: testTracker}
 			_, err := r.Reconcile(context.Background(), reconcile.Request{NamespacedName: typeNamespacedName})
 			Expect(err).NotTo(HaveOccurred())
 
@@ -106,7 +106,7 @@ var _ = Describe("TestCase Controller", func() {
 		})
 
 		It("does not create a burn Deployment - execution belongs to a TestRun", func() {
-			r := &TestCaseReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Recorder: record.NewFakeRecorder(100)}
+			r := &TestCaseReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Recorder: record.NewFakeRecorder(100), Tracker: testTracker}
 			_, err := r.Reconcile(context.Background(), reconcile.Request{NamespacedName: typeNamespacedName})
 			Expect(err).NotTo(HaveOccurred())
 
@@ -147,7 +147,7 @@ var _ = Describe("TestCase Controller", func() {
 		})
 
 		It("mirrors the inline body verbatim into the script ConfigMap under script.ts, overriding template", func() {
-			r := &TestCaseReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Recorder: record.NewFakeRecorder(100)}
+			r := &TestCaseReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Recorder: record.NewFakeRecorder(100), Tracker: testTracker}
 			_, err := r.Reconcile(context.Background(), reconcile.Request{NamespacedName: typeNamespacedName})
 			Expect(err).NotTo(HaveOccurred())
 
@@ -181,7 +181,7 @@ var _ = Describe("TestCase Controller", func() {
 		})
 
 		It("reports DependencyNotReady with a clear message instead of silently falling back", func() {
-			r := &TestCaseReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Recorder: record.NewFakeRecorder(100)}
+			r := &TestCaseReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Recorder: record.NewFakeRecorder(100), Tracker: testTracker}
 			_, err := r.Reconcile(context.Background(), reconcile.Request{NamespacedName: typeNamespacedName})
 			Expect(err).NotTo(HaveOccurred())
 
@@ -224,7 +224,7 @@ var _ = Describe("TestCase Controller", func() {
 		})
 
 		It("owns one independently-selectable burn Deployment per target and reports both in status", func() {
-			r := &TestCaseReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Recorder: record.NewFakeRecorder(100)}
+			r := &TestCaseReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Recorder: record.NewFakeRecorder(100), Tracker: testTracker}
 			_, err := r.Reconcile(context.Background(), reconcile.Request{NamespacedName: typeNamespacedName})
 			Expect(err).NotTo(HaveOccurred())
 
@@ -262,7 +262,7 @@ var _ = Describe("TestCase Controller", func() {
 		})
 
 		It("keeps every target's burn Deployment across reconciles instead of recreating it", func() {
-			r := &TestCaseReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Recorder: record.NewFakeRecorder(100)}
+			r := &TestCaseReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Recorder: record.NewFakeRecorder(100), Tracker: testTracker}
 			_, err := r.Reconcile(context.Background(), reconcile.Request{NamespacedName: typeNamespacedName})
 			Expect(err).NotTo(HaveOccurred())
 
@@ -318,7 +318,7 @@ var _ = Describe("TestCase Controller", func() {
 		})
 
 		It("migrates deploymentRef into deploymentRefs and replaces the legacy burn Deployment", func() {
-			r := &TestCaseReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Recorder: record.NewFakeRecorder(100)}
+			r := &TestCaseReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Recorder: record.NewFakeRecorder(100), Tracker: testTracker}
 			_, err := r.Reconcile(context.Background(), reconcile.Request{NamespacedName: typeNamespacedName})
 			Expect(err).NotTo(HaveOccurred())
 

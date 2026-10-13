@@ -175,9 +175,10 @@ type ChartSpec struct {
 // scheduled, and which of the three Postgres backends it uses.
 type AuthentikDeploymentSpec struct {
 	// clusterRef names a cluster.x-k8s.io/v1beta1 Cluster this deployment is
-	// deployed onto. Empty means the cluster the operator itself runs on.
-	// +optional
-	ClusterRef corev1.LocalObjectReference `json:"clusterRef,omitempty"`
+	// deployed onto. Deploying onto the management cluster itself is not
+	// allowed.
+	// +kubebuilder:validation:XValidation:rule="has(self.name) && self.name != ''",message="clusterRef.name must name a workload cluster; deploying onto the management cluster is not allowed"
+	ClusterRef corev1.LocalObjectReference `json:"clusterRef"`
 
 	// targetName is the identity this deployment is known by everywhere else:
 	// the `target` label Prometheus attaches to its metrics, and the `target`

@@ -32,6 +32,11 @@ type Tracker struct {
 	cache clustercache.ClusterCache
 }
 
+// NewTracker wraps an existing ClusterCache.
+func NewTracker(cc clustercache.ClusterCache) *Tracker {
+	return &Tracker{cache: cc}
+}
+
 // SetupWithManager creates the underlying ClusterCache and registers its
 // controller with mgr. Must be called before any reconciler that uses the
 // returned Tracker starts running.

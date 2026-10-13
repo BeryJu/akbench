@@ -23,8 +23,10 @@ import (
 	bootstrapv1 "sigs.k8s.io/cluster-api/api/bootstrap/kubeadm/v1beta2"
 	controlplanev1 "sigs.k8s.io/cluster-api/api/controlplane/kubeadm/v1beta2"
 	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
+	"sigs.k8s.io/cluster-api/controllers/clustercache"
 
 	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
+	"github.com/goauthentik/authentik-bench/internal/multicluster"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -37,7 +39,19 @@ var (
 	testEnv   *envtest.Environment
 	cfg       *rest.Config
 	k8sClient client.Client
+	// testTracker resolves every clusterRef to the envtest API server itself,
+	// standing in for a workload cluster.
+	testTracker = multicluster.NewTracker(envtestClusterCache{})
 )
+
+// testClusterName is the clusterRef every test AuthentikDeployment names.
+const testClusterName = "bench"
+
+type envtestClusterCache struct{ clustercache.ClusterCache }
+
+func (envtestClusterCache) GetClient(context.Context, client.ObjectKey) (client.Client, error) {
+	return k8sClient, nil
+}
 
 func TestControllers(t *testing.T) {
 	RegisterFailHandler(Fail)

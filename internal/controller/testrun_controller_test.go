@@ -49,7 +49,7 @@ var _ = Describe("TestRun Controller", func() {
 	})
 
 	It("creates a Job with the testid/target/profile contract and tracks it to completion", func() {
-		r := &TestRunReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Recorder: record.NewFakeRecorder(100)}
+		r := &TestRunReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Recorder: record.NewFakeRecorder(100), Tracker: testTracker}
 
 		_, err := r.Reconcile(context.Background(), reconcile.Request{NamespacedName: typeNamespacedName})
 		Expect(err).NotTo(HaveOccurred())
@@ -125,7 +125,7 @@ var _ = Describe("TestRun Controller, multi-deployment TestCase", func() {
 		}
 		Expect(k8sClient.Create(context.Background(), runA)).To(Succeed())
 
-		r := &TestRunReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Recorder: record.NewFakeRecorder(100)}
+		r := &TestRunReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Recorder: record.NewFakeRecorder(100), Tracker: testTracker}
 		_, err := r.Reconcile(context.Background(), reconcile.Request{Name: runA.Name, Namespace: "default"})
 		Expect(err).NotTo(HaveOccurred())
 
@@ -146,7 +146,7 @@ var _ = Describe("TestRun Controller, multi-deployment TestCase", func() {
 		}
 		Expect(k8sClient.Create(context.Background(), runB)).To(Succeed())
 
-		r := &TestRunReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Recorder: record.NewFakeRecorder(100)}
+		r := &TestRunReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Recorder: record.NewFakeRecorder(100), Tracker: testTracker}
 		_, err := r.Reconcile(context.Background(), reconcile.Request{Name: runB.Name, Namespace: "default"})
 		Expect(err).NotTo(HaveOccurred())
 
@@ -169,7 +169,7 @@ var _ = Describe("TestRun Controller, multi-deployment TestCase", func() {
 		}
 		Expect(k8sClient.Create(context.Background(), run)).To(Succeed())
 
-		r := &TestRunReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Recorder: record.NewFakeRecorder(100)}
+		r := &TestRunReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Recorder: record.NewFakeRecorder(100), Tracker: testTracker}
 		_, err := r.Reconcile(context.Background(), reconcile.Request{Name: run.Name, Namespace: "default"})
 		Expect(err).NotTo(HaveOccurred())
 

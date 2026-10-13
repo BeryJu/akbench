@@ -238,10 +238,13 @@ function DeploymentForm({ existing, source }: { existing?: AuthentikDeployment; 
             </Field>
             <Field label="Cluster">
               <select
+                required
                 value={spec.clusterRef?.name ?? ''}
-                onChange={e => patch({ clusterRef: e.target.value ? { name: e.target.value } : undefined })}
+                onChange={e => patch({ clusterRef: { name: e.target.value } })}
               >
-                <option value="">Management cluster</option>
+                <option value="" disabled>
+                  Select a workload cluster
+                </option>
                 {(clusters.data ?? [])
                   .filter(c => !c.management)
                   .map(c => (
