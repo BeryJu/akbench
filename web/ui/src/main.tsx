@@ -82,6 +82,7 @@ const router = createBrowserRouter([
       { path: 'infrastructure/incus/:name/edit', element: page(infrastructure, 'IncusCredentialEditPage') },
       { path: 'testruns', element: page(testRuns, 'TestRunsPage') },
       { path: 'testruns/:name', element: page(testRuns, 'TestRunViewPage') },
+      { path: 'pull-requests/new', element: page(() => import('./pages/PullRequestComparison'), 'PullRequestComparisonPage') },
       { path: 'compare', element: page(() => import('./pages/Compare'), 'ComparePage') },
       { path: 'alerts', element: page(() => import('./pages/Alerts'), 'AlertsPage') },
       { path: 'grafana', element: page(grafana, 'GrafanaPage') },

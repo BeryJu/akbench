@@ -36,9 +36,14 @@ export function TestCasesPage() {
       title="Test cases"
       subtitle="k6 load tests against one or more deployments. Burn runs until stopped; Quick runs once per test run."
       actions={
-        <Link className="button primary" to="/testcases/new">
-          New test case
-        </Link>
+        <>
+          <Link className="button" to="/pull-requests/new">
+            Compare a PR
+          </Link>
+          <Link className="button primary" to="/testcases/new">
+            New test case
+          </Link>
+        </>
       }
     >
       <Alert>{testCases.error}</Alert>

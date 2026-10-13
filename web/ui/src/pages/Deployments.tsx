@@ -99,7 +99,7 @@ export function DeploymentsPage() {
  * emptySpec mirrors the CRD's own defaults, so the form shows what will
  * actually be created rather than blanks the API server fills in invisibly.
  */
-function emptySpec(): AuthentikDeploymentSpec {
+export function emptySpec(): AuthentikDeploymentSpec {
   return {
     namespace: '',
     server: { replicas: 1 },
@@ -112,7 +112,7 @@ function emptySpec(): AuthentikDeploymentSpec {
 }
 
 /** slugify turns a deployment name into a namespace-safe default. */
-function slugify(value: string): string {
+export function slugify(value: string): string {
   return value
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
@@ -138,7 +138,6 @@ function duplicateSpec(source: AuthentikDeployment): AuthentikDeploymentSpec {
 
 function DeploymentForm({ existing, source }: { existing?: AuthentikDeployment; source?: AuthentikDeployment }) {
   const navigate = useNavigate();
-  const clusters = useResource(() => api.clusters(), [], 0);
   const [name, setName] = useState(existing?.metadata.name ?? '');
   // Starts from the fetched spec, so fields this form has no input for are
   // carried through a save untouched.
@@ -192,9 +191,6 @@ function DeploymentForm({ existing, source }: { existing?: AuthentikDeployment; 
     }
   }
 
-  const authentik = spec.authentik ?? {};
-  const errorReporting = authentik.errorReporting ?? {};
-
   return (
     <Page
       title={existing ? `Edit ${existing.metadata.name}` : 'New deployment'}
@@ -237,277 +233,17 @@ function DeploymentForm({ existing, source }: { existing?: AuthentikDeployment; 
               />
             </Field>
             <Field label="Cluster">
-              <select
-                required
-                value={spec.clusterRef?.name ?? ''}
-                onChange={e => patch({ clusterRef: { name: e.target.value } })}
-              >
-                <option value="" disabled>
-                  Select a workload cluster
-                </option>
-                {(clusters.data ?? [])
-                  .filter(c => !c.management)
-                  .map(c => (
-                    <option key={c.name} value={c.name}>
-                      {c.name}
-                    </option>
-                  ))}
-              </select>
+              <ClusterSelect value={spec.clusterRef?.name} onChange={cluster => patch({ clusterRef: { name: cluster } })} />
             </Field>
           </div>
         </fieldset>
 
-        <fieldset>
-          <legend>Workloads</legend>
-          <div className="fields">
-            <Field label="Server replicas">
-              <input
-                type="number"
-                min={1}
-                value={spec.server.replicas}
-                onChange={e => patch({ server: { ...spec.server, replicas: Number(e.target.value) } })}
-              />
-            </Field>
-            <Field label="Worker replicas">
-              <input
-                type="number"
-                min={1}
-                value={spec.worker.replicas}
-                onChange={e => patch({ worker: { ...spec.worker, replicas: Number(e.target.value) } })}
-              />
-            </Field>
-            <Field label="authentik image">
-              <input
-                value={authentik.image ?? ''}
-                placeholder="ghcr.io/goauthentik/server"
-                onChange={e => patch({ authentik: { ...authentik, image: e.target.value || undefined } })}
-              />
-            </Field>
-            <Field label="authentik image tag" help="Defaults to the chart's own">
-              <input
-                value={authentik.tag ?? ''}
-                placeholder="2026.6.0"
-                onChange={e => patch({ authentik: { ...authentik, tag: e.target.value || undefined } })}
-              />
-            </Field>
-            <Field label="Chart version" help="Defaults to latest">
-              <input
-                value={spec.chart?.version ?? ''}
-                onChange={e => patch({ chart: { ...spec.chart, version: e.target.value || undefined } })}
-              />
-            </Field>
-          </div>
-        </fieldset>
-
-        <fieldset>
-          <legend>Observability</legend>
-          <div className="fields">
-            <Field label="Pyroscope host" help="Defaults to this cluster's own Pyroscope">
-              <input
-                value={authentik.pyroscopeHost ?? ''}
-                placeholder="http://pyroscope.bench-system.svc.cluster.local:4040"
-                onChange={e => patch({ authentik: { ...authentik, pyroscopeHost: e.target.value || undefined } })}
-              />
-            </Field>
-            <label className="check">
-              <input
-                type="checkbox"
-                checked={errorReporting.enabled ?? false}
-                onChange={e =>
-                  patch({ authentik: { ...authentik, errorReporting: { ...errorReporting, enabled: e.target.checked } } })
-                }
-              />
-              Send traces (error reporting / OTLP)
-            </label>
-            {errorReporting.enabled && (
-              <Field label="Tracing endpoint" help="Defaults to this cluster's own Tempo">
-                <input
-                  value={errorReporting.tracingEndpoint ?? ''}
-                  placeholder="http://tempo.bench-system.svc.cluster.local:4318"
-                  onChange={e =>
-                    patch({
-                      authentik: {
-                        ...authentik,
-                        errorReporting: { ...errorReporting, tracingEndpoint: e.target.value || undefined },
-                      },
-                    })
-                  }
-                />
-              </Field>
-            )}
-          </div>
-        </fieldset>
-
-        <fieldset>
-          <legend>Placement</legend>
-          <div className="fields">
-            <Field label="Mode">
-              <select
-                value={spec.placement?.mode ?? 'Default'}
-                onChange={e => patch({ placement: { ...spec.placement, mode: e.target.value as PlacementMode } })}
-              >
-                <option value="Default">Default - pods may share nodes</option>
-                <option value="Dedicated">Dedicated - one pod per node</option>
-                <option value="Packed">Packed - all pods on the same node</option>
-              </select>
-            </Field>
-            {spec.placement?.mode === 'Dedicated' && (
-              <Field label="Anti-affinity topology key">
-                <input
-                  value={spec.placement?.topologyKey ?? ''}
-                  placeholder="kubernetes.io/hostname"
-                  onChange={e => patch({ placement: { ...spec.placement, topologyKey: e.target.value } })}
-                />
-              </Field>
-            )}
-            <Field label="Node selector" help="Comma-separated key=value">
-              <input
-                defaultValue={Object.entries(spec.placement?.nodeSelector ?? {})
-                  .map(([k, v]) => `${k}=${v}`)
-                  .join(',')}
-                placeholder="disktype=ssd"
-                onChange={e => {
-                  const nodeSelector: Record<string, string> = {};
-                  for (const pair of e.target.value.split(',')) {
-                    const [k, v] = pair.split('=').map(s => s.trim());
-                    if (k) {
-                      nodeSelector[k] = v ?? '';
-                    }
-                  }
-                  patch({ placement: { ...spec.placement, nodeSelector } });
-                }}
-              />
-            </Field>
-          </div>
-          <div className="muted">
-            Tolerations aren&apos;t a form field (a structured list) - set them with <code>kubectl edit</code> in the
-            shell.
-          </div>
-        </fieldset>
-
-        <fieldset>
-          <legend>Postgres</legend>
-          <div className="fields">
-            <Field label="Mode">
-              <select
-                value={spec.postgres.mode}
-                onChange={e => {
-                  const mode = e.target.value as PostgresMode;
-                  patch({
-                    postgres: {
-                      mode,
-                      embedded: mode === 'Embedded' ? (spec.postgres.embedded ?? {}) : undefined,
-                      cnpg: mode === 'CNPG' ? (spec.postgres.cnpg ?? { instances: 3 }) : undefined,
-                      external:
-                        mode === 'External'
-                          ? (spec.postgres.external ?? { secretRef: { name: '' }, sslMode: 'require' })
-                          : undefined,
-                    },
-                  });
-                }}
-              >
-                <option value="Embedded">Embedded - the chart&apos;s bundled subchart</option>
-                <option value="CNPG">CloudNativePG - HA cluster</option>
-                <option value="External">External - an instance you manage</option>
-              </select>
-            </Field>
-            {spec.postgres.mode === 'Embedded' && (
-              <Field label="Storage size">
-                <input
-                  value={spec.postgres.embedded?.storageSize ?? ''}
-                  placeholder="8Gi"
-                  onChange={e =>
-                    patch({
-                      postgres: {
-                        ...spec.postgres,
-                        embedded: { ...spec.postgres.embedded, storageSize: e.target.value || undefined },
-                      },
-                    })
-                  }
-                />
-              </Field>
-            )}
-            {spec.postgres.mode === 'CNPG' && (
-              <>
-                <Field label="Instances">
-                  <input
-                    type="number"
-                    min={1}
-                    value={spec.postgres.cnpg?.instances ?? 3}
-                    onChange={e =>
-                      patch({
-                        postgres: { ...spec.postgres, cnpg: { ...spec.postgres.cnpg, instances: Number(e.target.value) } },
-                      })
-                    }
-                  />
-                </Field>
-                <Field label="Storage size">
-                  <input
-                    value={spec.postgres.cnpg?.storageSize ?? ''}
-                    placeholder="10Gi"
-                    onChange={e =>
-                      patch({
-                        postgres: {
-                          ...spec.postgres,
-                          cnpg: { ...spec.postgres.cnpg, storageSize: e.target.value || undefined },
-                        },
-                      })
-                    }
-                  />
-                </Field>
-              </>
-            )}
-            {spec.postgres.mode === 'External' && (
-              <>
-                <Field label="Connection secret name">
-                  <input
-                    required
-                    value={spec.postgres.external?.secretRef.name ?? ''}
-                    onChange={e =>
-                      patch({
-                        postgres: {
-                          ...spec.postgres,
-                          external: { ...spec.postgres.external, secretRef: { name: e.target.value } },
-                        },
-                      })
-                    }
-                  />
-                </Field>
-                <Field label="SSL mode">
-                  <select
-                    value={spec.postgres.external?.sslMode ?? 'require'}
-                    onChange={e =>
-                      patch({
-                        postgres: {
-                          ...spec.postgres,
-                          external: {
-                            secretRef: spec.postgres.external?.secretRef ?? { name: '' },
-                            sslMode: e.target.value,
-                          },
-                        },
-                      })
-                    }
-                  >
-                    {['disable', 'require', 'verify-ca', 'verify-full'].map(m => (
-                      <option key={m} value={m}>
-                        {m}
-                      </option>
-                    ))}
-                  </select>
-                </Field>
-              </>
-            )}
-          </div>
-        </fieldset>
-
-        <fieldset>
-          <legend>Advanced: extra Helm values</legend>
-          <p className="muted">
-            Raw values.yaml for the authentik chart, deep-merged over everything above last - the escape hatch for
-            settings this form doesn&apos;t expose. For example: <code>authentik.geoip.enabled: true</code>
-          </p>
-          <CodeEditor language="yaml" value={extraValuesYAML} onChange={setExtraValuesYAML} />
-        </fieldset>
+        <DeploymentSpecFields
+          spec={spec}
+          patch={patch}
+          extraValuesYAML={extraValuesYAML}
+          onExtraValuesChange={setExtraValuesYAML}
+        />
 
         <div className="form-actions">
           <button type="submit" className="primary" disabled={saving}>
@@ -519,6 +255,309 @@ function DeploymentForm({ existing, source }: { existing?: AuthentikDeployment; 
         </div>
       </form>
     </Page>
+  );
+}
+
+/** ClusterSelect picks the workload cluster a deployment installs onto -
+ * never the management cluster, which the CRD rejects. */
+export function ClusterSelect({ value, onChange }: { value?: string; onChange: (name: string) => void }) {
+  const clusters = useResource(() => api.clusters(), [], 0);
+  return (
+    <select required value={value ?? ''} onChange={e => onChange(e.target.value)}>
+      <option value="" disabled>
+        Select a workload cluster
+      </option>
+      {(clusters.data ?? [])
+        .filter(c => !c.management)
+        .map(c => (
+          <option key={c.name} value={c.name}>
+            {c.name}
+          </option>
+        ))}
+    </select>
+  );
+}
+
+/**
+ * DeploymentSpecFields is every fieldset of the deployment form after its
+ * identity: workloads, observability, placement, Postgres and extra Helm
+ * values. Shared with the PR comparison flow, which picks the image itself
+ * (showImage=false) and applies one spec to both of its deployments.
+ */
+export function DeploymentSpecFields({
+  spec,
+  patch,
+  extraValuesYAML,
+  onExtraValuesChange,
+  showImage = true,
+}: {
+  spec: AuthentikDeploymentSpec;
+  patch: (changes: Partial<AuthentikDeploymentSpec>) => void;
+  extraValuesYAML: string;
+  onExtraValuesChange: (value: string) => void;
+  showImage?: boolean;
+}) {
+  const authentik = spec.authentik ?? {};
+  const errorReporting = authentik.errorReporting ?? {};
+
+  return (
+    <>
+      <fieldset>
+        <legend>Workloads</legend>
+        <div className="fields">
+          <Field label="Server replicas">
+            <input
+              type="number"
+              min={1}
+              value={spec.server.replicas}
+              onChange={e => patch({ server: { ...spec.server, replicas: Number(e.target.value) } })}
+            />
+          </Field>
+          <Field label="Worker replicas">
+            <input
+              type="number"
+              min={1}
+              value={spec.worker.replicas}
+              onChange={e => patch({ worker: { ...spec.worker, replicas: Number(e.target.value) } })}
+            />
+          </Field>
+          {showImage && (
+            <>
+              <Field label="authentik image">
+                <input
+                  value={authentik.image ?? ''}
+                  placeholder="ghcr.io/goauthentik/server"
+                  onChange={e => patch({ authentik: { ...authentik, image: e.target.value || undefined } })}
+                />
+              </Field>
+              <Field label="authentik image tag" help="Defaults to the chart's own">
+                <input
+                  value={authentik.tag ?? ''}
+                  placeholder="2026.6.0"
+                  onChange={e => patch({ authentik: { ...authentik, tag: e.target.value || undefined } })}
+                />
+              </Field>
+            </>
+          )}
+          <Field label="Chart version" help="Defaults to latest">
+            <input
+              value={spec.chart?.version ?? ''}
+              onChange={e => patch({ chart: { ...spec.chart, version: e.target.value || undefined } })}
+            />
+          </Field>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Observability</legend>
+        <div className="fields">
+          <Field label="Pyroscope host" help="Defaults to this cluster's own Pyroscope">
+            <input
+              value={authentik.pyroscopeHost ?? ''}
+              placeholder="http://pyroscope.bench-system.svc.cluster.local:4040"
+              onChange={e => patch({ authentik: { ...authentik, pyroscopeHost: e.target.value || undefined } })}
+            />
+          </Field>
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={errorReporting.enabled ?? false}
+              onChange={e =>
+                patch({ authentik: { ...authentik, errorReporting: { ...errorReporting, enabled: e.target.checked } } })
+              }
+            />
+            Send traces (error reporting / OTLP)
+          </label>
+          {errorReporting.enabled && (
+            <Field label="Tracing endpoint" help="Defaults to this cluster's own Tempo">
+              <input
+                value={errorReporting.tracingEndpoint ?? ''}
+                placeholder="http://tempo.bench-system.svc.cluster.local:4318"
+                onChange={e =>
+                  patch({
+                    authentik: {
+                      ...authentik,
+                      errorReporting: { ...errorReporting, tracingEndpoint: e.target.value || undefined },
+                    },
+                  })
+                }
+              />
+            </Field>
+          )}
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Placement</legend>
+        <div className="fields">
+          <Field label="Mode">
+            <select
+              value={spec.placement?.mode ?? 'Default'}
+              onChange={e => patch({ placement: { ...spec.placement, mode: e.target.value as PlacementMode } })}
+            >
+              <option value="Default">Default - pods may share nodes</option>
+              <option value="Dedicated">Dedicated - one pod per node</option>
+              <option value="Packed">Packed - all pods on the same node</option>
+            </select>
+          </Field>
+          {spec.placement?.mode === 'Dedicated' && (
+            <Field label="Anti-affinity topology key">
+              <input
+                value={spec.placement?.topologyKey ?? ''}
+                placeholder="kubernetes.io/hostname"
+                onChange={e => patch({ placement: { ...spec.placement, topologyKey: e.target.value } })}
+              />
+            </Field>
+          )}
+          <Field label="Node selector" help="Comma-separated key=value">
+            <input
+              defaultValue={Object.entries(spec.placement?.nodeSelector ?? {})
+                .map(([k, v]) => `${k}=${v}`)
+                .join(',')}
+              placeholder="disktype=ssd"
+              onChange={e => {
+                const nodeSelector: Record<string, string> = {};
+                for (const pair of e.target.value.split(',')) {
+                  const [k, v] = pair.split('=').map(s => s.trim());
+                  if (k) {
+                    nodeSelector[k] = v ?? '';
+                  }
+                }
+                patch({ placement: { ...spec.placement, nodeSelector } });
+              }}
+            />
+          </Field>
+        </div>
+        <div className="muted">
+          Tolerations aren&apos;t a form field (a structured list) - set them with <code>kubectl edit</code> in the
+          shell.
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Postgres</legend>
+        <div className="fields">
+          <Field label="Mode">
+            <select
+              value={spec.postgres.mode}
+              onChange={e => {
+                const mode = e.target.value as PostgresMode;
+                patch({
+                  postgres: {
+                    mode,
+                    embedded: mode === 'Embedded' ? (spec.postgres.embedded ?? {}) : undefined,
+                    cnpg: mode === 'CNPG' ? (spec.postgres.cnpg ?? { instances: 3 }) : undefined,
+                    external:
+                      mode === 'External'
+                        ? (spec.postgres.external ?? { secretRef: { name: '' }, sslMode: 'require' })
+                        : undefined,
+                  },
+                });
+              }}
+            >
+              <option value="Embedded">Embedded - the chart&apos;s bundled subchart</option>
+              <option value="CNPG">CloudNativePG - HA cluster</option>
+              <option value="External">External - an instance you manage</option>
+            </select>
+          </Field>
+          {spec.postgres.mode === 'Embedded' && (
+            <Field label="Storage size">
+              <input
+                value={spec.postgres.embedded?.storageSize ?? ''}
+                placeholder="8Gi"
+                onChange={e =>
+                  patch({
+                    postgres: {
+                      ...spec.postgres,
+                      embedded: { ...spec.postgres.embedded, storageSize: e.target.value || undefined },
+                    },
+                  })
+                }
+              />
+            </Field>
+          )}
+          {spec.postgres.mode === 'CNPG' && (
+            <>
+              <Field label="Instances">
+                <input
+                  type="number"
+                  min={1}
+                  value={spec.postgres.cnpg?.instances ?? 3}
+                  onChange={e =>
+                    patch({
+                      postgres: { ...spec.postgres, cnpg: { ...spec.postgres.cnpg, instances: Number(e.target.value) } },
+                    })
+                  }
+                />
+              </Field>
+              <Field label="Storage size">
+                <input
+                  value={spec.postgres.cnpg?.storageSize ?? ''}
+                  placeholder="10Gi"
+                  onChange={e =>
+                    patch({
+                      postgres: {
+                        ...spec.postgres,
+                        cnpg: { ...spec.postgres.cnpg, storageSize: e.target.value || undefined },
+                      },
+                    })
+                  }
+                />
+              </Field>
+            </>
+          )}
+          {spec.postgres.mode === 'External' && (
+            <>
+              <Field label="Connection secret name">
+                <input
+                  required
+                  value={spec.postgres.external?.secretRef.name ?? ''}
+                  onChange={e =>
+                    patch({
+                      postgres: {
+                        ...spec.postgres,
+                        external: { ...spec.postgres.external, secretRef: { name: e.target.value } },
+                      },
+                    })
+                  }
+                />
+              </Field>
+              <Field label="SSL mode">
+                <select
+                  value={spec.postgres.external?.sslMode ?? 'require'}
+                  onChange={e =>
+                    patch({
+                      postgres: {
+                        ...spec.postgres,
+                        external: {
+                          secretRef: spec.postgres.external?.secretRef ?? { name: '' },
+                          sslMode: e.target.value,
+                        },
+                      },
+                    })
+                  }
+                >
+                  {['disable', 'require', 'verify-ca', 'verify-full'].map(m => (
+                    <option key={m} value={m}>
+                      {m}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            </>
+          )}
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Advanced: extra Helm values</legend>
+        <p className="muted">
+          Raw values.yaml for the authentik chart, deep-merged over everything above last - the escape hatch for
+          settings this form doesn&apos;t expose. For example: <code>authentik.geoip.enabled: true</code>
+        </p>
+        <CodeEditor language="yaml" value={extraValuesYAML} onChange={onExtraValuesChange} />
+      </fieldset>
+    </>
   );
 }
 

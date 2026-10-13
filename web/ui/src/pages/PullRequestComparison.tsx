@@ -1,0 +1,419 @@
+import { FormEvent, useEffect, useState } from 'react';
+import { Link, useNavigate } from 'react-router';
+import { api } from '../api';
+import { Alert, errorMessage, Field, Page } from '../components/ui';
+import { toast } from '../components/Toast';
+import {
+  DEV_IMAGE,
+  devImageTag,
+  fetchLatestRelease,
+  fetchPullRequest,
+  k8sNameSegment,
+  parsePullRequestNumber,
+  PullRequest,
+  RELEASE_IMAGE,
+} from '../github';
+import { AuthentikDeploymentSpec } from '../types';
+import { useResource } from '../useResource';
+import { ClusterSelect, DeploymentSpecFields, emptySpec } from './Deployments';
+
+// Set on all three objects this flow creates, so one PR's comparison can be
+// found again with `kubectl get authentikdeployments,testcases -l ...`.
+const PULL_REQUEST_LABEL = 'bench.goauthentik.io/pull-request';
+
+type Baseline = 'base' | 'release';
+
+type ImageState = 'checking' | 'published' | 'missing' | 'unknown';
+
+/**
+ * useImageCheck asks the apiserver whether image:tag is published, debounced
+ * while the tag is being typed. authentik's CI only publishes a commit's
+ * image once its tests pass, so a PR's newest commit often has none yet.
+ */
+function useImageCheck(image: string, tag: string): ImageState | undefined {
+  const [state, setState] = useState<ImageState>();
+  useEffect(() => {
+    if (!tag) {
+      setState(undefined);
+      return;
+    }
+    let cancelled = false;
+    setState('checking');
+    const timer = setTimeout(() => {
+      api
+        .checkImage(image.replace(/^ghcr\.io\//, ''), tag)
+        .then(res => !cancelled && setState(res.exists ? 'published' : 'missing'))
+        .catch(() => !cancelled && setState('unknown'));
+    }, 400);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [image, tag]);
+  return state;
+}
+
+function ImageStatus({ state }: { state?: ImageState }) {
+  switch (state) {
+    case 'checking':
+      return <span className="muted">Checking ghcr.io…</span>;
+    case 'published':
+      return <span>Published on ghcr.io</span>;
+    case 'missing':
+      return <strong>Not published (yet) - CI publishes a commit&apos;s image only once its tests pass</strong>;
+    case 'unknown':
+      return <span className="muted">Couldn&apos;t check ghcr.io</span>;
+    default:
+      return null;
+  }
+}
+
+/**
+ * PullRequestComparisonPage sets up a side-by-side Burn test of an authentik
+ * pull request's CI build against its base branch or a release: two
+ * deployments sharing every setting but the image, and one TestCase driving
+ * both with the same load.
+ */
+export function PullRequestComparisonPage() {
+  const navigate = useNavigate();
+  const templates = useResource(() => api.testCaseTemplates(), [], 0);
+
+  const [prInput, setPrInput] = useState('');
+  const [pr, setPr] = useState<PullRequest>();
+  const [lookupError, setLookupError] = useState<string>();
+  const [lookingUp, setLookingUp] = useState(false);
+
+  // The tags are prefilled from the lookup but stay editable - a fork PR,
+  // a rate-limited lookup or an image built from another commit all need
+  // them typed in by hand.
+  const [prTag, setPrTag] = useState('');
+  const [baseline, setBaseline] = useState<Baseline>('base');
+  const [baseTag, setBaseTag] = useState('gh-main');
+  const [version, setVersion] = useState('');
+
+  const [prefix, setPrefix] = useState('');
+  const [prefixEdited, setPrefixEdited] = useState(false);
+
+  const [spec, setSpec] = useState<AuthentikDeploymentSpec>(emptySpec());
+  const [extraValuesYAML, setExtraValuesYAML] = useState('');
+  const patch = (changes: Partial<AuthentikDeploymentSpec>) => setSpec(current => ({ ...current, ...changes }));
+
+  const [template, setTemplate] = useState('login');
+  const [vus, setVus] = useState(8);
+  const [flow, setFlow] = useState('default-authentication-flow');
+  const [burnDuration, setBurnDuration] = useState('8760h');
+  const [traceSampleRate, setTraceSampleRate] = useState('0.01');
+
+  const [error, setError] = useState<string>();
+  const [saving, setSaving] = useState(false);
+
+  const prImage = useImageCheck(DEV_IMAGE, prTag);
+  const baselineImage = useImageCheck(
+    baseline === 'base' ? DEV_IMAGE : RELEASE_IMAGE,
+    baseline === 'base' ? baseTag : version
+  );
+
+  // Prefill the release baseline with the newest release; not fatal if
+  // GitHub can't be reached, the field just starts blank.
+  useEffect(() => {
+    let cancelled = false;
+    fetchLatestRelease()
+      .then(v => !cancelled && setVersion(current => current || v))
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const prNumber = parsePullRequestNumber(prInput);
+
+  async function lookUp() {
+    if (prNumber === undefined) {
+      setLookupError('Enter a pull request number or a github.com/goauthentik/authentik/pull/... URL');
+      return;
+    }
+    setLookingUp(true);
+    setLookupError(undefined);
+    try {
+      const found = await fetchPullRequest(prNumber);
+      setPr(found);
+      setPrTag(devImageTag(found.headSha));
+      setBaseTag(devImageTag(found.baseSha));
+    } catch (err) {
+      setPr(undefined);
+      setLookupError(errorMessage(err));
+    } finally {
+      setLookingUp(false);
+    }
+  }
+
+  // The prefix follows the PR number until edited directly.
+  const effectivePrefix = prefixEdited ? prefix : prNumber !== undefined ? `pr-${prNumber}` : '';
+  const baselineSuffix = baseline === 'base' ? k8sNameSegment(pr?.baseRef ?? 'main') : k8sNameSegment(version);
+  const prName = effectivePrefix;
+  const baselineName = effectivePrefix && baselineSuffix ? `${effectivePrefix}-${baselineSuffix}` : '';
+  const testCaseName = effectivePrefix ? `${effectivePrefix}-burn` : '';
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    if (!prName || !baselineName) {
+      setError('Enter a pull request and a baseline first');
+      return;
+    }
+    setSaving(true);
+    setError(undefined);
+    const labels = prNumber !== undefined ? { [PULL_REQUEST_LABEL]: String(prNumber) } : undefined;
+    const deploymentSpec = (name: string, image: string, tag: string): AuthentikDeploymentSpec => ({
+      ...spec,
+      namespace: name,
+      authentik: { ...spec.authentik, image, tag },
+    });
+    const created: string[] = [];
+    try {
+      const deployments = [
+        { name: prName, spec: deploymentSpec(prName, DEV_IMAGE, prTag) },
+        baseline === 'base'
+          ? { name: baselineName, spec: deploymentSpec(baselineName, DEV_IMAGE, baseTag) }
+          : { name: baselineName, spec: deploymentSpec(baselineName, RELEASE_IMAGE, version) },
+      ];
+      for (const d of deployments) {
+        await api.createDeployment({ metadata: { name: d.name, labels }, spec: d.spec });
+        created.push(`deployment ${d.name}`);
+        if (extraValuesYAML.trim()) {
+          await api.setExtraValues(d.name, extraValuesYAML);
+        }
+      }
+      await api.createTestCase({
+        metadata: { name: testCaseName, labels },
+        spec: {
+          deploymentRefs: deployments.map(d => ({ name: d.name })),
+          template,
+          profile: 'Burn',
+          vus,
+          flow,
+          burnDuration,
+          traceSampleRate,
+        },
+      });
+      toast.success(`Created ${prName}, ${baselineName} and ${testCaseName}`);
+      navigate(`/testcases/${testCaseName}`);
+    } catch (err) {
+      setError(
+        created.length > 0
+          ? `${errorMessage(err)} (already created: ${created.join(', ')} - delete or reuse them before retrying)`
+          : errorMessage(err)
+      );
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Page
+      title="Compare a pull request"
+      subtitle="Burn-test an authentik PR build against its base branch or a release, side by side."
+    >
+      <form onSubmit={submit}>
+        <Alert>{error}</Alert>
+
+        <fieldset>
+          <legend>Pull request</legend>
+          <div className="fields">
+            <Field label="Pull request" help="Number or URL on goauthentik/authentik">
+              <input
+                required
+                value={prInput}
+                placeholder="https://github.com/goauthentik/authentik/pull/12345"
+                onChange={e => setPrInput(e.target.value)}
+                onBlur={() => {
+                  if (prNumber !== undefined && prNumber !== pr?.number) {
+                    void lookUp();
+                  }
+                }}
+              />
+            </Field>
+            <Field
+              label="PR image tag"
+              help={
+                <>
+                  On {DEV_IMAGE}; defaults to the PR&apos;s head commit. <ImageStatus state={prImage} />
+                </>
+              }
+            >
+              <input required value={prTag} placeholder="gh-<commit sha>" onChange={e => setPrTag(e.target.value)} />
+            </Field>
+          </div>
+          <div className="row">
+            <button type="button" disabled={lookingUp || prNumber === undefined} onClick={() => void lookUp()}>
+              {lookingUp ? 'Looking up…' : 'Look up on GitHub'}
+            </button>
+            {pr && (
+              <span className="muted">
+                <a href={pr.url} target="_blank" rel="noreferrer">
+                  #{pr.number}
+                </a>{' '}
+                {pr.title} ({pr.state}, <code>{pr.headRef}</code> into <code>{pr.baseRef}</code>)
+              </span>
+            )}
+          </div>
+          <Alert>{lookupError}</Alert>
+          {pr && !pr.sameRepo && (
+            <Alert kind="info">
+              This PR comes from a fork - authentik&apos;s CI doesn&apos;t publish images for those, so the PR image
+              tag likely doesn&apos;t exist. Enter the tag of an image you built yourself.
+            </Alert>
+          )}
+        </fieldset>
+
+        <fieldset>
+          <legend>Baseline</legend>
+          <div className="choice-cards" role="radiogroup" aria-label="Baseline">
+            <label className="choice-card">
+              <input type="radio" name="baseline" checked={baseline === 'base'} onChange={() => setBaseline('base')} />
+              <span>
+                <strong>Base branch{pr ? ` (${pr.baseRef})` : ''}</strong>
+                <span className="muted">
+                  The dev build of the commit the PR is based on, so only the PR&apos;s own changes differ.
+                </span>
+              </span>
+            </label>
+            <label className="choice-card">
+              <input
+                type="radio"
+                name="baseline"
+                checked={baseline === 'release'}
+                onChange={() => setBaseline('release')}
+              />
+              <span>
+                <strong>Tagged release</strong>
+                <span className="muted">A released version, e.g. to check a PR against what users run today.</span>
+              </span>
+            </label>
+          </div>
+          <div className="fields">
+            {baseline === 'base' ? (
+              <Field
+                label="Baseline image tag"
+                help={
+                  <>
+                    On {DEV_IMAGE}; defaults to the PR&apos;s base commit. <ImageStatus state={baselineImage} />
+                    {baselineImage === 'missing' && baseTag !== 'gh-main' && (
+                      <>
+                        {' '}
+                        <button type="button" className="small" onClick={() => setBaseTag('gh-main')}>
+                          Use gh-main
+                        </button>
+                      </>
+                    )}
+                  </>
+                }
+              >
+                <input required value={baseTag} placeholder="gh-main" onChange={e => setBaseTag(e.target.value)} />
+              </Field>
+            ) : (
+              <Field
+                label="Release version"
+                help={
+                  <>
+                    On {RELEASE_IMAGE}; defaults to the latest release. <ImageStatus state={baselineImage} />
+                  </>
+                }
+              >
+                <input required value={version} placeholder="2026.6.0" onChange={e => setVersion(e.target.value)} />
+              </Field>
+            )}
+          </div>
+        </fieldset>
+
+        <fieldset>
+          <legend>Deployments</legend>
+          <p className="muted">Both deployments get every setting below; only the image differs.</p>
+          <div className="fields">
+            <Field label="Name prefix" help="Deployments and namespaces are named after it">
+              <input
+                required
+                value={effectivePrefix}
+                placeholder="pr-12345"
+                onChange={e => {
+                  setPrefixEdited(true);
+                  setPrefix(e.target.value);
+                }}
+              />
+            </Field>
+            <Field label="Cluster">
+              <ClusterSelect value={spec.clusterRef?.name} onChange={cluster => patch({ clusterRef: { name: cluster } })} />
+            </Field>
+          </div>
+        </fieldset>
+
+        <DeploymentSpecFields
+          spec={spec}
+          patch={patch}
+          extraValuesYAML={extraValuesYAML}
+          onExtraValuesChange={setExtraValuesYAML}
+          showImage={false}
+        />
+
+        <fieldset>
+          <legend>Burn test</legend>
+          <p className="muted">
+            Keeps both deployments under the same steady load until stopped, each tagged with its own k6 target.
+          </p>
+          <div className="fields">
+            <Field label="Template" help={<Link to="/testcasetemplates">Manage test case templates</Link>}>
+              <select value={template} onChange={e => setTemplate(e.target.value)}>
+                {(templates.data ?? []).map(t => (
+                  <option key={t.metadata.name} value={t.metadata.name}>
+                    {t.metadata.name}
+                    {t.spec.description ? ` - ${t.spec.description}` : ''}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Virtual users" help="Per deployment">
+              <input type="number" min={1} value={vus} onChange={e => setVus(Number(e.target.value))} />
+            </Field>
+            <Field label="Time limit">
+              <input value={burnDuration} placeholder="8760h" onChange={e => setBurnDuration(e.target.value)} />
+            </Field>
+            <Field label="Flow slug">
+              <input value={flow} placeholder="default-authentication-flow" onChange={e => setFlow(e.target.value)} />
+            </Field>
+            <Field label="Trace sample rate">
+              <input value={traceSampleRate} placeholder="0.01" onChange={e => setTraceSampleRate(e.target.value)} />
+            </Field>
+          </div>
+        </fieldset>
+
+        <fieldset>
+          <legend>Creates</legend>
+          <ul className="muted">
+            <li>
+              Deployment <code>{prName || '…'}</code> running{' '}
+              <code>
+                {DEV_IMAGE}:{prTag || '…'}
+              </code>
+            </li>
+            <li>
+              Deployment <code>{baselineName || '…'}</code> running{' '}
+              <code>
+                {baseline === 'base' ? `${DEV_IMAGE}:${baseTag || '…'}` : `${RELEASE_IMAGE}:${version || '…'}`}
+              </code>
+            </li>
+            <li>
+              Burn test case <code>{testCaseName || '…'}</code> driving both
+            </li>
+          </ul>
+        </fieldset>
+
+        <div className="form-actions">
+          <button type="submit" className="primary" disabled={saving}>
+            {saving ? 'Creating…' : 'Create comparison'}
+          </button>
+          <button type="button" onClick={() => navigate(-1)}>
+            Cancel
+          </button>
+        </div>
+      </form>
+    </Page>
+  );
+}

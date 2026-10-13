@@ -90,6 +90,8 @@ type Server struct {
 	// podExec runs a command in a workload cluster pod (sql.go); a field so
 	// tests can fake it.
 	podExec podExecFunc
+	// imageRegistry overrides defaultImageRegistry (images.go) in tests.
+	imageRegistry string
 }
 
 // New builds a Server. The client must be backed by the management cluster
@@ -188,6 +190,8 @@ func (s *Server) Router() http.Handler {
 			r.Delete("/infrastructure/incus/credentials/{name}", s.deleteIncusCredential)
 			r.Post("/infrastructure/incus/credentials/{name}/test", s.testIncusCredential)
 			r.Post("/infrastructure/incus/credentials/{name}/trust", s.trustIncusCredential)
+
+			r.Get("/images/check", s.checkImage)
 
 			r.Get("/alerts", s.listAlerts)
 			r.Get("/placement", s.listPlacement)

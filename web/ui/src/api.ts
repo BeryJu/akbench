@@ -242,6 +242,11 @@ export const api = {
   objectEvents: (path: ResourcePath, name: string) =>
     request<List<ObjectEvent>>(`/api/v1/${path}/${seg(name)}/events`).then(r => r.items ?? []),
 
+  // -- Images (internal/api/images.go): whether a goauthentik image tag has
+  // been published on ghcr.io - repository without the registry host.
+  checkImage: (repository: string, tag: string) =>
+    request<{ exists: boolean }>(`/api/v1/images/check?repository=${seg(repository)}&tag=${seg(tag)}`),
+
   // -- Alerts (internal/api/alerts.go) - aggregated across every workload
   // cluster's own Alertmanager, there is no central instance.
   alerts: () => request<List<Alert>>('/api/v1/alerts').then(r => r.items ?? []),
