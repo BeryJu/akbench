@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import { api } from '../api';
 import { CodeEditor } from '../components/CodeEditor';
 import { MetricsGrid } from '../components/MetricsChart';
@@ -70,6 +70,9 @@ export function DeploymentsPage() {
                 <Link className="button small" to={`/deployments/${d.metadata.name}/edit`}>
                   Edit
                 </Link>
+                <Link className="button small" to={duplicateLink(d.metadata.name)}>
+                  Duplicate
+                </Link>
                 <button
                   className="small danger"
                   onClick={() =>
@@ -116,13 +119,32 @@ function slugify(value: string): string {
     .replace(/^-+|-+$/g, '');
 }
 
-function DeploymentForm({ existing }: { existing?: AuthentikDeployment }) {
+/** duplicateLink opens the new deployment form prefilled from `name`. */
+function duplicateLink(name: string): string {
+  return `/deployments/new?${new URLSearchParams({ from: name })}`;
+}
+
+/**
+ * duplicateSpec copies a deployment's spec for a new one. The namespace and
+ * target name are cleared so they follow the new name instead of colliding
+ * with the source's.
+ */
+function duplicateSpec(source: AuthentikDeployment): AuthentikDeploymentSpec {
+  const spec = structuredClone(source.spec);
+  spec.namespace = '';
+  delete spec.targetName;
+  return spec;
+}
+
+function DeploymentForm({ existing, source }: { existing?: AuthentikDeployment; source?: AuthentikDeployment }) {
   const navigate = useNavigate();
   const clusters = useResource(() => api.clusters(), [], 0);
   const [name, setName] = useState(existing?.metadata.name ?? '');
   // Starts from the fetched spec, so fields this form has no input for are
   // carried through a save untouched.
-  const [spec, setSpec] = useState<AuthentikDeploymentSpec>(existing?.spec ?? emptySpec());
+  const [spec, setSpec] = useState<AuthentikDeploymentSpec>(
+    existing?.spec ?? (source ? duplicateSpec(source) : emptySpec())
+  );
   const [extraValuesYAML, setExtraValuesYAML] = useState('');
   const [error, setError] = useState<string>();
   const [saving, setSaving] = useState(false);
@@ -131,21 +153,23 @@ function DeploymentForm({ existing }: { existing?: AuthentikDeployment }) {
 
   const patch = (changes: Partial<AuthentikDeploymentSpec>) => setSpec(current => ({ ...current, ...changes }));
 
-  // Extra values live in a separate ConfigMap: fetched once for an edit.
+  // Extra values live in a separate ConfigMap: fetched once for an edit or
+  // a duplicate.
+  const valuesFrom = existing ?? source;
   useEffect(() => {
-    if (!existing) {
+    if (!valuesFrom) {
       return;
     }
     let cancelled = false;
     api
-      .getExtraValues(existing.metadata.name)
+      .getExtraValues(valuesFrom.metadata.name)
       .then(res => !cancelled && setExtraValuesYAML(res.valuesYAML))
       // Not fatal - the field starts blank and a real problem surfaces on save.
       .catch(() => undefined);
     return () => {
       cancelled = true;
     };
-  }, [existing]);
+  }, [valuesFrom]);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -172,7 +196,10 @@ function DeploymentForm({ existing }: { existing?: AuthentikDeployment }) {
   const errorReporting = authentik.errorReporting ?? {};
 
   return (
-    <Page title={existing ? `Edit ${existing.metadata.name}` : 'New deployment'}>
+    <Page
+      title={existing ? `Edit ${existing.metadata.name}` : 'New deployment'}
+      subtitle={source && `Duplicating ${source.metadata.name}`}
+    >
       <form onSubmit={submit}>
         <Alert>{error}</Alert>
 
@@ -493,7 +520,24 @@ function DeploymentForm({ existing }: { existing?: AuthentikDeployment }) {
 }
 
 export function DeploymentCreatePage() {
-  return <DeploymentForm />;
+  const [params] = useSearchParams();
+  const from = params.get('from');
+  if (!from) {
+    return <DeploymentForm />;
+  }
+  return <DeploymentDuplicate from={from} />;
+}
+
+function DeploymentDuplicate({ from }: { from: string }) {
+  const source = useResource(() => api.deployment(from), [from], 0);
+  if (source.error) {
+    return (
+      <Page title="New deployment">
+        <Alert>{source.error}</Alert>
+      </Page>
+    );
+  }
+  return source.data ? <DeploymentForm key={from} source={source.data} /> : null;
 }
 
 export function DeploymentEditPage() {
@@ -555,6 +599,9 @@ export function DeploymentViewPage() {
           </button>
           <Link className="button" to={`/deployments/${name}/edit`}>
             Edit
+          </Link>
+          <Link className="button" to={duplicateLink(name)}>
+            Duplicate
           </Link>
         </>
       }
