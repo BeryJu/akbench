@@ -1,9 +1,7 @@
 package render
 
 import (
-	appsv1 "k8s.io/api/apps/v1"
 	"maps"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 	"strings"
 	"testing"
 
@@ -318,42 +316,6 @@ func TestMachineHealthCheck(t *testing.T) {
 func TestObservabilityStorage(t *testing.T) {
 	wc := addonTestCluster("c1")
 	wc.Spec.Incus = &benchv1alpha1.IncusProviderSpec{}
-	for name, objs := range map[string][]client.Object{
-		"tempo":     TempoObjects(wc),
-		"pyroscope": PyroscopeObjects(wc),
-		"grafana":   GrafanaObjects(wc, "pw"),
-	} {
-		var pvc *corev1.PersistentVolumeClaim
-		var deploy *appsv1.Deployment
-		for _, o := range objs {
-			switch o := o.(type) {
-			case *corev1.PersistentVolumeClaim:
-				pvc = o
-			case *appsv1.Deployment:
-				deploy = o
-			}
-		}
-		if pvc == nil || deploy == nil {
-			t.Fatalf("%s: pvc %v deployment %v", name, pvc, deploy)
-		}
-		if pvc.Spec.StorageClassName == nil || *pvc.Spec.StorageClassName != CSIIncusStorageClassName {
-			t.Errorf("%s: storage class %v", name, pvc.Spec.StorageClassName)
-		}
-		pod := deploy.Spec.Template.Spec
-		claimed := false
-		for _, v := range pod.Volumes {
-			if v.PersistentVolumeClaim != nil && v.PersistentVolumeClaim.ClaimName == pvc.Name {
-				claimed = true
-			}
-			if v.EmptyDir != nil {
-				t.Errorf("%s: still has an emptyDir volume %q", name, v.Name)
-			}
-		}
-		if !claimed || deploy.Spec.Strategy.Type != appsv1.RecreateDeploymentStrategyType || pod.SecurityContext == nil || pod.SecurityContext.FSGroup == nil {
-			t.Errorf("%s: claimed %v strategy %v securityContext %+v", name, claimed, deploy.Spec.Strategy.Type, pod.SecurityContext)
-		}
-	}
-
 	values, err := KubePrometheusStackHelmValues(wc)
 	if err != nil {
 		t.Fatal(err)

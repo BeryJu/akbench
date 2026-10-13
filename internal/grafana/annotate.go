@@ -13,7 +13,7 @@ import (
 )
 
 // Client posts annotations to a Grafana instance. Token is left empty in
-// practice: every Grafana this project installs (render.GrafanaObjects) runs
+// practice: every Grafana this project installs (render.GrafanaHelmRelease) runs
 // with anonymous Admin access, the same posture the Ansible harness's own
 // compose.yml used, so there's no service-account token to carry. Built per
 // TestRun by TestRunReconciler.resolveGrafanaClient, pointed at whichever

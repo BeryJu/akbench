@@ -18,7 +18,7 @@ import (
 
 // grafanaProxy reverse-proxies /grafana-proxy/{cluster}/* straight to that
 // WorkloadCluster's own Grafana NodePort (status.grafanaURL, populated by
-// WorkloadClusterReconciler's ensureGrafana - see render.GrafanaObjects'
+// WorkloadClusterReconciler's ensureGrafana - see render.GrafanaHelmRelease'
 // own doc comment for the full story of why this exists at all: the k8s
 // API server's own service-proxy subresource content-rewrites absolute
 // HTML paths in a way that breaks Grafana's own, so the browser has to
@@ -28,7 +28,7 @@ import (
 // src=> can't attach the Authorization header s.requireToken demands, so
 // this route accepts a session cookie minted by an authenticated request
 // instead (grafana_session.go). Grafana itself also requires real
-// credentials now (render.GrafanaObjects), which this handler injects below
+// credentials now (render.GrafanaHelmRelease), which this handler injects below
 // - so an ak-bench session/token is required to reach Grafana through here,
 // and reaching Grafana's NodePort by any other path (the only way to bypass
 // this handler, given cross-cluster reachability needs a NodePort at all)
@@ -37,7 +37,7 @@ import (
 // The Director deliberately does NOT strip the "/grafana-proxy/<cluster>"
 // prefix from the forwarded request path - the one deliberate difference
 // from a typical strip-prefix reverse proxy. Grafana's own
-// GF_SERVER_SERVE_FROM_SUB_PATH=true (render.GrafanaObjects) means Grafana
+// serve_from_sub_path=true (render.GrafanaHelmRelease's grafana.ini) means Grafana
 // expects exactly that: a reverse proxy in front of it that preserves the
 // sub-path rather than stripping it.
 func (s *Server) grafanaProxy(w http.ResponseWriter, r *http.Request) {
@@ -82,7 +82,7 @@ func (s *Server) grafanaProxy(w http.ResponseWriter, r *http.Request) {
 			pr.Out.Host = target.Host
 			stripProxyCredentials(pr.Out)
 			// Grafana itself requires real credentials now (see
-			// render.GrafanaObjects' own doc comment) - the browser never
+			// render.GrafanaHelmRelease's doc comment) - the browser never
 			// sees them, only this hop does, which is what keeps the iframe
 			// login-free.
 			pr.Out.SetBasicAuth(render.GrafanaAdminUser, adminPassword)

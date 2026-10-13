@@ -51,7 +51,7 @@ type TestRunReconciler struct {
 // clusterRef (the management cluster itself gets no Grafana installed by
 // this operator) or its WorkloadCluster hasn't reconciled a URL yet.
 // Grafana itself runs with anonymous Admin access (see
-// render.GrafanaObjects' own doc comment), so no token is needed here.
+// render.GrafanaHelmRelease's doc comment), so no token is needed here.
 func (r *TestRunReconciler) resolveGrafanaClient(ctx context.Context, namespace, deploymentName string) *grafana.Client {
 	var topo benchv1alpha1.AuthentikDeployment
 	if err := r.Get(ctx, types.NamespacedName{Name: deploymentName, Namespace: namespace}, &topo); err != nil {

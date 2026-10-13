@@ -4,11 +4,7 @@ import (
 	_ "embed"
 	"fmt"
 
-	appsv1 "k8s.io/api/apps/v1"
-	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/util/intstr"
-	"sigs.k8s.io/controller-runtime/pkg/client"
+	helmv2 "github.com/fluxcd/helm-controller/api/v2"
 
 	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
 )
@@ -30,21 +26,19 @@ const (
 	GrafanaServiceName = "grafana"
 	GrafanaPort        = 3000
 
-	// GrafanaNodePortServiceName/GrafanaNodePort expose Grafana outside its
-	// own cluster the same way Prometheus's own NodePort does
-	// (PrometheusNodePortServiceName/PrometheusNodePort) - what
+	// GrafanaNodePort exposes Grafana outside its own cluster the same way
+	// Prometheus's own NodePort does (PrometheusNodePort) - what
 	// cmd/apiserver's reverse proxy (internal/api/grafana_proxy.go)
-	// connects to, resolved via WorkloadClusterStatus.GrafanaURL.
-	GrafanaNodePortServiceName = "grafana-nodeport"
-	GrafanaNodePort            = 30910
+	// connects to, resolved via WorkloadClusterStatus.GrafanaURL. The
+	// chart's Service is a NodePort itself, so there's no separate one.
+	GrafanaNodePort = 30910
 
-	grafanaDatasourcesConfigMapName = GrafanaServiceName + "-datasources"
-	grafanaDashboardsConfigMapName  = GrafanaServiceName + "-dashboards"
-	grafanaProvidersConfigMapName   = GrafanaServiceName + "-providers"
-
-	// GrafanaAdminUser is the one account Grafana has - see GrafanaObjects'
-	// own doc comment for why anonymous access was replaced with this.
+	// GrafanaAdminUser is the one account Grafana has - see
+	// GrafanaHelmRelease's doc comment for why anonymous access was
+	// replaced with this.
 	GrafanaAdminUser = "admin"
+
+	grafanaDashboardsPath = "/var/lib/grafana/dashboards/benchmarks"
 )
 
 // GrafanaAdminSecretName is the *management*-cluster Secret
@@ -56,10 +50,6 @@ const (
 // only the operator ever reads.
 func GrafanaAdminSecretName(wc *benchv1alpha1.WorkloadCluster) string {
 	return wc.Name + "-grafana-admin"
-}
-
-func grafanaLabels() map[string]string {
-	return map[string]string{labelKeyApp: GrafanaServiceName}
 }
 
 // GrafanaProxyPathPrefix is cmd/apiserver's own fixed mount for this
@@ -86,61 +76,54 @@ const TempoDatasourceUID = "tempo"
 // unlike the reference harness, nothing here deploys Loki. Tempo's
 // tracesToLogsV2 (which pivoted from a trace to Loki logs) is dropped for
 // the same reason.
-func grafanaDatasources() string {
-	return fmt.Sprintf(`apiVersion: 1
-datasources:
-  - name: Prometheus
-    type: prometheus
-    access: proxy
-    orgId: 1
-    uid: prometheus
-    url: http://%s.%s.svc.cluster.local:%d
-    jsonData:
-      timeInterval: 15s
-  - name: Pyroscope
-    type: grafana-pyroscope-datasource
-    access: proxy
-    orgId: 1
-    uid: pyroscope
-    url: http://%s.%s.svc.cluster.local:%d
-  - name: Tempo
-    type: tempo
-    access: proxy
-    orgId: 1
-    uid: tempo
-    url: http://%s.%s.svc.cluster.local:%d
-    jsonData:
-      serviceMap:
-        datasourceUid: prometheus
-      nodeGraph:
-        enabled: true
-`,
-		PrometheusServiceName, ObservabilityNamespace, PrometheusPort,
-		PyroscopeServiceName, ObservabilityNamespace, PyroscopePort,
-		TempoServiceName, ObservabilityNamespace, TempoQueryPort,
-	)
+func grafanaDatasources() map[string]any {
+	url := func(service string, port int) string {
+		return fmt.Sprintf("http://%s.%s.svc.cluster.local:%d", service, ObservabilityNamespace, port)
+	}
+	return map[string]any{
+		"apiVersion": 1,
+		"datasources": []map[string]any{
+			{
+				"name": "Prometheus", "type": "prometheus", "access": "proxy", "orgId": 1, "uid": "prometheus",
+				"url":      url(PrometheusServiceName, PrometheusPort),
+				"jsonData": map[string]any{"timeInterval": "15s"},
+			},
+			{
+				"name": "Pyroscope", "type": "grafana-pyroscope-datasource", "access": "proxy", "orgId": 1, "uid": "pyroscope",
+				"url": url(PyroscopeServiceName, PyroscopePort),
+			},
+			{
+				"name": "Tempo", "type": "tempo", "access": "proxy", "orgId": 1, "uid": TempoDatasourceUID,
+				"url": url(TempoServiceName, TempoQueryPort),
+				"jsonData": map[string]any{
+					"serviceMap": map[string]any{"datasourceUid": "prometheus"},
+					"nodeGraph":  map[string]any{"enabled": true},
+				},
+			},
+		},
+	}
 }
 
-// grafanaDashboardProvider matches the reference harness's own
-// providers/dashboards.yml: a single file-based provider reading whatever's
-// mounted at /var/lib/grafana/dashboards.
-const grafanaDashboardProvider = `apiVersion: 1
-providers:
-  - name: benchmarks
-    orgId: 1
-    type: file
-    disableDeletion: false
-    allowUiUpdates: true
-    updateIntervalSeconds: 30
-    options:
-      path: /var/lib/grafana/dashboards
-      foldersFromFilesStructure: false
-`
+// grafanaDashboardProviders matches the reference harness's own
+// providers/dashboards.yml: a single file-based provider reading the
+// dashboards the chart mounts from its "benchmarks" dashboards ConfigMap.
+func grafanaDashboardProviders() map[string]any {
+	return map[string]any{
+		"apiVersion": 1,
+		"providers": []map[string]any{{
+			"name": "benchmarks", "orgId": 1, "folder": "", "type": "file",
+			"disableDeletion": false, "allowUiUpdates": true, "updateIntervalSeconds": 30,
+			"options": map[string]any{"path": grafanaDashboardsPath, "foldersFromFilesStructure": false},
+		}},
+	}
+}
 
 // The 5 dashboards are this project's own, already adapted to what this
 // project actually collects - see manifests/grafana-dashboards/README.md for
 // why they're hand-authored rather than ported from the reference harness's
-// newer dashboard.grafana.app/v2-schema ones.
+// newer dashboard.grafana.app/v2-schema ones. The chart writes each into its
+// dashboards ConfigMap verbatim (no Helm templating), so their own
+// {{...}} legend formats are safe.
 //
 //go:embed manifests/grafana-dashboards/compare-tests.json
 var grafanaDashboardCompareTests []byte
@@ -157,158 +140,58 @@ var grafanaDashboardPostgres []byte
 //go:embed manifests/grafana-dashboards/nodes.json
 var grafanaDashboardNodes []byte
 
-// GrafanaObjects returns the single-replica, no-HA Grafana
-// WorkloadClusterReconciler installs onto every workload cluster: datasource/
-// dashboard-provider/dashboard ConfigMaps, a Deployment, and a ClusterIP
-// Service. Also has a NodePort Service (GrafanaNodePortServiceName) purely so
-// cmd/apiserver's reverse proxy (internal/api/grafana_proxy.go), running on a
-// different cluster entirely, can reach it at all - which means anyone who
-// can reach a node's IP on that port can reach Grafana directly, bypassing
-// cmd/apiserver's own session/bearer-token gate entirely. This used to be
-// covered by anonymous Admin auth (matching the reference harness's own
-// compose.yml, which never needed to consider this - its Grafana was never
-// multi-hop), which made that bypass a full unauthenticated admin panel.
-// Grafana now requires real credentials (GF_SECURITY_ADMIN_USER/PASSWORD,
-// adminPassword generated once by ensureRandomSecret and never sent to a
-// browser): cmd/apiserver injects them as HTTP Basic auth on every request it
-// proxies (see stripProxyCredentials's caller), so the iframe still "just
-// works" with no login prompt, but reaching this NodePort by any other path
-// now hits Grafana's own login screen instead of an open admin session.
-// GF_SERVER_ROOT_URL/GF_SERVER_SERVE_FROM_SUB_PATH are required once Grafana
-// is reached through a proxy subpath - a well-known
-// Grafana-behind-a-reverse-proxy requirement, not something specific to this
-// proxy mechanism - otherwise its own asset/API links break once loaded.
-func GrafanaObjects(wc *benchv1alpha1.WorkloadCluster, adminPassword string) []client.Object {
-	labels := grafanaLabels()
-	rootURL := GrafanaProxyPathPrefix(wc)
-	monitoringNodeSelector, monitoringTolerations := MonitoringPoolPlacement(wc)
-	return []client.Object{
-		&corev1.Namespace{
-			Kind: kindNamespace, APIVersion: apiVersionV1,
-			Name: ObservabilityNamespace,
+// GrafanaHelmRelease installs the single-replica Grafana every workload
+// cluster gets, from its upstream chart. Its Service is a NodePort
+// (GrafanaNodePort) purely so cmd/apiserver's reverse proxy
+// (internal/api/grafana_proxy.go), running on a different cluster entirely,
+// can reach it at all - which means anyone who can reach a node's IP on
+// that port can reach Grafana directly, bypassing cmd/apiserver's own
+// session/bearer-token gate. So Grafana requires real credentials: the
+// admin password is generated once on the management cluster
+// (GrafanaAdminSecretName, by ensureRandomSecret) and handed to the chart
+// through valuesFrom rather than written into the HelmRelease. cmd/apiserver
+// injects it as HTTP Basic auth on every request it proxies, so the iframe
+// still "just works" with no login prompt, but reaching the NodePort by any
+// other path hits Grafana's login screen. root_url/serve_from_sub_path are
+// the usual Grafana-behind-a-reverse-proxy settings; allow_embedding drops
+// the X-Frame-Options header that would otherwise block the UI's iframe.
+func GrafanaHelmRelease(wc *benchv1alpha1.WorkloadCluster) (*helmv2.HelmRelease, error) {
+	values := map[string]any{
+		"fullnameOverride": GrafanaServiceName,
+		"adminUser":        GrafanaAdminUser,
+		"service": map[string]any{
+			"type": "NodePort", "port": GrafanaPort, "nodePort": GrafanaNodePort,
 		},
-		&corev1.ConfigMap{
-			Kind: kindConfigMap, APIVersion: apiVersionV1,
-			Name: grafanaDatasourcesConfigMapName, Namespace: ObservabilityNamespace,
-			Data: map[string]string{"datasources.yaml": grafanaDatasources()},
+		"persistence":    chartPersistence(wc, GrafanaStorageSize),
+		"serviceMonitor": map[string]any{"enabled": true},
+		"testFramework":  map[string]any{"enabled": false},
+		"grafana.ini": map[string]any{
+			"server": map[string]any{
+				"root_url":            GrafanaProxyPathPrefix(wc),
+				"serve_from_sub_path": true,
+			},
+			"security":  map[string]any{"allow_embedding": true},
+			"analytics": map[string]any{"reporting_enabled": false, "check_for_updates": false},
 		},
-		&corev1.ConfigMap{
-			Kind: kindConfigMap, APIVersion: apiVersionV1,
-			Name: grafanaProvidersConfigMapName, Namespace: ObservabilityNamespace,
-			Data: map[string]string{"dashboards.yaml": grafanaDashboardProvider},
-		},
-		&corev1.ConfigMap{
-			Kind: kindConfigMap, APIVersion: apiVersionV1,
-			Name: grafanaDashboardsConfigMapName, Namespace: ObservabilityNamespace,
-			Data: map[string]string{
-				"compare-tests.json": string(grafanaDashboardCompareTests),
-				"k6.json":            string(grafanaDashboardK6),
-				"authentik.json":     string(grafanaDashboardAuthentik),
-				"postgres.json":      string(grafanaDashboardPostgres),
-				"nodes.json":         string(grafanaDashboardNodes),
+		"datasources":        map[string]any{"datasources.yaml": grafanaDatasources()},
+		"dashboardProviders": map[string]any{"dashboardproviders.yaml": grafanaDashboardProviders()},
+		"dashboards": map[string]any{
+			"benchmarks": map[string]any{
+				"compare-tests": map[string]any{"json": string(grafanaDashboardCompareTests)},
+				"k6":            map[string]any{"json": string(grafanaDashboardK6)},
+				"authentik":     map[string]any{"json": string(grafanaDashboardAuthentik)},
+				"postgres":      map[string]any{"json": string(grafanaDashboardPostgres)},
+				"nodes":         map[string]any{"json": string(grafanaDashboardNodes)},
 			},
 		},
-		observabilityPVC(wc, "grafana-data", GrafanaStorageSize),
-		withPersistentData(&appsv1.Deployment{
-			Kind: kindDeployment, APIVersion: apiVersionAppsV1,
-			Name: GrafanaServiceName, Namespace: ObservabilityNamespace, Labels: labels,
-			Spec: appsv1.DeploymentSpec{
-				Replicas: new(int32(1)),
-				Selector: &metav1.LabelSelector{MatchLabels: labels},
-				Template: corev1.PodTemplateSpec{
-					ObjectMeta: metav1.ObjectMeta{Labels: labels},
-					Spec: corev1.PodSpec{
-						Containers: []corev1.Container{
-							{
-								Name:  "grafana",
-								Image: "grafana/grafana:11.4.0",
-								Env: []corev1.EnvVar{
-									{Name: "GF_SECURITY_ADMIN_USER", Value: GrafanaAdminUser},
-									{Name: "GF_SECURITY_ADMIN_PASSWORD", Value: adminPassword},
-									// Grafana sends "X-Frame-Options: deny" on every
-									// response by default (confirmed live: curl -I
-									// against a stock grafana/grafana:11.4.0 container) -
-									// its own clickjacking protection, blocking iframe
-									// embedding from any origin whatsoever, not a CORS
-									// concern at all (no Access-Control-* header is
-									// involved). allow_embedding is the one documented
-									// switch that removes it - confirmed live that setting
-									// it drops the header entirely.
-									{Name: "GF_SECURITY_ALLOW_EMBEDDING", Value: "true"},
-									{Name: "GF_SERVER_ROOT_URL", Value: rootURL},
-									// "true" is correct here: per Grafana's own docs,
-									// serve_from_sub_path=true means the reverse proxy
-									// does NOT strip root_url's own path prefix before
-									// forwarding to Grafana - exactly what
-									// internal/api/grafana_proxy.go's reverse proxy
-									// does (it deliberately preserves the full request
-									// path). This was "false" in an earlier version of
-									// this file when Grafana was reached through the
-									// k8s API server's own service-proxy subresource
-									// instead, which *does* strip its own mount prefix
-									// - a materially different proxy, not just a config
-									// tweak; see this file's own package doc comment.
-									{Name: "GF_SERVER_SERVE_FROM_SUB_PATH", Value: "true"},
-								},
-								Ports: []corev1.ContainerPort{{Name: portNameHTTP, ContainerPort: GrafanaPort}},
-								VolumeMounts: []corev1.VolumeMount{
-									{Name: "datasources", MountPath: "/etc/grafana/provisioning/datasources"},
-									{Name: "providers", MountPath: "/etc/grafana/provisioning/dashboards"},
-									{Name: "dashboards", MountPath: "/var/lib/grafana/dashboards"},
-								},
-							},
-						},
-						NodeSelector: monitoringNodeSelector,
-						Tolerations:  monitoringTolerations,
-						Volumes: []corev1.Volume{
-							{
-								Name: "datasources",
-								ConfigMap: &corev1.ConfigMapVolumeSource{
-									Name: grafanaDatasourcesConfigMapName,
-								},
-							},
-							{
-								Name: "providers",
-								ConfigMap: &corev1.ConfigMapVolumeSource{
-									Name: grafanaProvidersConfigMapName,
-								},
-							},
-							{
-								Name: "dashboards",
-								ConfigMap: &corev1.ConfigMapVolumeSource{
-									Name: grafanaDashboardsConfigMapName,
-								},
-							},
-						},
-					},
-				},
-			},
-		}, "grafana-data", "/var/lib/grafana", 472),
-		&corev1.Service{
-			Kind: kindService, APIVersion: apiVersionV1,
-			Name: GrafanaServiceName, Namespace: ObservabilityNamespace, Labels: labels,
-			Spec: corev1.ServiceSpec{
-				Selector: labels,
-				Ports:    []corev1.ServicePort{{Name: portNameHTTP, Port: GrafanaPort, TargetPort: intstr.FromInt32(GrafanaPort)}},
-			},
-		},
-		&corev1.Service{
-			Kind: kindService, APIVersion: apiVersionV1,
-			Name: GrafanaNodePortServiceName, Namespace: ObservabilityNamespace,
-			Spec: corev1.ServiceSpec{
-				Type:     corev1.ServiceTypeNodePort,
-				Selector: labels,
-				Ports: []corev1.ServicePort{
-					{Name: portNameHTTP, Port: GrafanaPort, TargetPort: intstr.FromInt32(GrafanaPort), NodePort: int32(GrafanaNodePort)},
-				},
-			},
-		},
-		// Grafana serves its own Prometheus-format /metrics on its main
-		// "http" port - confirmed live (docker run grafana/grafana:11.4.0,
-		// curl :3000/metrics returns real go_*/deprecated_flags_inuse_total
-		// series). Selects the plain ClusterIP Service above (it carries
-		// these same labels); the NodePort twin isn't labeled, so it's
-		// skipped rather than scraped twice.
-		newServiceMonitor(GrafanaServiceName, labels, portNameHTTP),
 	}
+	monitoringPlacement(wc, values)
+	hr, err := observabilityHelmRelease(wc, GrafanaHelmReleaseName, "grafana", grafanaChartVersion, GrafanaCommunityHelmRepositoryName, values)
+	if err != nil {
+		return nil, err
+	}
+	hr.Spec.ValuesFrom = []helmv2.ValuesReference{{
+		Kind: "Secret", Name: GrafanaAdminSecretName(wc), ValuesKey: "password", TargetPath: "adminPassword",
+	}}
+	return hr, nil
 }

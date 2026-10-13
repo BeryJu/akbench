@@ -157,7 +157,7 @@ func prometheusCompatServices() []map[string]any {
 //     set of features), unlike the hand-rolled v2.55.1 install this
 //     replaces, which needed it explicitly.
 //   - grafana.enabled false: this project already installs its own Grafana
-//     (render.GrafanaObjects, pre-wired with Prometheus/Pyroscope/Tempo
+//     (render.GrafanaHelmRelease, pre-wired with Prometheus/Pyroscope/Tempo
 //     datasources), matching the "no HA, dev-scale, only what's actually
 //     used" posture the rest of this addon set already follows.
 //   - alertmanager.enabled true, with alertmanager.config set to

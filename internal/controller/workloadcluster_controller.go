@@ -265,9 +265,9 @@ func (r *WorkloadClusterReconciler) ensureAddons(ctx context.Context, wc *benchv
 		helmAddon("metrics-server", r.ensureMetricsServer, render.MetricsServerHelmReleaseName),
 		helmAddon("Prometheus", r.ensurePrometheus, render.KubePrometheusStackHelmReleaseName),
 		{name: "cluster-autoscaler", ensure: r.ensureClusterAutoscaler, helmRelease: render.ClusterAutoscalerHelmReleaseName(wc)},
-		{name: "Pyroscope", ensure: r.ensurePyroscope},
-		{name: "Tempo", ensure: r.ensureTempo},
-		{name: "Grafana", ensure: r.ensureGrafana},
+		helmAddon("Pyroscope", r.ensurePyroscope, render.PyroscopeHelmReleaseName),
+		helmAddon("Tempo", r.ensureTempo, render.TempoHelmReleaseName),
+		helmAddon("Grafana", r.ensureGrafana, render.GrafanaHelmReleaseName),
 		helmAddon("descheduler", r.ensureDescheduler, render.DeschedulerHelmReleaseName),
 	}
 	// csi-incus is Incus-specific (and a no-op without spec.incus).
@@ -532,66 +532,6 @@ func (r *WorkloadClusterReconciler) ensureClusterAutoscaler(ctx context.Context,
 	if err := applyOwned(ctx, r.Client, r.Scheme, wc, hr); err != nil {
 		return fmt.Errorf("apply cluster-autoscaler HelmRelease: %w", err)
 	}
-	return nil
-}
-
-// ensurePyroscope installs a single-replica Grafana Pyroscope onto the
-// workload cluster if it isn't there already. No cross-cluster
-// reachability needed - authentik's own AUTHENTIK_PYROSCOPE_HOST already
-// points at this exact in-cluster DNS name (defaultPyroscopeHost in
-// authentikdeployment_controller.go), and nothing outside this cluster reads
-// its data (yet).
-func (r *WorkloadClusterReconciler) ensurePyroscope(ctx context.Context, wc *benchv1alpha1.WorkloadCluster) error {
-	remoteClient, err := r.remoteAddonClient(ctx, wc)
-	if err != nil {
-		return err
-	}
-	return createAll(ctx, remoteClient, render.PyroscopeObjects(wc))
-}
-
-// ensureTempo installs a single-replica Grafana Tempo onto the workload
-// cluster if it isn't there already - same reasoning as ensurePyroscope,
-// for AUTHENTIK_ERROR_REPORTING__OTEL_ENDPOINT (defaultTracingEndpoint).
-func (r *WorkloadClusterReconciler) ensureTempo(ctx context.Context, wc *benchv1alpha1.WorkloadCluster) error {
-	remoteClient, err := r.remoteAddonClient(ctx, wc)
-	if err != nil {
-		return err
-	}
-	return createAll(ctx, remoteClient, render.TempoObjects(wc))
-}
-
-// ensureGrafana installs a single-replica Grafana onto the workload cluster
-// if it isn't there already, pre-wired with Prometheus/Pyroscope/Tempo
-// datasources and this project's own 5 dashboards (see
-// render.GrafanaObjects). Unlike Pyroscope/Tempo, this does need a
-// cross-cluster URL recorded: cmd/apiserver's own reverse proxy
-// (internal/api/grafana_proxy.go) is what the web UI's Grafana page actually
-// embeds, and it connects to Grafana via this NodePort URL, mirroring
-// ensurePrometheus exactly.
-func (r *WorkloadClusterReconciler) ensureGrafana(ctx context.Context, wc *benchv1alpha1.WorkloadCluster) error {
-	remoteClient, err := r.remoteAddonClient(ctx, wc)
-	if err != nil {
-		return err
-	}
-	// Generated once on the management cluster (not the remote one): both
-	// cmd/apiserver (which proxies to Grafana) and this Deployment's own env
-	// need the exact same value, and only the management cluster is
-	// somewhere cmd/apiserver can already read a Secret from directly - see
-	// render.GrafanaAdminSecretName's own doc comment.
-	adminPassword, err := ensureRandomSecret(ctx, r.Client,
-		types.NamespacedName{Name: render.GrafanaAdminSecretName(wc), Namespace: wc.Namespace},
-		"password", 16)
-	if err != nil {
-		return fmt.Errorf("ensure Grafana admin password: %w", err)
-	}
-	if err := createAll(ctx, remoteClient, render.GrafanaObjects(wc, adminPassword)); err != nil {
-		return err
-	}
-	nodeIP, err := reachableNodeIP(ctx, remoteClient)
-	if err != nil {
-		return fmt.Errorf("resolve reachable node IP: %w", err)
-	}
-	wc.Status.GrafanaURL = fmt.Sprintf("http://%s:%d", nodeIP, render.GrafanaNodePort)
 	return nil
 }
 

@@ -92,7 +92,7 @@ func TestGrafanaProxyStripsOwnCredentials(t *testing.T) {
 	}
 	// The caller's own Authorization (the ak-bench bearer token) must never
 	// reach Grafana - but the proxy must inject Grafana's own real
-	// credentials in its place (render.GrafanaObjects requires them now
+	// credentials in its place (render.GrafanaHelmRelease requires them now
 	// that anonymous Admin access is gone), not leave the header empty.
 	user, pass, ok := forwarded.BasicAuth()
 	if !ok || user != render.GrafanaAdminUser || pass != grafanaTestAdminPassword {
