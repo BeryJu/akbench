@@ -30,4 +30,5 @@ const (
 	ReasonReady              = "Ready"
 	ReasonNotImplemented     = "NotImplemented"
 	ReasonDependencyNotReady = "DependencyNotReady"
+	ReasonResetting          = "Resetting"
 )

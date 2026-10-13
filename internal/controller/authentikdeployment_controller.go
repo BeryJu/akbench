@@ -311,8 +311,8 @@ func (r *AuthentikDeploymentReconciler) reconcilePostgresRoleFix(ctx context.Con
 // +kubebuilder:rbac:groups=core,resources=namespaces,verbs=get;list;watch;create;delete
 // +kubebuilder:rbac:groups=core,resources=secrets,verbs=get;list;watch;create;update
 // +kubebuilder:rbac:groups=core,resources=configmaps,verbs=get;list;watch;create;update
-// +kubebuilder:rbac:groups=core,resources=persistentvolumeclaims,verbs=get;list;watch;create;update
-// +kubebuilder:rbac:groups=batch,resources=jobs,verbs=get;list;watch;create
+// +kubebuilder:rbac:groups=core,resources=persistentvolumeclaims,verbs=get;list;watch;create;update;delete
+// +kubebuilder:rbac:groups=batch,resources=jobs,verbs=get;list;watch;create;delete
 
 func (r *AuthentikDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
@@ -341,6 +341,10 @@ func (r *AuthentikDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.
 			return ctrl.Result{}, err
 		}
 		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+	}
+
+	if _, ok := topo.Annotations[benchv1alpha1.AnnotationResetRequested]; ok {
+		return r.reconcileReset(ctx, rc, &topo)
 	}
 
 	if err := ensureNamespace(ctx, rc, topo.Spec.Namespace); err != nil {

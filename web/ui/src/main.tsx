@@ -7,6 +7,7 @@ import { EventsProvider } from './events';
 import { Layout } from './Layout';
 import { AuthGate, OIDCCallback, OIDCSilent } from './Login';
 import './styles.css';
+import type { RouteTitle } from './title';
 
 // @goauthentik/theme keys its dark-mode values off html[data-theme="dark"],
 // not a prefers-color-scheme media query - bridge the two so this app still
@@ -37,6 +38,8 @@ const testRuns = () => import('./pages/TestRuns');
 const grafana = () => import('./pages/Grafana');
 const infrastructure = () => import('./pages/Infrastructure');
 
+const t = (title: RouteTitle) => ({ title });
+
 function NotFound() {
   return (
     <div>
@@ -59,37 +62,37 @@ const router = createBrowserRouter([
       </AuthGate>
     ),
     children: [
-      { index: true, element: page(() => import('./pages/Dashboard'), 'DashboardPage') },
-      { path: 'deployments', element: page(deployments, 'DeploymentsPage') },
-      { path: 'deployments/new', element: page(deployments, 'DeploymentCreatePage') },
-      { path: 'deployments/:name', element: page(deployments, 'DeploymentViewPage') },
-      { path: 'deployments/:name/edit', element: page(deployments, 'DeploymentEditPage') },
-      { path: 'testcases', element: page(testCases, 'TestCasesPage') },
-      { path: 'testcases/new', element: page(testCases, 'TestCaseCreatePage') },
-      { path: 'testcases/:name', element: page(testCases, 'TestCaseViewPage') },
-      { path: 'testcases/:name/edit', element: page(testCases, 'TestCaseEditPage') },
-      { path: 'testcasetemplates', element: page(templates, 'TestCaseTemplatesPage') },
-      { path: 'testcasetemplates/new', element: page(templates, 'TestCaseTemplateCreatePage') },
-      { path: 'testcasetemplates/:name', element: page(templates, 'TestCaseTemplateViewPage') },
-      { path: 'testcasetemplates/:name/edit', element: page(templates, 'TestCaseTemplateEditPage') },
-      { path: 'clusters', element: page(clusters, 'ClustersPage') },
-      { path: 'clusters/new', element: page(clusters, 'ClusterCreatePage') },
-      { path: 'clusters/:name', element: page(clusters, 'ClusterViewPage') },
-      { path: 'clusters/:name/edit', element: page(clusters, 'ClusterEditPage') },
-      { path: 'infrastructure', element: page(infrastructure, 'InfrastructurePage') },
-      { path: 'infrastructure/incus/new', element: page(infrastructure, 'IncusCredentialCreatePage') },
-      { path: 'infrastructure/incus/:name', element: page(infrastructure, 'IncusCredentialViewPage') },
-      { path: 'infrastructure/incus/:name/edit', element: page(infrastructure, 'IncusCredentialEditPage') },
-      { path: 'testruns', element: page(testRuns, 'TestRunsPage') },
-      { path: 'testruns/:name', element: page(testRuns, 'TestRunViewPage') },
-      { path: 'pull-requests/new', element: page(() => import('./pages/PullRequestComparison'), 'PullRequestComparisonPage') },
-      { path: 'compare', element: page(() => import('./pages/Compare'), 'ComparePage') },
-      { path: 'alerts', element: page(() => import('./pages/Alerts'), 'AlertsPage') },
-      { path: 'grafana', element: page(grafana, 'GrafanaPage') },
-      { path: 'grafana/:cluster', element: page(grafana, 'GrafanaPage') },
+      { index: true, handle: t('Dashboard'), element: page(() => import('./pages/Dashboard'), 'DashboardPage') },
+      { path: 'deployments', handle: t('Deployments'), element: page(deployments, 'DeploymentsPage') },
+      { path: 'deployments/new', handle: t('New deployment'), element: page(deployments, 'DeploymentCreatePage') },
+      { path: 'deployments/:name', handle: t(p => `Deployment ${p.name}`), element: page(deployments, 'DeploymentViewPage') },
+      { path: 'deployments/:name/edit', handle: t(p => `Edit deployment ${p.name}`), element: page(deployments, 'DeploymentEditPage') },
+      { path: 'testcases', handle: t('Test cases'), element: page(testCases, 'TestCasesPage') },
+      { path: 'testcases/new', handle: t('New test case'), element: page(testCases, 'TestCaseCreatePage') },
+      { path: 'testcases/:name', handle: t(p => `Test case ${p.name}`), element: page(testCases, 'TestCaseViewPage') },
+      { path: 'testcases/:name/edit', handle: t(p => `Edit test case ${p.name}`), element: page(testCases, 'TestCaseEditPage') },
+      { path: 'testcasetemplates', handle: t('Test case templates'), element: page(templates, 'TestCaseTemplatesPage') },
+      { path: 'testcasetemplates/new', handle: t('New test case template'), element: page(templates, 'TestCaseTemplateCreatePage') },
+      { path: 'testcasetemplates/:name', handle: t(p => `Test case template ${p.name}`), element: page(templates, 'TestCaseTemplateViewPage') },
+      { path: 'testcasetemplates/:name/edit', handle: t(p => `Edit test case template ${p.name}`), element: page(templates, 'TestCaseTemplateEditPage') },
+      { path: 'clusters', handle: t('Clusters'), element: page(clusters, 'ClustersPage') },
+      { path: 'clusters/new', handle: t('New cluster'), element: page(clusters, 'ClusterCreatePage') },
+      { path: 'clusters/:name', handle: t(p => `Cluster ${p.name}`), element: page(clusters, 'ClusterViewPage') },
+      { path: 'clusters/:name/edit', handle: t(p => `Edit cluster ${p.name}`), element: page(clusters, 'ClusterEditPage') },
+      { path: 'infrastructure', handle: t('Providers'), element: page(infrastructure, 'InfrastructurePage') },
+      { path: 'infrastructure/incus/new', handle: t('New Incus credential'), element: page(infrastructure, 'IncusCredentialCreatePage') },
+      { path: 'infrastructure/incus/:name', handle: t(p => `Incus credential ${p.name}`), element: page(infrastructure, 'IncusCredentialViewPage') },
+      { path: 'infrastructure/incus/:name/edit', handle: t(p => `Edit Incus credential ${p.name}`), element: page(infrastructure, 'IncusCredentialEditPage') },
+      { path: 'testruns', handle: t('Test runs'), element: page(testRuns, 'TestRunsPage') },
+      { path: 'testruns/:name', handle: t(p => `Test run ${p.name}`), element: page(testRuns, 'TestRunViewPage') },
+      { path: 'pull-requests/new', handle: t('Compare a PR'), element: page(() => import('./pages/PullRequestComparison'), 'PullRequestComparisonPage') },
+      { path: 'compare', handle: t('Compare'), element: page(() => import('./pages/Compare'), 'ComparePage') },
+      { path: 'alerts', handle: t('Alerts'), element: page(() => import('./pages/Alerts'), 'AlertsPage') },
+      { path: 'grafana', handle: t('Grafana'), element: page(grafana, 'GrafanaPage') },
+      { path: 'grafana/:cluster', handle: t(p => `Grafana · ${p.cluster}`), element: page(grafana, 'GrafanaPage') },
       // Rendered by Layout's persistent ShellWorkspace, not an Outlet.
-      { path: 'shell', element: null },
-      { path: '*', element: <NotFound /> },
+      { path: 'shell', handle: t('Shell'), element: null },
+      { path: '*', handle: t('Not found'), element: <NotFound /> },
     ],
   },
 ]);

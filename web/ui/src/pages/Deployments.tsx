@@ -609,6 +609,7 @@ export function DeploymentViewPage() {
   const [kicking, setKicking] = useState(false);
 
   const d = deployment.data;
+  const resetting = !!d?.metadata.annotations?.['bench.goauthentik.io/reset-requested-at'];
   const cluster = d?.spec.clusterRef?.name;
   const ns = d?.spec.namespace;
 
@@ -639,6 +640,23 @@ export function DeploymentViewPage() {
           >
             {kicking ? 'Kicking…' : 'Kick'}
           </button>
+          {d && d.spec.postgres.mode !== 'External' && (
+            <button
+              className="button danger"
+              disabled={resetting}
+              title="Uninstall authentik, delete its database volumes and reinstall from an empty database, re-applying the fixtures and test-client blueprints."
+              onClick={() =>
+                void confirmAndRun(
+                  `Reset deployment "${name}"? This uninstalls authentik, permanently deletes its database and reinstalls it from scratch with the seed blueprints.`,
+                  () => api.resetDeployment(name),
+                  deployment.reload,
+                  `Resetting ${name}`
+                )
+              }
+            >
+              {resetting ? 'Resetting…' : 'Reset'}
+            </button>
+          )}
           <Link className="button" to={`/deployments/${name}/edit`}>
             Edit
           </Link>

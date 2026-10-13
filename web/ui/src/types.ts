@@ -53,6 +53,7 @@ export interface ObjectMeta {
   generateName?: string;
   creationTimestamp?: string;
   labels?: Record<string, string>;
+  annotations?: Record<string, string>;
 }
 
 export type PostgresMode = 'Embedded' | 'CNPG' | 'External';

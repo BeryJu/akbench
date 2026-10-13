@@ -3,6 +3,7 @@ import { NavLink, Outlet, useLocation } from 'react-router';
 import { api } from './api';
 import { buildLabel } from './format';
 import { useAuth } from './auth';
+import { APP_TITLE, useDocumentTitle } from './title';
 import { useResource } from './useResource';
 
 // The terminal (ghostty-web and its WebAssembly) only loads once the shell is first opened.
@@ -84,6 +85,7 @@ function NavSectionLinks({ section }: { section: NavSection }) {
 export function Layout() {
   const { identity, logout } = useAuth();
   const location = useLocation();
+  useDocumentTitle();
   const onShell = location.pathname === '/shell';
   // The shell workspace mounts on first visit and then stays mounted (just
   // hidden), so its sessions survive navigating elsewhere in the app.
@@ -99,7 +101,7 @@ export function Layout() {
       <nav className="sidebar">
         <div className="brand">
           <img src="/favicon.svg" alt="" />
-          authentik bench
+          {APP_TITLE}
         </div>
         {navSections.map((section, i) => (
           <NavSectionLinks key={section.label ?? i} section={section} />

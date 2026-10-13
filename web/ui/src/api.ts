@@ -167,6 +167,8 @@ export const api = {
   deleteDeployment: (name: string) => request<void>(`/api/v1/deployments/${seg(name)}`, { method: 'DELETE' }),
   kickDeployment: (name: string) =>
     request<AuthentikDeployment>(`/api/v1/deployments/${seg(name)}/reconcile`, json('POST', {})),
+  resetDeployment: (name: string) =>
+    request<AuthentikDeployment>(`/api/v1/deployments/${seg(name)}/reset`, json('POST', {})),
   getExtraValues: (name: string) =>
     request<{ valuesYAML: string }>(`/api/v1/deployments/${seg(name)}/extra-values`),
   setExtraValues: (name: string, valuesYAML: string) =>

@@ -173,6 +173,7 @@ func (s *Server) Router() http.Handler {
 			r.Get("/deployments/{name}/extra-values", s.getExtraValues)
 			r.Put("/deployments/{name}/extra-values", s.putExtraValues)
 			r.Post("/deployments/{name}/sql", s.runSQL)
+			r.Post("/deployments/{name}/reset", s.resetDeployment)
 
 			r.Post("/testcases/{name}/runs", s.createRun)
 

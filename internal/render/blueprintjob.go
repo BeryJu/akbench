@@ -51,8 +51,12 @@ func authentikConfigSecretName(t *benchv1alpha1.AuthentikDeployment) string {
 // ("must be no more than 63 bytes") rather than silently truncating.
 func BlueprintJobName(t *benchv1alpha1.AuthentikDeployment, label, content string) string {
 	sum := sha256.Sum256(fmt.Appendf(nil, "%s/%s/%s", t.Name, label, content))
-	return "blueprint-" + hex.EncodeToString(sum[:])[:16]
+	return BlueprintJobNamePrefix + hex.EncodeToString(sum[:])[:16]
 }
+
+// BlueprintJobNamePrefix starts every BlueprintJobName, which is how a
+// deployment reset finds the import Jobs to delete so they run again.
+const BlueprintJobNamePrefix = "blueprint-"
 
 // BlueprintJob renders a one-shot Job that imports a blueprint: it mounts
 // sourceConfigMapName (read-only, the blueprint content under
