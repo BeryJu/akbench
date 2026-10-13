@@ -62,9 +62,15 @@ func legacyObject(obj client.Object, name string) client.Object {
 }
 
 func legacyServiceMonitor(name string) client.Object {
+	return legacyMonitoringObject("ServiceMonitor", name)
+}
+
+// legacyMonitoringObject is a prometheus-operator object (unstructured: its
+// CRDs come from kube-prometheus-stack, not a typed import).
+func legacyMonitoringObject(kind, name string) client.Object {
 	u := &unstructured.Unstructured{}
 	u.SetAPIVersion("monitoring.coreos.com/v1")
-	u.SetKind("ServiceMonitor")
+	u.SetKind(kind)
 	return legacyObject(u, name)
 }
 
@@ -81,7 +87,14 @@ func (r *WorkloadClusterReconciler) removeLegacyObservabilityObjects(ctx context
 	if err != nil && !apierrors.IsNotFound(err) {
 		return err
 	}
-	for _, template := range legacyObservabilityObjects[release] {
+	return removeLegacyObjects(ctx, remote, release, legacyObservabilityObjects[release])
+}
+
+// removeLegacyObjects deletes each of objs from remote that exists and isn't
+// managed by Helm - once Helm manages an object of that name, it's a chart's
+// own.
+func removeLegacyObjects(ctx context.Context, remote client.Client, addon string, objs []client.Object) error {
+	for _, template := range objs {
 		obj := template.DeepCopyObject().(client.Object)
 		switch err := remote.Get(ctx, client.ObjectKeyFromObject(obj), obj); {
 		case apierrors.IsNotFound(err) || meta.IsNoMatchError(err):
@@ -96,7 +109,7 @@ func (r *WorkloadClusterReconciler) removeLegacyObservabilityObjects(ctx context
 			return fmt.Errorf("delete legacy %T %s: %w", obj, obj.GetName(), err)
 		}
 		logf.FromContext(ctx).Info("Removed hand-rendered add-on object in favour of its Helm chart",
-			"addon", release, "kind", fmt.Sprintf("%T", obj), "name", obj.GetName())
+			"addon", addon, "kind", fmt.Sprintf("%T", obj), "name", obj.GetName())
 	}
 	return nil
 }

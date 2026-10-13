@@ -128,11 +128,11 @@ func TestKubePrometheusStackHelmValues(t *testing.T) {
 		}
 	}
 
-	// DefaultAlertRules is deliberately NOT among these - see its own doc
-	// comment (and KubePrometheusStackHelmValues') for why a PrometheusRule
-	// containing "{{ $labels... }}" can't survive this chart's own
-	// extraManifests -> tpl pipeline; it's applied directly by
-	// ensurePrometheus instead (TestDefaultAlertRules covers it).
+	// The default alert rules are deliberately NOT among these - see
+	// KubePrometheusStackHelmValues for why a PrometheusRule containing
+	// "{{ $labels... }}" can't survive this chart's extraManifests -> tpl
+	// pipeline; they go in additionalPrometheusRulesMap instead
+	// (TestDefaultAlertRules covers it).
 	manifests, ok := values["extraManifests"].([]any)
 	if !ok || len(manifests) != 4 {
 		t.Fatalf("extraManifests = %v, want 4 objects (2 Prometheus compat Services, 2 Alertmanager compat Services)", values["extraManifests"])
@@ -190,29 +190,33 @@ func TestKubePrometheusStackHelmValues(t *testing.T) {
 // code ever touches it - only Prometheus's rule engine expands it, at alert
 // time.
 func TestDefaultAlertRules(t *testing.T) {
-	rule := DefaultAlertRules()
-
-	if rule.GetKind() != "PrometheusRule" {
-		t.Errorf("kind = %q, want PrometheusRule", rule.GetKind())
+	values, err := KubePrometheusStackHelmValues(nil)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if rule.GetName() != DefaultAlertRulesName {
-		t.Errorf("name = %q, want %q", rule.GetName(), DefaultAlertRulesName)
+	// Through the chart's additionalPrometheusRulesMap (toYaml), never
+	// extraManifests (tpl). Round-tripped through JSON like the HelmRelease
+	// values themselves.
+	var decoded map[string]any
+	if err := json.Unmarshal(values.Raw, &decoded); err != nil {
+		t.Fatal(err)
 	}
-	if rule.GetNamespace() != ObservabilityNamespace {
-		t.Errorf("namespace = %q, want %q", rule.GetNamespace(), ObservabilityNamespace)
+	rulesMap, _ := decoded["additionalPrometheusRulesMap"].(map[string]any)
+	entry, ok := rulesMap[defaultAlertRulesKey].(map[string]any)
+	if !ok {
+		t.Fatalf("additionalPrometheusRulesMap[%q] missing: %v", defaultAlertRulesKey, rulesMap)
 	}
-
-	groups, ok, err := unstructured.NestedSlice(rule.Object, "spec", "groups")
-	if err != nil || !ok {
-		t.Fatalf("spec.groups: ok=%v err=%v", ok, err)
+	groups, _ := entry["groups"].([]any)
+	if len(groups) == 0 {
+		t.Fatalf("no rule groups: %v", entry)
 	}
 	group, ok := groups[0].(map[string]any)
 	if !ok {
-		t.Fatalf("spec.groups[0] is not an object: %v", groups[0])
+		t.Fatalf("groups[0] is not an object: %v", groups[0])
 	}
 	rules, ok := group["rules"].([]any)
 	if !ok || len(rules) == 0 {
-		t.Fatalf("spec.groups[0].rules missing or empty: %v", group["rules"])
+		t.Fatalf("groups[0].rules missing or empty: %v", group["rules"])
 	}
 
 	wantAlerts := map[string]bool{

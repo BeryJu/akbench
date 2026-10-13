@@ -1,26 +1,20 @@
 package render
 
-import (
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-)
-
-// PrometheusRule is prometheus-operator's own CRD (monitoring.coreos.com/v1,
-// same source as ServiceMonitor - see servicemonitor.go's own doc comment
-// for why this is unstructured.Unstructured rather than a typed import).
 const (
-	prometheusRuleAPIVersion = "monitoring.coreos.com/v1"
-	prometheusRuleKind       = "PrometheusRule"
+	// defaultAlertRulesKey is this project's own rules' key in
+	// kube-prometheus-stack's additionalPrometheusRulesMap (the chart names
+	// the PrometheusRule "<fullname>-<key>") - distinct from the many
+	// PrometheusRule objects the chart's own defaultRules.* values already
+	// create (KubePodCrashLooping, KubeDeploymentReplicasMismatch,
+	// KubePersistentVolumeFillingUp, node pressure, etc.). This one adds only
+	// what the generic rules can't know: alerts specific to this project's
+	// own authentik/postgres/k6 metrics.
+	defaultAlertRulesKey = "default-alerts"
 
-	// DefaultAlertRulesName is this project's own PrometheusRule object -
-	// distinct from the many PrometheusRule objects kube-prometheus-stack's
-	// own defaultRules.* values already create (KubePodCrashLooping,
-	// KubeDeploymentReplicasMismatch, KubePersistentVolumeFillingUp, node
-	// pressure, etc. - defaultRules.create was never disabled in
-	// KubePrometheusStackHelmValues, so those already exist and are already
-	// evaluated; they just had nowhere to go before Alertmanager existed).
-	// This one adds only what the generic rules can't know: alerts specific
-	// to this project's own authentik/postgres/k6 metrics.
-	DefaultAlertRulesName = "authentik-bench-default-alerts"
+	// LegacyDefaultAlertRulesName is the PrometheusRule an older operator
+	// applied those rules as, directly rather than through the chart -
+	// removed by ensurePrometheus so they aren't defined twice.
+	LegacyDefaultAlertRulesName = "authentik-bench-default-alerts"
 
 	// The two severities this project's own alert rules use.
 	severityWarning  = "warning"
@@ -56,13 +50,12 @@ func (ar alertRule) toMap() map[string]any {
 	}
 }
 
-// DefaultAlertRules builds the PrometheusRule this project ships by default,
-// applied directly by WorkloadClusterReconciler.ensurePrometheus (not
-// through the kube-prometheus-stack HelmRelease's own extraManifests value -
-// see KubePrometheusStackHelmValues' own doc comment for why: this chart
-// runs every extraManifests entry through Helm's own `tpl`, which breaks on
-// this object's "{{ $labels... }}" alert-annotation syntax). Every
-// expression here
+// DefaultAlertRuleGroups builds the alert rules this project ships by
+// default, as rule groups for kube-prometheus-stack's
+// additionalPrometheusRulesMap value. That value goes through the chart's
+// toYaml, never Helm's `tpl` - unlike extraManifests, which did and broke on
+// the rules' "{{ $labels... }}" annotation syntax - so it reaches
+// Prometheus verbatim, for its rule engine to expand. Every expression here
 // was checked against this project's own live Prometheus
 // (http://<node-ip>:30909/api/v1/query) before being written down, not
 // guessed from documentation - this codebase has been burned twice already
@@ -103,7 +96,7 @@ func (ar alertRule) toMap() map[string]any {
 // Deliberately NOT duplicated here: node/PVC/pod-restart health, which
 // kube-prometheus-stack's own default rules already cover once Alertmanager
 // exists to receive them.
-func DefaultAlertRules() *unstructured.Unstructured {
+func DefaultAlertRuleGroups() []any {
 	ruleDefs := []alertRule{
 		{
 			name:        "AuthentikBenchServiceScrapeDown",
@@ -143,17 +136,10 @@ func DefaultAlertRules() *unstructured.Unstructured {
 	for i, rd := range ruleDefs {
 		rules[i] = rd.toMap()
 	}
-
-	u := &unstructured.Unstructured{}
-	u.SetAPIVersion(prometheusRuleAPIVersion)
-	u.SetKind(prometheusRuleKind)
-	u.SetName(DefaultAlertRulesName)
-	u.SetNamespace(ObservabilityNamespace)
-	_ = unstructured.SetNestedSlice(u.Object, []any{
+	return []any{
 		map[string]any{
 			"name":  "authentik-bench.rules",
 			"rules": rules,
 		},
-	}, "spec", "groups")
-	return u
+	}
 }

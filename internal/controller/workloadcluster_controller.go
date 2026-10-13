@@ -2,16 +2,12 @@ package controller
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"slices"
 	"strings"
 	"time"
 
 	helmv2 "github.com/fluxcd/helm-controller/api/v2"
-	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -297,14 +293,14 @@ func (r *WorkloadClusterReconciler) ensureAddons(ctx context.Context, wc *benchv
 
 // remoteAddonClient builds a one-off client directly from the
 // "<name>-kubeconfig" Secret CAPI writes, rather than
-// internal/multicluster.Tracker: this controller only ever needs occasional
-// addon applies (ensurePrometheus, ensurePyroscope, ensureTempo - the
-// project-authored addons with no upstream Helm chart worth depending on),
-// not the long-lived cached/watching connection Tracker exists for (that's
-// what AuthentikDeployment/TestCase/TestRun use once they actually deploy onto
-// this cluster via clusterRef). ensureCNI/ensureCSIIncus/ensureMetricsServer
-// install via their own official Helm charts instead (Flux HelmRelease
-// applied locally with spec.kubeConfig), so they never need this.
+// internal/multicluster.Tracker. Every add-on installs through a Flux
+// HelmRelease (spec.kubeConfig points helm-controller at the cluster), so
+// this is only for the occasional direct read or cleanup: resolving a node
+// IP for the NodePort URLs (reachableNodeIP) and removing objects an older,
+// hand-rendering operator left behind (removeLegacyObjects) - not the
+// long-lived cached/watching connection Tracker exists for (that's what
+// AuthentikDeployment/TestCase/TestRun use once they deploy onto this
+// cluster via clusterRef).
 func (r *WorkloadClusterReconciler) remoteAddonClient(ctx context.Context, wc *benchv1alpha1.WorkloadCluster) (client.Client, error) {
 	kubeconfigBytes, err := capikubeconfig.FromSecret(ctx, r.Client, client.ObjectKey{Name: wc.Name, Namespace: wc.Namespace})
 	if err != nil {
@@ -479,12 +475,15 @@ func (r *WorkloadClusterReconciler) ensurePrometheus(ctx context.Context, wc *be
 	if err != nil {
 		return err
 	}
-	// Applied directly, not through the HelmRelease's own extraManifests -
-	// see render.KubePrometheusStackHelmValues' own doc comment on why a
-	// PrometheusRule containing "{{ $labels... }}" annotations can't go
-	// through that path.
-	if err := createAll(ctx, remoteClient, []client.Object{render.DefaultAlertRules()}); err != nil {
-		return fmt.Errorf("apply default PrometheusRule: %w", err)
+	// The default alert rules ship through the chart now
+	// (additionalPrometheusRulesMap); an older operator applied them as
+	// their own PrometheusRule, which would define every alert twice. A
+	// single lookup per reconcile, unlike the other add-ons' cleanup, which
+	// stops once their release is Ready: this release already is on every
+	// cluster that has the old rule.
+	if err := removeLegacyObjects(ctx, remoteClient, render.KubePrometheusStackHelmReleaseName,
+		[]client.Object{legacyMonitoringObject("PrometheusRule", render.LegacyDefaultAlertRulesName)}); err != nil {
+		return err
 	}
 	nodeIP, err := reachableNodeIP(ctx, remoteClient)
 	if err != nil {
@@ -531,97 +530,6 @@ func (r *WorkloadClusterReconciler) ensureClusterAutoscaler(ctx context.Context,
 	hr := render.ClusterAutoscalerHelmRelease(wc, values)
 	if err := applyOwned(ctx, r.Client, r.Scheme, wc, hr); err != nil {
 		return fmt.Errorf("apply cluster-autoscaler HelmRelease: %w", err)
-	}
-	return nil
-}
-
-// createAll applies every object best-effort/idempotently, the same way for
-// vendored-YAML addons (decoded to unstructured.Unstructured: CNI, storage,
-// metrics-server) and project-authored ones (native typed structs like
-// *appsv1.Deployment: Prometheus/Pyroscope/Tempo) - client.Object is the one
-// interface both satisfy.
-func createAll(ctx context.Context, c client.Client, objs []client.Object) error {
-	for _, obj := range objs {
-		if err := createIfMissing(ctx, c, obj); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// createIfMissing is createAll's per-object step, its own function so the
-// "does this already exist" recheck below can run twice (once before,
-// optionally once after Create) without duplicating the error-wrapping.
-//
-// A plain "Create, ignore AlreadyExists" (this function's own first version)
-// is not enough for a NodePort Service with an explicit spec.ports[].nodePort:
-// confirmed live that re-Create-ing one that already exists with the exact
-// same requested port fails with a spec-validation error ("provided port is
-// already allocated"), not AlreadyExists - the apiserver's port allocator
-// runs before the etcd-level existence check, so an object that's already
-// there in every way still gets rejected at the allocation step first. Every
-// pinned-NodePort addon this file renders (Prometheus, Grafana, Pyroscope)
-// hit this on every single reconcile after their first successful creation,
-// silently logged as an AddonFailed event forever after - not a fluke this
-// session happened to catch once.
-func createIfMissing(ctx context.Context, c client.Client, obj client.Object) error {
-	gvk := obj.GetObjectKind().GroupVersionKind()
-	key := client.ObjectKeyFromObject(obj)
-	if d, ok := obj.(*appsv1.Deployment); ok {
-		setSpecHash(d)
-	}
-	existing := obj.DeepCopyObject().(client.Object)
-	if err := c.Get(ctx, key, existing); err == nil {
-		if d, ok := obj.(*appsv1.Deployment); ok {
-			return updateDeploymentIfChanged(ctx, c, existing.(*appsv1.Deployment), d)
-		}
-		return nil
-	} else if !apierrors.IsNotFound(err) {
-		return fmt.Errorf("get %s %s/%s: %w", gvk.Kind, key.Namespace, key.Name, err)
-	}
-	err := c.Create(ctx, obj)
-	if err == nil || apierrors.IsAlreadyExists(err) {
-		return nil
-	}
-	// Re-check before giving up: a Create that failed for any reason -
-	// including the NodePort-allocation case above - might still mean the
-	// object is there and fine, just not via a race Get-then-Create alone
-	// can fully close.
-	if getErr := c.Get(ctx, key, existing); getErr == nil {
-		return nil
-	}
-	return fmt.Errorf("create %s %s/%s: %w", gvk.Kind, key.Namespace, key.Name, err)
-}
-
-// specHashAnnotation records the hash of the spec this operator last
-// rendered for an add-on Deployment, so a changed render (e.g. a new
-// volume) reaches clusters that already have the Deployment - createAll is
-// otherwise create-only - without comparing against fields the apiserver
-// defaults.
-const specHashAnnotation = "bench.goauthentik.io/spec-hash"
-
-func setSpecHash(d *appsv1.Deployment) {
-	raw, _ := json.Marshal(d.Spec)
-	sum := sha256.Sum256(raw)
-	if d.Annotations == nil {
-		d.Annotations = map[string]string{}
-	}
-	d.Annotations[specHashAnnotation] = hex.EncodeToString(sum[:8])
-}
-
-// updateDeploymentIfChanged replaces existing's spec with desired's when
-// desired was rendered differently from what existing was last given.
-func updateDeploymentIfChanged(ctx context.Context, c client.Client, existing, desired *appsv1.Deployment) error {
-	if existing.Annotations[specHashAnnotation] == desired.Annotations[specHashAnnotation] {
-		return nil
-	}
-	existing.Spec = desired.Spec
-	if existing.Annotations == nil {
-		existing.Annotations = map[string]string{}
-	}
-	existing.Annotations[specHashAnnotation] = desired.Annotations[specHashAnnotation]
-	if err := c.Update(ctx, existing); err != nil {
-		return fmt.Errorf("update Deployment %s/%s: %w", existing.Namespace, existing.Name, err)
 	}
 	return nil
 }
