@@ -19,18 +19,30 @@ const (
 	// TempoQueryPort is Tempo's own HTTP API - what Grafana's Tempo
 	// datasource (and, through it, cmd/apiserver's trace breakdown) queries.
 	TempoQueryPort = 3200
+
+	// TempoMaxSpansPerSpanSet is how many spans per trace a search may ask
+	// for (and cmd/apiserver's trace breakdown does): a login's full trace
+	// is ~430 spans, ~110 of them queries. Tempo rejects anything above its
+	// own limit (default 100) with a 400.
+	TempoMaxSpansPerSpanSet = 500
 )
 
 // TempoHelmRelease installs Tempo from its upstream chart: single binary,
 // local trace storage on a persistent volume. The chart's default receivers
 // include OTLP over HTTP on TempoOTLPHTTPPort, which is all authentik
-// exports. Usage reporting to Grafana Labs is off.
+// exports. Usage reporting to Grafana Labs is off, and searches may return
+// up to TempoMaxSpansPerSpanSet spans per trace.
 func TempoHelmRelease(wc *benchv1alpha1.WorkloadCluster) (*helmv2.HelmRelease, error) {
 	values := map[string]any{
 		"fullnameOverride": TempoServiceName,
-		"tempo":            map[string]any{"reportingEnabled": false},
-		"persistence":      chartPersistence(wc, TempoStorageSize),
-		"serviceMonitor":   map[string]any{"enabled": true},
+		"tempo": map[string]any{
+			"reportingEnabled": false,
+			"queryFrontend": map[string]any{
+				"search": map[string]any{"max_spans_per_span_set": TempoMaxSpansPerSpanSet},
+			},
+		},
+		"persistence":    chartPersistence(wc, TempoStorageSize),
+		"serviceMonitor": map[string]any{"enabled": true},
 	}
 	monitoringPlacement(wc, values)
 	return observabilityHelmRelease(wc, TempoHelmReleaseName, "tempo", tempoChartVersion, GrafanaCommunityHelmRepositoryName, values)

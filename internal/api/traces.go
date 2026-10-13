@@ -33,12 +33,10 @@ import (
 // to tie a database or stage span to a target is a spanset-level && within
 // a search, which TraceQL metrics don't support.
 const (
-	traceBreakdownLimit = 15
-	// Generous: a login's full trace is ~430 spans, ~110 of them queries.
-	traceBreakdownSpansPerTrace = 500
-	traceBreakdownCacheTTL      = 2 * time.Minute
-	traceTopQueries             = 8
-	maxStatementLength          = 400
+	traceBreakdownLimit    = 15
+	traceBreakdownCacheTTL = 2 * time.Minute
+	traceTopQueries        = 8
+	maxStatementLength     = 400
 )
 
 var traceBreakdownWindows = map[string]time.Duration{
@@ -256,7 +254,7 @@ func (s *Server) searchTraceSpans(ctx context.Context, tempoURL, adminPassword, 
 	q := url.Values{}
 	q.Set("q", traceBreakdownQuery(testid, target))
 	q.Set("limit", strconv.Itoa(traceBreakdownLimit))
-	q.Set("spss", strconv.Itoa(traceBreakdownSpansPerTrace))
+	q.Set("spss", strconv.Itoa(render.TempoMaxSpansPerSpanSet))
 	q.Set("start", strconv.FormatInt(start.Unix(), 10))
 	q.Set("end", strconv.FormatInt(end.Unix(), 10))
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, tempoURL+"/api/search?"+q.Encode(), nil)
