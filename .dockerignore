@@ -28,3 +28,6 @@ web/ui/dist
 !appliance/entrypoint.sh
 !appliance/assets.lock
 !appliance/clusterctl.yaml
+
+# The kubectl shell's bashrc, embedded via go:embed (see internal/api/shell.go)
+!internal/api/shell/bashrc

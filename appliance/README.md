@@ -150,7 +150,7 @@ keep running on your infrastructure, but nothing manages them any more. Back
 the volume up, for example with the container stopped:
 
 ```sh
-docker run --rm -v akbench:/data -v "$PWD:/backup" alpine tar czf /backup/akbench.tgz -C /data .
+docker run --rm -v akbench:/data -v "$PWD:/backup" debian:trixie-slim tar czf /backup/akbench.tgz -C /data .
 ```
 
 Or move everything to another management cluster with `clusterctl move`, the

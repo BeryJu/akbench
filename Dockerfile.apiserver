@@ -5,7 +5,7 @@
 
 # The UI bundle is platform-independent, so it is built once, natively,
 # and shared by every target platform.
-FROM --platform=$BUILDPLATFORM node:26-alpine AS ui
+FROM --platform=$BUILDPLATFORM node:26-slim AS ui
 WORKDIR /ui
 COPY web/ui/package.json web/ui/package-lock.json ./
 RUN npm ci
@@ -39,10 +39,10 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
 # kubectl from the official release, checksum-verified. Kept within one
 # minor version of the clusters it talks to (kubectl's supported skew) -
 # bump alongside the Kubernetes versions ClusterForm offers.
-FROM --platform=$BUILDPLATFORM alpine:3.24 AS kubectl
+FROM --platform=$BUILDPLATFORM debian:trixie-slim AS kubectl
 ARG TARGETARCH
 ARG KUBECTL_VERSION=v1.36.5
-RUN apk add --no-cache curl \
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl \
     && base="https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/${TARGETARCH:-amd64}" \
     && curl -fsSLo /kubectl "${base}/kubectl" \
     && echo "$(curl -fsSL "${base}/kubectl.sha256")  /kubectl" | sha256sum -c - \
@@ -54,10 +54,10 @@ RUN apk add --no-cache curl \
 # cluster/namespace is the common case here (the merged kubeconfig already
 # has every registered cluster as its own context), and typing a full
 # --context/-n flag every time is exactly the friction these exist to remove.
-FROM --platform=$BUILDPLATFORM alpine:3.24 AS kubectx
+FROM --platform=$BUILDPLATFORM debian:trixie-slim AS kubectx
 ARG TARGETARCH
 ARG KUBECTX_VERSION=v0.11.0
-RUN apk add --no-cache curl tar \
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl \
     && case "${TARGETARCH:-amd64}" in \
          amd64) arch=x86_64 ;; \
          arm64) arch=arm64 ;; \
@@ -74,11 +74,14 @@ RUN apk add --no-cache curl tar \
          mv "$name" "/usr/local/bin/$name"; \
        done
 
-FROM alpine:3.24
-# bash + completion for the shell itself; fzf for interactive kubectx/kubens;
+FROM debian:trixie-slim
+# bash-completion for the shell itself; fzf for interactive kubectx/kubens;
 # jq/less/curl because a kubectl session without them is miserable;
-# ncurses-terminfo-base for TERM=xterm-256color. busybox vi serves `kubectl edit`.
-RUN apk add --no-cache bash bash-completion ca-certificates curl fzf jq less ncurses-terminfo-base tini
+# ncurses-base (already in the base image) covers TERM=xterm-256color.
+# vim-tiny serves `kubectl edit`.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends bash-completion ca-certificates curl fzf jq less tini vim-tiny \
+    && rm -rf /var/lib/apt/lists/*
 COPY --from=kubectl /kubectl /usr/local/bin/kubectl
 COPY --from=kubectx /usr/local/bin/kubectx /usr/local/bin/kubectx
 COPY --from=kubectx /usr/local/bin/kubens /usr/local/bin/kubens
@@ -90,4 +93,4 @@ USER 65532:65532
 
 # tini as PID 1: anything a shell session orphans is reparented to PID 1,
 # and the apiserver binary itself never reaps processes it didn't start.
-ENTRYPOINT ["/sbin/tini", "--", "/apiserver"]
+ENTRYPOINT ["/usr/bin/tini", "--", "/apiserver"]
