@@ -82,7 +82,7 @@ func run() error {
 		"Comma-separated scopes the web UI requests. Defaults to openid,profile,email.")
 	flag.StringVar(&oidcCfg.RequiredGroup, "oidc-required-group", os.Getenv("BENCH_OIDC_REQUIRED_GROUP"),
 		"If set, OIDC tokens must list this group in their groups claim.")
-	flag.StringVar(&shellBinary, "shell", envOr("BENCH_SHELL", "/bin/sh"),
+	flag.StringVar(&shellBinary, "shell", envOr("BENCH_SHELL", "/bin/bash"),
 		"Shell the in-browser kubectl shell runs.")
 	flag.StringVar(&shellKubeconfig, "shell-kubeconfig", os.Getenv("BENCH_SHELL_KUBECONFIG"),
 		"Kubeconfig file the in-browser shell uses. For local development; in-cluster, use --shell-kubeconfig-secret.")

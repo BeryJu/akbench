@@ -50,7 +50,7 @@ func shellServer(t *testing.T) *Server {
 	t.Helper()
 	s, _ := newServer(t, Config{Shell: &ShellConfig{
 		Kubeconfig: func(context.Context) ([]byte, error) { return []byte(testKubeconfig), nil },
-		Shell:      "/bin/sh",
+		Shell:      "/bin/bash",
 	}})
 	return s
 }
@@ -139,8 +139,8 @@ func TestShellTicketIsSingleUseAndExpires(t *testing.T) {
 // chosen context is selected, the backend's own environment does not leak
 // in, and closing the socket kills the shell and its background jobs.
 func TestShellSessionEndToEnd(t *testing.T) {
-	if _, err := os.Stat("/bin/sh"); err != nil {
-		t.Skip("no /bin/sh")
+	if _, err := os.Stat("/bin/bash"); err != nil {
+		t.Skip("no /bin/bash")
 	}
 	t.Setenv("BENCH_API_TOKEN", "must-not-leak")
 	s := shellServer(t)

@@ -34,6 +34,7 @@ package api
 import (
 	"context"
 	"crypto/rand"
+	_ "embed"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -452,27 +453,10 @@ func shellEnv(home string) []string {
 		"TERM=xterm-256color",
 		"LANG=C.UTF-8",
 		"EDITOR=vi",
-		// Read by POSIX sh/ash for interactive shells; bash reads
-		// $HOME/.bashrc instead. Same file either way.
-		"ENV=" + filepath.Join(home, ".bashrc"),
 	}
 }
 
-// shellRC must stay parseable by plain POSIX sh too (dash parses a whole
-// if-block before running any of it), hence eval rather than bash-only
-// process substitution for completion.
+// shellRC is the session's .bashrc: prompt, kubectl aliases and completion.
 //
-// shellRC shows the current kubeconfig context in the prompt (read straight
-// from the session's own kubeconfig, so it follows `kubectl config
-// use-context`) and wires up kubectl completion where bash is available.
-const shellRC = `alias k=kubectl
-__bench_ctx() { sed -n 's/^current-context: //p' "$KUBECONFIG"; }
-PS1='[$(__bench_ctx)] \w \$ '
-if [ -n "$BASH_VERSION" ]; then
-  [ -r /usr/share/bash-completion/bash_completion ] && . /usr/share/bash-completion/bash_completion
-  if command -v kubectl >/dev/null 2>&1; then
-    eval "$(kubectl completion bash)"
-    complete -o default -F __start_kubectl k
-  fi
-fi
-`
+//go:embed shell/bashrc
+var shellRC string

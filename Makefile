@@ -123,7 +123,7 @@ run: manifests generate fmt vet ## Run a controller from your host.
 run-apiserver: fmt vet ## Run the web UI backend against the current kubeconfig context (serves web/ui/dist if built; shell only with BENCH_SHELL_KUBECONFIG set).
 	BENCH_API_TOKEN=$${BENCH_API_TOKEN:-dev-token} \
 	BENCH_UI_DIR=$${BENCH_UI_DIR:-$$([ -f web/ui/dist/index.html ] && echo web/ui/dist)} \
-	BENCH_SHELL=$${BENCH_SHELL:-$$(command -v bash || echo /bin/sh)} \
+	BENCH_SHELL=$${BENCH_SHELL:-$$(command -v bash)} \
 	go run ./cmd/apiserver
 
 .PHONY: ui

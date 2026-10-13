@@ -75,10 +75,10 @@ RUN apk add --no-cache curl tar \
        done
 
 FROM alpine:3.24
-# bash + completion for the shell itself; jq/less/curl because a kubectl
-# session without them is miserable; ncurses-terminfo-base for
-# TERM=xterm-256color. busybox vi serves `kubectl edit`.
-RUN apk add --no-cache bash bash-completion ca-certificates curl jq less ncurses-terminfo-base tini
+# bash + completion for the shell itself; fzf for interactive kubectx/kubens;
+# jq/less/curl because a kubectl session without them is miserable;
+# ncurses-terminfo-base for TERM=xterm-256color. busybox vi serves `kubectl edit`.
+RUN apk add --no-cache bash bash-completion ca-certificates curl fzf jq less ncurses-terminfo-base tini
 COPY --from=kubectl /kubectl /usr/local/bin/kubectl
 COPY --from=kubectx /usr/local/bin/kubectx /usr/local/bin/kubectx
 COPY --from=kubectx /usr/local/bin/kubens /usr/local/bin/kubens
