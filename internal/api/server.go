@@ -87,6 +87,9 @@ type Server struct {
 	traces            *traceBreakdownCache
 	events            *eventHub
 	eventsTickets     *eventsState
+	// podExec runs a command in a workload cluster pod (sql.go); a field so
+	// tests can fake it.
+	podExec podExecFunc
 }
 
 // New builds a Server. The client must be backed by the management cluster
@@ -107,6 +110,7 @@ func New(c client.WithWatch, cfg Config) *Server {
 		traces:            &traceBreakdownCache{entries: map[string]TraceBreakdown{}},
 		events:            newEventHub(),
 		eventsTickets:     newEventsState(),
+		podExec:           execInPod,
 	}
 }
 
@@ -166,6 +170,7 @@ func (s *Server) Router() http.Handler {
 
 			r.Get("/deployments/{name}/extra-values", s.getExtraValues)
 			r.Put("/deployments/{name}/extra-values", s.putExtraValues)
+			r.Post("/deployments/{name}/sql", s.runSQL)
 
 			r.Post("/testcases/{name}/runs", s.createRun)
 
