@@ -84,9 +84,14 @@ Implemented so far:
   `make fixtures` (the original script) still replaces them on demand.
 - **Test-case templates**: `TestCaseTemplate` is a real, UI-editable
   CRD (list/create/edit/delete, Monaco editor for the script) - the operator
-  seeds four built-in ones at startup (`login`; `oauth-oidc`, driving a
+  seeds seven built-in ones at startup (`login`; `oauth-oidc`, driving a
   real OAuth2/OIDC authorization-code round trip through
   [BeryJu/oidc-test-client](https://github.com/BeryJu/oidc-test-client);
+  `saml`, an SP-initiated SAML login through
+  [BeryJu/saml-test-sp](https://github.com/BeryJu/saml-test-sp);
+  `oidc-source` and `saml-source`, federated logins through an authentik
+  OAuth source (dex) and SAML source (saml-test-idp), where every VU is the
+  IdP's one test user, enrolled once in k6's `setup()`;
   `mixed-usage`, a weighted mix of logins, logins + API browsing, failed
   logins and flow page loads, drawn from a PRNG seeded per TestCase via
   `spec.seed` - defaulting to a hash of the TestCase name - so every run

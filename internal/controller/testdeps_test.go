@@ -82,6 +82,7 @@ func TestDependencyBlueprintCombinesAllEntries(t *testing.T) {
 	for _, want := range []string{
 		"acs_url: http://sp/saml/acs",
 		"audience: http://sp/saml/metadata",
+		"sign_assertion: true",
 		"authorization_url: http://dex/dex/auth",
 		"access_token_url: http://dex/dex/token",
 		"profile_url: http://dex/dex/userinfo",

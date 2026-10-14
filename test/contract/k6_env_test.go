@@ -8,6 +8,9 @@
 package contract
 
 import (
+	"os"
+	"path/filepath"
+	"regexp"
 	"slices"
 	"testing"
 
@@ -100,6 +103,38 @@ func TestK6EnvVarValues(t *testing.T) {
 	for k, v := range want {
 		if values[k] != v {
 			t.Errorf("env %s = %q, want %q", k, values[k], v)
+		}
+	}
+}
+
+// TestBuiltinScriptsReadOnlyRenderedEnv guards the other direction: every
+// __ENV name a built-in script reads must be one the k6 Job can actually
+// set, with every test dependency in use. A script reading a renamed or
+// never-rendered dependency var would otherwise only fail at run time.
+func TestBuiltinScriptsReadOnlyRenderedEnv(t *testing.T) {
+	p := params(exampleTestCase(benchv1alpha1.ProfileQuick))
+	p.Dependencies = render.DependencyEndpoints{
+		OIDCClientHost: "oidc-test-client", OIDCClientPort: 9009,
+		SAMLClientHost: "saml-test-sp", SAMLClientPort: 9009,
+		OIDCSourceSlug: "oidc-idp",
+		SAMLSourceSlug: "saml-idp",
+	}
+	rendered := envValueMap(p.EnvVars())
+
+	scripts, err := filepath.Glob("../../k6/scripts/*.ts")
+	if err != nil || len(scripts) == 0 {
+		t.Fatalf("no built-in k6 scripts found: %v", err)
+	}
+	envRef := regexp.MustCompile(`__ENV\.([A-Z0-9_]+)`)
+	for _, script := range scripts {
+		content, err := os.ReadFile(script)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, m := range envRef.FindAllStringSubmatch(string(content), -1) {
+			if _, ok := rendered[m[1]]; !ok {
+				t.Errorf("%s reads __ENV.%s, which the k6 Job never sets", filepath.Base(script), m[1])
+			}
 		}
 	}
 }

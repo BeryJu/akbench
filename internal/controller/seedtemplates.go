@@ -32,12 +32,6 @@ func mustEmbeddedScript(name string) string {
 // binary already carries, so a fresh install has working, immediately
 // editable TestCaseTemplate objects without anyone hand-authoring
 // them first.
-//
-// "saml" is deliberately not seeded yet - see internal/testtemplate's own
-// former Registry doc comment (that package is now gone, having been
-// replaced by this CRD): once a concrete SAML test client is chosen, add a
-// third entry here (plus a k6/scripts/saml.ts) following the oauth-oidc
-// entry's own pattern.
 func defaultTestCaseTemplates(namespace string) []benchv1alpha1.TestCaseTemplate {
 	return []benchv1alpha1.TestCaseTemplate{
 		{
@@ -53,6 +47,32 @@ func defaultTestCaseTemplates(namespace string) []benchv1alpha1.TestCaseTemplate
 				Description:  "Drives an OAuth2/OIDC authorization-code flow through an oidc-test-client relying party, reusing the same flow-executor walk as login.",
 				Script:       mustEmbeddedScript("oauth.ts"),
 				Dependencies: []benchv1alpha1.TestCaseDependency{benchv1alpha1.DependencyOIDCClient},
+			},
+		},
+		{
+			Name: "saml", Namespace: namespace,
+			Spec: benchv1alpha1.TestCaseTemplateSpec{
+				Description:  "Drives an SP-initiated SAML login (HTTP-POST response binding) through a saml-test-sp service provider, reusing the same flow-executor walk as login.",
+				Script:       mustEmbeddedScript("saml.ts"),
+				Dependencies: []benchv1alpha1.TestCaseDependency{benchv1alpha1.DependencySAMLClient},
+			},
+		},
+		{
+			Name: "oidc-source", Namespace: namespace,
+			Spec: benchv1alpha1.TestCaseTemplateSpec{
+				Description: "Logs in through an authentik OAuth source federating to dex: dex's password form, the callback, " +
+					"then the source authentication flow. Every VU is the same dex user, enrolled once in setup().",
+				Script:       mustEmbeddedScript("oidc-source.ts"),
+				Dependencies: []benchv1alpha1.TestCaseDependency{benchv1alpha1.DependencyOIDCIdP},
+			},
+		},
+		{
+			Name: "saml-source", Namespace: namespace,
+			Spec: benchv1alpha1.TestCaseTemplateSpec{
+				Description: "Logs in through an authentik SAML source federating to saml-test-idp: the IdP's login form, the POSTed " +
+					"SAMLResponse, then the source authentication flow. Every VU is the same IdP user, enrolled once in setup().",
+				Script:       mustEmbeddedScript("saml-source.ts"),
+				Dependencies: []benchv1alpha1.TestCaseDependency{benchv1alpha1.DependencySAMLIdP},
 			},
 		},
 		{

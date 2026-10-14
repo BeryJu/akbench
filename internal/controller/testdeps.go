@@ -91,6 +91,9 @@ func oauthProviderEntries(id, clientID, clientSecret, redirectURI string) string
 // crewjam/saml checks; assertions are signed with authentik's self-signed
 // keypair, whose certificate the SP reads from the provider metadata.
 // sp_binding is post: saml-test-sp's ACS only takes HTTP-POST.
+// sign_assertion is set explicitly even though it's the model default: the
+// serializer rejects a signing_kp without sign_assertion or sign_response
+// in the submitted attrs (seen on authentik 2026.8).
 func samlProviderEntries(id, acsURL, audience string) string {
 	return fmt.Sprintf(`  - model: authentik_providers_saml.samlprovider
     id: %[1]s
@@ -103,6 +106,7 @@ func samlProviderEntries(id, acsURL, audience string) string {
       audience: %[3]s
       sp_binding: post
       signing_kp: %[6]s
+      sign_assertion: true
       property_mappings:
         - !Find [authentik_providers_saml.samlpropertymapping, [managed, goauthentik.io/providers/saml/uid]]
         - !Find [authentik_providers_saml.samlpropertymapping, [managed, goauthentik.io/providers/saml/username]]
