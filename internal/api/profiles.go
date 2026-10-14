@@ -39,7 +39,9 @@ import (
 const (
 	pyroscopeCPUProfileType = "process_cpu:cpu:nanoseconds:cpu:nanoseconds"
 	pyroscopeServiceName    = "authentik"
-	profileTopFunctions     = 25
+	// profileTopFunctions is generous so the UI's cross-target table
+	// rarely finds a function missing from one target's list.
+	profileTopFunctions = 60
 	// maxProfileBytes bounds a merged profile read into memory.
 	maxProfileBytes = 256 << 20
 )

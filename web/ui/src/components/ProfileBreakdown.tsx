@@ -119,8 +119,13 @@ export function ProfileBreakdownSection({
                 <thead>
                   <tr>
                     <th>Target</th>
-                    <th className="num">Avg CPU</th>
-                    {profiled.length > 1 && <th className="num">Δ CPU</th>}
+                    <th
+                      className="num"
+                      title="Average Python CPU the profiler sampled. It leaves out authentik's Go router and native code, so it reads lower than the pods' CPU under Resources."
+                    >
+                      Profiled CPU
+                    </th>
+                    {profiled.length > 1 && <th className="num">Δ</th>}
                     <th>Where CPU goes</th>
                     {CATEGORIES.map(c => (
                       <th key={c.name} className="num">
