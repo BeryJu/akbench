@@ -34,7 +34,7 @@ const resetPollInterval = 2 * time.Second
 //  3. delete every PVC in spec.namespace except the BlueprintPVC (a staging
 //     area for blueprint files, not state) and wait until they're gone;
 //  4. delete every blueprint import Job and the postgres role-fix Job, so
-//     reconcileBlueprint, TestCaseReconciler.ensureOAuthClient and
+//     reconcileBlueprint, TestCaseReconciler.ensureDependencies and
 //     reconcilePostgresRoleFix all run them again against the new database.
 //
 // Each step waits until the remote cluster client's (cached) reads no longer

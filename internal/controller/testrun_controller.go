@@ -182,8 +182,7 @@ func (r *TestRunReconciler) start(ctx context.Context, run *benchv1alpha1.TestRu
 		return ctrl.Result{}, fmt.Errorf("ensure fixtures secret: %w", err)
 	}
 
-	var oauthHost string
-	var oauthPort int32
+	var deps render.DependencyEndpoints
 	if tc.Spec.Inline == "" && tc.Spec.ScriptConfigMapRef == nil {
 		tmpl, err := resolveTemplate(ctx, r.Client, tc.Namespace, tc.Spec.Template)
 		if err != nil {
@@ -191,9 +190,7 @@ func (r *TestRunReconciler) start(ctx context.Context, run *benchv1alpha1.TestRu
 				benchv1alpha1.ReasonDependencyNotReady, fmt.Sprintf("resolving TestCaseTemplate %q: %v", tc.Spec.Template, err))
 			return ctrl.Result{RequeueAfter: 5 * time.Second}, r.Status().Update(ctx, run)
 		}
-		if tmpl.Spec.RequiresOAuthClient {
-			oauthHost, oauthPort = oidcTestClientHostPort(&tc, deploymentRef.Name)
-		}
+		deps = dependencyEndpoints(&tc, deploymentRef.Name, &tmpl.Spec)
 	}
 
 	runnerWC := resolveWorkloadCluster(ctx, r.Client, run.Namespace, runnerClusterName(&tc, topo))
@@ -207,8 +204,7 @@ func (r *TestRunReconciler) start(ctx context.Context, run *benchv1alpha1.TestRu
 		RemoteWriteURL:      defaultRemoteWriteURL,
 		ScriptConfigMapName: scriptCMName,
 		FixturesSecretName:  fixturesSecretName,
-		OAuthTestClientHost: oauthHost,
-		OAuthTestClientPort: oauthPort,
+		Dependencies:        deps,
 		NodeSelector:        nodeSelector,
 		Tolerations:         tolerations,
 	}

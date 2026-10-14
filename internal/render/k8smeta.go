@@ -10,6 +10,7 @@ const (
 	kindConfigMap  = "ConfigMap"
 	kindDeployment = "Deployment"
 	kindService    = "Service"
+	kindSecret     = "Secret"
 
 	apiVersionV1     = "v1"
 	apiVersionAppsV1 = "apps/v1"

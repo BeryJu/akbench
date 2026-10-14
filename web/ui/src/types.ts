@@ -189,8 +189,18 @@ export function testCaseBaseline(spec: TestCaseSpec): string | undefined {
 export interface TestCaseTemplateSpec {
     description?: string;
     script: string;
-    requiresOAuthClient?: boolean;
+    dependencies?: TestCaseDependency[];
 }
+
+/** Extra services a TestCaseTemplate needs provisioned next to its target. */
+export const testCaseDependencies = {
+    "oidc-client": "OIDC client",
+    "saml-client": "SAML client",
+    "oidc-idp": "OIDC IdP",
+    "saml-idp": "SAML IdP",
+} as const;
+
+export type TestCaseDependency = keyof typeof testCaseDependencies;
 
 export interface TestCaseTemplate {
     metadata: ObjectMeta;

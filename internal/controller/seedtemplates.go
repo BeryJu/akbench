@@ -50,9 +50,9 @@ func defaultTestCaseTemplates(namespace string) []benchv1alpha1.TestCaseTemplate
 		{
 			Name: "oauth-oidc", Namespace: namespace,
 			Spec: benchv1alpha1.TestCaseTemplateSpec{
-				Description:         "Drives an OAuth2/OIDC authorization-code flow through an oidc-test-client relying party, reusing the same flow-executor walk as login.",
-				Script:              mustEmbeddedScript("oauth.ts"),
-				RequiresOAuthClient: true,
+				Description:  "Drives an OAuth2/OIDC authorization-code flow through an oidc-test-client relying party, reusing the same flow-executor walk as login.",
+				Script:       mustEmbeddedScript("oauth.ts"),
+				Dependencies: []benchv1alpha1.TestCaseDependency{benchv1alpha1.DependencyOIDCClient},
 			},
 		},
 		{

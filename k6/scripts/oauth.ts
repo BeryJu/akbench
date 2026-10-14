@@ -140,7 +140,7 @@ if (users.length === 0) {
     throw new Error(`No credentials found in ${usersFile}`);
 }
 if (!oauthHost) {
-    throw new Error("OAUTH_TEST_CLIENT_HOST is required for the oauth-oidc template - is TestCaseReconciler's ensureOAuthClient wired up?");
+    throw new Error("OAUTH_TEST_CLIENT_HOST is required for the oauth-oidc template - does the template list the oidc-client dependency?");
 }
 
 export const options: Options = {

@@ -1,6 +1,8 @@
 package v1alpha1
 
 import (
+	"slices"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 )
@@ -24,16 +26,45 @@ type TestCaseTemplateSpec struct {
 	// itself.
 	Script string `json:"script"`
 
-	// requiresOAuthClient gates TestCaseReconciler's oidc-test-client
-	// Deployment/Service + OAuth2 provider/application blueprint
-	// provisioning (internal/controller/testcase_controller.go,
-	// internal/render/oidctestclient.go) for any TestCase selecting this
-	// template - scoped to the TestCase, not the AuthentikDeployment it
-	// targets, so "what is being tested" stays fully decoupled from "what
-	// it's being tested against" the same way the k6 workload itself
-	// already is.
+	// dependencies lists the extra services TestCaseReconciler provisions
+	// for any TestCase selecting this template, beyond the target
+	// AuthentikDeployment itself, plus the authentik objects each needs:
+	// oidc-client (oidc-test-client + OAuth2 provider), saml-client
+	// (saml-test-sp + SAML provider), oidc-idp (dex + OAuth source) and
+	// saml-idp (saml-test-idp + SAML source) - see
+	// internal/controller/testdeps.go and internal/render/testdeps.go. Scoped to the TestCase, not the
+	// AuthentikDeployment it targets, so "what is being tested" stays fully
+	// decoupled from "what it's being tested against" the same way the k6
+	// workload itself already is. Templates can combine several (e.g. an
+	// oidc-idp federating into authentik while an oidc-client logs in).
+	// +listType=set
 	// +optional
-	RequiresOAuthClient bool `json:"requiresOAuthClient,omitempty"`
+	Dependencies []TestCaseDependency `json:"dependencies,omitempty"`
+}
+
+// TestCaseDependency names one extra service a TestCaseTemplate needs
+// provisioned next to its target AuthentikDeployment.
+// +kubebuilder:validation:Enum=oidc-client;saml-client;oidc-idp;saml-idp
+type TestCaseDependency string
+
+const (
+	// DependencyOIDCClient is an OIDC relying party (oidc-test-client)
+	// authenticating against authentik as the OpenID provider.
+	DependencyOIDCClient TestCaseDependency = "oidc-client"
+	// DependencySAMLClient is a SAML service provider authenticating
+	// against authentik as the SAML IdP.
+	DependencySAMLClient TestCaseDependency = "saml-client"
+	// DependencyOIDCIdP is an upstream OpenID provider authentik federates
+	// logins to (an OAuth source).
+	DependencyOIDCIdP TestCaseDependency = "oidc-idp"
+	// DependencySAMLIdP is an upstream SAML IdP authentik federates logins
+	// to (a SAML source).
+	DependencySAMLIdP TestCaseDependency = "saml-idp"
+)
+
+// HasDependency reports whether this template lists dep.
+func (s *TestCaseTemplateSpec) HasDependency(dep TestCaseDependency) bool {
+	return slices.Contains(s.Dependencies, dep)
 }
 
 // TestCaseTemplateStatus defines the observed state of TestCaseTemplate.
@@ -58,7 +89,7 @@ type TestCaseTemplateStatus struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:printcolumn:name="OAuth",type=boolean,JSONPath=`.spec.requiresOAuthClient`
+// +kubebuilder:printcolumn:name="Dependencies",type=string,JSONPath=`.spec.dependencies`
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
 // +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=="Ready")].status`
 

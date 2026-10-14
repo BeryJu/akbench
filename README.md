@@ -95,8 +95,16 @@ Implemented so far:
   rate or p95 latency crosses its thresholds),
   sourced from the exact same embedded `k6/scripts/*.ts` files the operator
   binary carries (create-only, so editing one in the UI is never
-  clobbered by a later restart). A SAML template slot is reserved but not
-  implemented yet.
+  clobbered by a later restart). A template's `spec.dependencies` lists
+  extra services the operator provisions per TestCase and target, together
+  with the authentik objects they need (via a blueprint import):
+  `oidc-client` ([BeryJu/oidc-test-client](https://github.com/BeryJu/oidc-test-client)
+  + OAuth2 provider), `saml-client`
+  ([BeryJu/saml-test-sp](https://github.com/BeryJu/saml-test-sp) + SAML
+  provider), `oidc-idp` ([dex](https://dexidp.io) + OAuth source) and
+  `saml-idp` ([BeryJu/saml-test-idp](https://github.com/BeryJu/saml-test-idp)
+  + SAML source). Their addresses, source slugs and IdP test credentials
+  reach k6 as env vars (`render.DependencyEndpoints`).
 - **Web UI**: `internal/api` is a REST/JSON backend (chi router) that CRUDs
   every CRD as unstructured objects (the CRD schema stays the single source
   of truth), proxies PromQL for the compare view (resolved per-testid

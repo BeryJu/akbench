@@ -15,9 +15,9 @@ spec:
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
-    - jsonPath: .spec.requiresOAuthClient
-      name: OAuth
-      type: boolean
+    - jsonPath: .spec.dependencies
+      name: Dependencies
+      type: string
     - jsonPath: .status.phase
       name: Phase
       type: string
@@ -56,22 +56,36 @@ spec:
               TestCase referencing it reconciles; nothing needs rebuilding or
               redeploying.
             properties:
+              dependencies:
+                description: |-
+                  dependencies lists the extra services TestCaseReconciler provisions
+                  for any TestCase selecting this template, beyond the target
+                  AuthentikDeployment itself, plus the authentik objects each needs:
+                  oidc-client (oidc-test-client + OAuth2 provider), saml-client
+                  (saml-test-sp + SAML provider), oidc-idp (dex + OAuth source) and
+                  saml-idp (saml-test-idp + SAML source) - see
+                  internal/controller/testdeps.go and internal/render/testdeps.go. Scoped to the TestCase, not the
+                  AuthentikDeployment it targets, so "what is being tested" stays fully
+                  decoupled from "what it's being tested against" the same way the k6
+                  workload itself already is. Templates can combine several (e.g. an
+                  oidc-idp federating into authentik while an oidc-client logs in).
+                items:
+                  description: |-
+                    TestCaseDependency names one extra service a TestCaseTemplate needs
+                    provisioned next to its target AuthentikDeployment.
+                  enum:
+                  - oidc-client
+                  - saml-client
+                  - oidc-idp
+                  - saml-idp
+                  type: string
+                type: array
+                x-kubernetes-list-type: set
               description:
                 description: |-
                   description documents what this template exercises, shown in the
                   web UI's template picker.
                 type: string
-              requiresOAuthClient:
-                description: |-
-                  requiresOAuthClient gates TestCaseReconciler's oidc-test-client
-                  Deployment/Service + OAuth2 provider/application blueprint
-                  provisioning (internal/controller/testcase_controller.go,
-                  internal/render/oidctestclient.go) for any TestCase selecting this
-                  template - scoped to the TestCase, not the AuthentikDeployment it
-                  targets, so "what is being tested" stays fully decoupled from "what
-                  it's being tested against" the same way the k6 workload itself
-                  already is.
-                type: boolean
               script:
                 description: |-
                   script is the k6 test script (TypeScript) this template runs -

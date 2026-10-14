@@ -68,14 +68,11 @@ type K6WorkloadParams struct {
 	ScriptConfigMapName string
 	// FixturesSecretName holds the generated users.json fixture.
 	FixturesSecretName string
-	// OAuthTestClientHost/Port are set only when the resolved template
-	// requires an OAuth client (oauth-oidc - see
-	// TestCaseTemplateSpec.RequiresOAuthClient and
-	// internal/controller/oauthclient.go's ensureOAuthClient). Empty
-	// otherwise, in which case EnvVars renders no OAUTH_TEST_CLIENT_* vars
-	// at all, so a non-oauth script never sees them.
-	OAuthTestClientHost string
-	OAuthTestClientPort int32
+	// Dependencies locates the resolved template's
+	// TestCaseTemplateSpec.Dependencies (see
+	// internal/controller/testdeps.go). Only the ones set render env vars,
+	// so a script without dependencies never sees any.
+	Dependencies DependencyEndpoints
 	// NodeSelector/Tolerations target this TestCase's own k6-pool node (see
 	// render.K6PoolPlacement), resolved by the caller from the runner's own
 	// WorkloadCluster - empty when that cluster has no K6-role pool (or when
@@ -89,7 +86,7 @@ type K6WorkloadParams struct {
 // resulting metrics carry the same meaning as the Ansible-based harness.
 func (p K6WorkloadParams) EnvVars() []corev1.EnvVar {
 	tc := p.TestCase
-	vars := []corev1.EnvVar{
+	return append([]corev1.EnvVar{
 		{Name: "TEST_ID", Value: tc.Name},
 		{Name: "TARGET", Value: p.TargetName},
 		{Name: "PROFILE", Value: k6ProfileValue(tc.Spec.Profile)},
@@ -106,11 +103,53 @@ func (p K6WorkloadParams) EnvVars() []corev1.EnvVar {
 		{Name: "K6_PROMETHEUS_RW_SERVER_URL", Value: p.RemoteWriteURL},
 		{Name: "K6_PROMETHEUS_RW_TREND_AS_NATIVE_HISTOGRAM", Value: "true"},
 		{Name: "K6_PROMETHEUS_RW_PUSH_INTERVAL", Value: "1s"},
-	}
-	if p.OAuthTestClientHost != "" {
+	}, p.Dependencies.EnvVars()...)
+}
+
+// DependencyEndpoints is where a k6 script finds each test dependency its
+// template declares. Zero values mean that dependency isn't in use.
+type DependencyEndpoints struct {
+	// OIDCClientHost/Port: oidc-test-client (oidc-client).
+	OIDCClientHost string
+	OIDCClientPort int32
+	// SAMLClientHost/Port: saml-test-sp (saml-client).
+	SAMLClientHost string
+	SAMLClientPort int32
+	// OIDCSourceSlug: authentik's OAuth source federating to dex (oidc-idp);
+	// a login starts at /source/oauth/login/<slug>/.
+	OIDCSourceSlug string
+	// SAMLSourceSlug: authentik's SAML source federating to saml-test-idp
+	// (saml-idp); a login starts at /source/saml/<slug>/.
+	SAMLSourceSlug string
+}
+
+// EnvVars renders the env vars for the dependencies in use.
+func (d DependencyEndpoints) EnvVars() []corev1.EnvVar {
+	var vars []corev1.EnvVar
+	if d.OIDCClientHost != "" {
 		vars = append(vars,
-			corev1.EnvVar{Name: "OAUTH_TEST_CLIENT_HOST", Value: p.OAuthTestClientHost},
-			corev1.EnvVar{Name: "OAUTH_TEST_CLIENT_PORT", Value: fmt.Sprintf("%d", p.OAuthTestClientPort)},
+			corev1.EnvVar{Name: "OAUTH_TEST_CLIENT_HOST", Value: d.OIDCClientHost},
+			corev1.EnvVar{Name: "OAUTH_TEST_CLIENT_PORT", Value: fmt.Sprintf("%d", d.OIDCClientPort)},
+		)
+	}
+	if d.SAMLClientHost != "" {
+		vars = append(vars,
+			corev1.EnvVar{Name: "SAML_TEST_SP_HOST", Value: d.SAMLClientHost},
+			corev1.EnvVar{Name: "SAML_TEST_SP_PORT", Value: fmt.Sprintf("%d", d.SAMLClientPort)},
+		)
+	}
+	if d.OIDCSourceSlug != "" {
+		vars = append(vars,
+			corev1.EnvVar{Name: "OIDC_IDP_SOURCE_SLUG", Value: d.OIDCSourceSlug},
+			corev1.EnvVar{Name: "OIDC_IDP_USERNAME", Value: DexEmail},
+			corev1.EnvVar{Name: "OIDC_IDP_PASSWORD", Value: DexPassword},
+		)
+	}
+	if d.SAMLSourceSlug != "" {
+		vars = append(vars,
+			corev1.EnvVar{Name: "SAML_IDP_SOURCE_SLUG", Value: d.SAMLSourceSlug},
+			corev1.EnvVar{Name: "SAML_IDP_USERNAME", Value: SAMLTestIdPUsername},
+			corev1.EnvVar{Name: "SAML_IDP_PASSWORD", Value: SAMLTestIdPPassword},
 		)
 	}
 	return vars

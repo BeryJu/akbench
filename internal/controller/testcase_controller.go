@@ -319,10 +319,9 @@ func (r *TestCaseReconciler) reconcileTarget(ctx context.Context, tc *benchv1alp
 		return targetResult{}, fmt.Errorf("ensure fixtures secret for %q: %w", ref.Name, err)
 	}
 
-	var oauthHost string
-	var oauthPort int32
-	if tmpl != nil && tmpl.Spec.RequiresOAuthClient {
-		oauthHost, oauthPort, err = r.ensureOAuthClient(ctx, rc, remote, tc, ref.Name, topo, host, port)
+	var deps render.DependencyEndpoints
+	if tmpl != nil {
+		deps, err = r.ensureDependencies(ctx, rc, remote, tc, ref.Name, topo, &tmpl.Spec, host, port)
 		if err != nil {
 			result.notReadyMsg = fmt.Sprintf("%s: %v", ref.Name, err)
 			return result, nil
@@ -340,8 +339,7 @@ func (r *TestCaseReconciler) reconcileTarget(ctx context.Context, tc *benchv1alp
 		RemoteWriteURL:      defaultRemoteWriteURL,
 		ScriptConfigMapName: scriptCM,
 		FixturesSecretName:  fixturesSecretName,
-		OAuthTestClientHost: oauthHost,
-		OAuthTestClientPort: oauthPort,
+		Dependencies:        deps,
 		NodeSelector:        nodeSelector,
 		Tolerations:         tolerations,
 	}

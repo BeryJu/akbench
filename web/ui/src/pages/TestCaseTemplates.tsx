@@ -5,11 +5,20 @@ import { ObjectYaml } from "../components/ObjectYaml";
 import { StatusBadge } from "../components/Status";
 import { toast } from "../components/Toast";
 import { Alert, confirmAndRun, Empty, errorMessage, Field, Page, Table } from "../components/ui";
-import { TestCaseTemplate, TestCaseTemplateSpec } from "../types";
+import {
+    TestCaseDependency,
+    testCaseDependencies,
+    TestCaseTemplate,
+    TestCaseTemplateSpec,
+} from "../types";
 import { useResource } from "../useResource";
 
 import { FormEvent, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
+
+function dependencyLabels(deps?: TestCaseDependency[]): string {
+    return (deps ?? []).map((d) => testCaseDependencies[d] ?? d).join(", ");
+}
 
 export function TestCaseTemplatesPage() {
     const templates = useResource(() => api.testCaseTemplates(), [], 5000, "TestCaseTemplate");
@@ -39,8 +48,8 @@ export function TestCaseTemplatesPage() {
                     },
                     { label: "Description", render: (t) => t.spec.description ?? "" },
                     {
-                        label: "OAuth client",
-                        render: (t) => (t.spec.requiresOAuthClient ? "Required" : "-"),
+                        label: "Dependencies",
+                        render: (t) => dependencyLabels(t.spec.dependencies) || "-",
                     },
                     {
                         label: "Status",
@@ -91,7 +100,7 @@ function TestCaseTemplateForm({ existing }: { existing?: TestCaseTemplate }) {
     const navigate = useNavigate();
     const [name, setName] = useState(existing?.metadata.name ?? "");
     const [spec, setSpec] = useState<TestCaseTemplateSpec>(
-        existing?.spec ?? { description: "", script: "", requiresOAuthClient: false },
+        existing?.spec ?? { description: "", script: "", dependencies: [] },
     );
     const [error, setError] = useState<string>();
     const [saving, setSaving] = useState(false);
@@ -141,15 +150,27 @@ function TestCaseTemplateForm({ existing }: { existing?: TestCaseTemplate }) {
                         />
                     </Field>
                 </div>
-                <label className="check" style={{ margin: "8px 0 16px" }}>
-                    <input
-                        type="checkbox"
-                        checked={Boolean(spec.requiresOAuthClient)}
-                        onChange={(e) => patch({ requiresOAuthClient: e.target.checked })}
-                    />
-                    Requires an OAuth client (provisions an OAuth2 provider/application for every
-                    test case using this template)
-                </label>
+                <p className="muted" style={{ marginTop: 8 }}>
+                    Dependencies, provisioned for every test case using this template:
+                </p>
+                <div className="row" style={{ marginBottom: 16 }}>
+                    {(Object.keys(testCaseDependencies) as TestCaseDependency[]).map((dep) => (
+                        <label key={dep} className="check">
+                            <input
+                                type="checkbox"
+                                checked={spec.dependencies?.includes(dep) ?? false}
+                                onChange={(e) =>
+                                    patch({
+                                        dependencies: e.target.checked
+                                            ? [...(spec.dependencies ?? []), dep]
+                                            : spec.dependencies?.filter((d) => d !== dep),
+                                    })
+                                }
+                            />
+                            {testCaseDependencies[dep]}
+                        </label>
+                    ))}
+                </div>
                 <p className="muted">
                     k6 script (TypeScript), mirrored verbatim into every test case selecting this
                     template.
@@ -224,9 +245,11 @@ export function TestCaseTemplateViewPage() {
                         phase={t.status?.phase}
                         conditions={t.status?.conditions}
                     />
-                    {t.spec.requiresOAuthClient && (
-                        <span className="muted">Provisions an OAuth client</span>
-                    )}
+                    {t.spec.dependencies?.length ? (
+                        <span className="muted">
+                            Provisions {dependencyLabels(t.spec.dependencies)}
+                        </span>
+                    ) : null}
                 </div>
             )}
             {t && (
