@@ -73,6 +73,7 @@ make test        # envtest + unit + contract tests
 
 **After editing `web/ui`:**
 ```
+make ui-lint-fix # oxfmt + oxlint --fix (@goauthentik/oxfmt-config, @goauthentik/oxlint-config)
 make ui-test     # typecheck + vitest
 ```
 

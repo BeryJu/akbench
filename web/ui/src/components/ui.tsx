@@ -1,213 +1,246 @@
+import { SINCE_START, TIME_RANGES } from "../format";
+import { toast } from "./Toast";
+
 // The handful of layout/feedback primitives every page shares.
-import { ReactNode } from 'react';
-import { toast } from './Toast';
-import { SINCE_START, TIME_RANGES } from '../format';
+import { ReactNode } from "react";
 
 export function Page({
-  title,
-  subtitle,
-  actions,
-  children,
+    title,
+    subtitle,
+    actions,
+    children,
 }: {
-  title: ReactNode;
-  subtitle?: ReactNode;
-  actions?: ReactNode;
-  children: ReactNode;
+    title: ReactNode;
+    subtitle?: ReactNode;
+    actions?: ReactNode;
+    children: ReactNode;
 }) {
-  return (
-    <>
-      <div className="page-head">
-        <div>
-          <h1>{title}</h1>
-          {subtitle && <div className="sub">{subtitle}</div>}
-        </div>
-        {actions && <div className="row">{actions}</div>}
-      </div>
-      {children}
-    </>
-  );
+    return (
+        <>
+            <div className="page-head">
+                <div>
+                    <h1>{title}</h1>
+                    {subtitle && <div className="sub">{subtitle}</div>}
+                </div>
+                {actions && <div className="row">{actions}</div>}
+            </div>
+            {children}
+        </>
+    );
 }
 
-/** Section is one titled card of a long page: a header bar with the
- * section's own controls, then its body. id is its SectionNav anchor. */
+/**
+ * Section is one titled card of a long page: a header bar with the
+ * section's own controls, then its body. id is its SectionNav anchor.
+ */
 export function Section({
-  id,
-  title,
-  description,
-  actions,
-  children,
+    id,
+    title,
+    description,
+    actions,
+    children,
 }: {
-  id: string;
-  title: ReactNode;
-  description?: ReactNode;
-  actions?: ReactNode;
-  children: ReactNode;
+    id: string;
+    title: ReactNode;
+    description?: ReactNode;
+    actions?: ReactNode;
+    children: ReactNode;
 }) {
-  return (
-    <section className="section" id={id} aria-labelledby={`${id}-title`}>
-      <header className="section-bar">
-        <div>
-          <h2 id={`${id}-title`}>{title}</h2>
-          {description && <div className="muted">{description}</div>}
-        </div>
-        {actions && <div className="row">{actions}</div>}
-      </header>
-      <div className="section-body">{children}</div>
-    </section>
-  );
+    return (
+        <section className="section" id={id} aria-labelledby={`${id}-title`}>
+            <header className="section-bar">
+                <div>
+                    <h2 id={`${id}-title`}>{title}</h2>
+                    {description && <div className="muted">{description}</div>}
+                </div>
+                {actions && <div className="row">{actions}</div>}
+            </header>
+            <div className="section-body">{children}</div>
+        </section>
+    );
 }
 
-/** SectionNav jumps between a page's Sections. It scrolls rather than
- * linking to #id, so the page's own search params and history stay put. */
+/**
+ * SectionNav jumps between a page's Sections. It scrolls rather than
+ * linking to #id, so the page's own search params and history stay put.
+ */
 export function SectionNav({ sections }: { sections: { id: string; label: string }[] }) {
-  return (
-    <nav className="section-nav" aria-label="Sections">
-      {sections.map(s => (
-        <button
-          key={s.id}
-          type="button"
-          onClick={() => document.getElementById(s.id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
-        >
-          {s.label}
-        </button>
-      ))}
-    </nav>
-  );
+    return (
+        <nav className="section-nav" aria-label="Sections">
+            {sections.map((s) => (
+                <button
+                    key={s.id}
+                    type="button"
+                    onClick={() =>
+                        document
+                            .getElementById(s.id)
+                            ?.scrollIntoView({ behavior: "smooth", block: "start" })
+                    }
+                >
+                    {s.label}
+                </button>
+            ))}
+        </nav>
+    );
 }
 
-export function Alert({ kind = 'error', children }: { kind?: 'error' | 'info' | 'success'; children: ReactNode }) {
-  if (!children) {
-    return null;
-  }
-  return <div className={`alert ${kind}`}>{children}</div>;
+export function Alert({
+    kind = "error",
+    children,
+}: {
+    kind?: "error" | "info" | "success";
+    children: ReactNode;
+}) {
+    if (!children) {
+        return null;
+    }
+    return <div className={`alert ${kind}`}>{children}</div>;
 }
 
 export function Empty({ children }: { children: ReactNode }) {
-  return <div className="empty">{children}</div>;
+    return <div className="empty">{children}</div>;
 }
 
 export interface Column<T> {
-  label: string;
-  render: (row: T) => ReactNode;
-  className?: string;
+    label: string;
+    render: (row: T) => ReactNode;
+    className?: string;
 }
 
 export function Table<T>({
-  columns,
-  rows,
-  rowKey,
-  empty,
+    columns,
+    rows,
+    rowKey,
+    empty,
 }: {
-  columns: Column<T>[];
-  rows: T[] | undefined;
-  rowKey: (row: T) => string;
-  empty: ReactNode;
+    columns: Column<T>[];
+    rows: T[] | undefined;
+    rowKey: (row: T) => string;
+    empty: ReactNode;
 }) {
-  if (rows === undefined) {
-    return <div className="muted">Loading…</div>;
-  }
-  if (rows.length === 0) {
-    return <Empty>{empty}</Empty>;
-  }
-  return (
-    <table className="table">
-      <thead>
-        <tr>
-          {columns.map(c => (
-            <th key={c.label}>{c.label}</th>
-          ))}
-        </tr>
-      </thead>
-      <tbody>
-        {rows.map(row => (
-          <tr key={rowKey(row)}>
-            {columns.map(c => (
-              <td key={c.label} className={c.className}>
-                {c.render(row)}
-              </td>
-            ))}
-          </tr>
-        ))}
-      </tbody>
-    </table>
-  );
+    if (rows === undefined) {
+        return <div className="muted">Loading…</div>;
+    }
+    if (rows.length === 0) {
+        return <Empty>{empty}</Empty>;
+    }
+    return (
+        <table className="table">
+            <thead>
+                <tr>
+                    {columns.map((c) => (
+                        <th key={c.label}>{c.label}</th>
+                    ))}
+                </tr>
+            </thead>
+            <tbody>
+                {rows.map((row) => (
+                    <tr key={rowKey(row)}>
+                        {columns.map((c) => (
+                            <td key={c.label} className={c.className}>
+                                {c.render(row)}
+                            </td>
+                        ))}
+                    </tr>
+                ))}
+            </tbody>
+        </table>
+    );
 }
 
-export function Field({ label, help, children }: { label: string; help?: ReactNode; children: ReactNode }) {
-  return (
-    <label className="field">
-      {label}
-      {children}
-      {help && <span className="help">{help}</span>}
-    </label>
-  );
+export function Field({
+    label,
+    help,
+    children,
+}: {
+    label: string;
+    help?: ReactNode;
+    children: ReactNode;
+}) {
+    return (
+        <label className="field">
+            {label}
+            {children}
+            {help && <span className="help">{help}</span>}
+        </label>
+    );
 }
 
-export function Stat({ value, label, hint }: { value: ReactNode; label: string; hint?: ReactNode }) {
-  return (
-    <div className="panel stat">
-      <div className="value">{value}</div>
-      <div className="label">{label}</div>
-      {hint && <div className="hint">{hint}</div>}
-    </div>
-  );
+export function Stat({
+    value,
+    label,
+    hint,
+}: {
+    value: ReactNode;
+    label: string;
+    hint?: ReactNode;
+}) {
+    return (
+        <div className="panel stat">
+            <div className="value">{value}</div>
+            <div className="label">{label}</div>
+            {hint && <div className="hint">{hint}</div>}
+        </div>
+    );
 }
 
-/** TimeRangeSelect picks a chart time range (format.ts's TIME_RANGES).
+/**
+ * TimeRangeSelect picks a chart time range (format.ts's TIME_RANGES).
  * sinceStartLabel, when set, adds the SINCE_START option under that label
- * (e.g. "Since burn start") - only offer it where a start is known. */
+ * (e.g. "Since burn start") - only offer it where a start is known.
+ */
 export function TimeRangeSelect({
-  value,
-  onChange,
-  sinceStartLabel,
+    value,
+    onChange,
+    sinceStartLabel,
 }: {
-  value: string;
-  onChange: (value: string) => void;
-  sinceStartLabel?: string;
+    value: string;
+    onChange: (value: string) => void;
+    sinceStartLabel?: string;
 }) {
-  return (
-    <select aria-label="Time range" value={value} onChange={e => onChange(e.target.value)}>
-      {sinceStartLabel && <option value={SINCE_START}>{sinceStartLabel}</option>}
-      {TIME_RANGES.map(r => (
-        <option key={r.value} value={r.value}>
-          {r.label}
-        </option>
-      ))}
-    </select>
-  );
+    return (
+        <select aria-label="Time range" value={value} onChange={(e) => onChange(e.target.value)}>
+            {sinceStartLabel && <option value={SINCE_START}>{sinceStartLabel}</option>}
+            {TIME_RANGES.map((r) => (
+                <option key={r.value} value={r.value}>
+                    {r.label}
+                </option>
+            ))}
+        </select>
+    );
 }
 
 /** Segmented is a small single-choice toggle (windows). */
 export function Segmented<T extends string | number>({
-  label,
-  options,
-  value,
-  onChange,
+    label,
+    options,
+    value,
+    onChange,
 }: {
-  label: string;
-  options: { value: T; label: string }[];
-  value: T;
-  onChange: (value: T) => void;
+    label: string;
+    options: { value: T; label: string }[];
+    value: T;
+    onChange: (value: T) => void;
 }) {
-  return (
-    <div className="seg" role="group" aria-label={label}>
-      {options.map(o => (
-        <button
-          key={o.value}
-          type="button"
-          className={o.value === value ? 'on' : undefined}
-          aria-pressed={o.value === value}
-          onClick={() => onChange(o.value)}
-        >
-          {o.label}
-        </button>
-      ))}
-    </div>
-  );
+    return (
+        <div className="seg" role="group" aria-label={label}>
+            {options.map((o) => (
+                <button
+                    key={o.value}
+                    type="button"
+                    className={o.value === value ? "on" : undefined}
+                    aria-pressed={o.value === value}
+                    onClick={() => onChange(o.value)}
+                >
+                    {o.label}
+                </button>
+            ))}
+        </div>
+    );
 }
 
 export function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
+    return err instanceof Error ? err.message : String(err);
 }
 
 /**
@@ -218,25 +251,25 @@ export function errorMessage(err: unknown): string {
  * always the error on failure.
  */
 export async function confirmAndRun(
-  question: string,
-  action: () => Promise<unknown>,
-  after?: () => void,
-  successMessage?: string
+    question: string,
+    action: () => Promise<unknown>,
+    after?: () => void,
+    successMessage?: string,
 ) {
-  if (!window.confirm(question)) {
-    return;
-  }
-  try {
-    await action();
-    after?.();
-    if (successMessage) {
-      toast.success(successMessage);
+    if (!window.confirm(question)) {
+        return;
     }
-  } catch (err) {
-    toast.error(errorMessage(err));
-  }
+    try {
+        await action();
+        after?.();
+        if (successMessage) {
+            toast.success(successMessage);
+        }
+    } catch (err) {
+        toast.error(errorMessage(err));
+    }
 }
 
 export function formatTimestamp(value: string | undefined): string {
-  return value ? new Date(value).toLocaleString() : '-';
+    return value ? new Date(value).toLocaleString() : "-";
 }

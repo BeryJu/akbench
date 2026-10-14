@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { useResourceEvents } from './events';
+import { useResourceEvents } from "./events";
+
+import { useCallback, useEffect, useRef, useState } from "react";
 
 /**
  * useResource polls a fetcher on an interval. Everything here reflects
@@ -14,61 +15,61 @@ import { useResourceEvents } from './events';
  * reconnecting.
  */
 export function useResource<T>(
-  fetcher: () => Promise<T>,
-  deps: unknown[] = [],
-  intervalMs = 5000,
-  watchKind = ''
+    fetcher: () => Promise<T>,
+    deps: unknown[] = [],
+    intervalMs = 5000,
+    watchKind = "",
 ): { data: T | undefined; error: string | undefined; reload: () => void; loading: boolean } {
-  const [data, setData] = useState<T>();
-  const [error, setError] = useState<string>();
-  const [loading, setLoading] = useState(true);
-  // Guards against a slow response for old deps landing after a newer one.
-  const generation = useRef(0);
+    const [data, setData] = useState<T>();
+    const [error, setError] = useState<string>();
+    const [loading, setLoading] = useState(true);
+    // Guards against a slow response for old deps landing after a newer one.
+    const generation = useRef(0);
 
-  const load = useCallback(async () => {
-    const mine = ++generation.current;
-    try {
-      const result = await fetcher();
-      if (mine === generation.current) {
-        setData(result);
-        setError(undefined);
-      }
-    } catch (err) {
-      if (mine === generation.current) {
-        setError(err instanceof Error ? err.message : String(err));
-      }
-    } finally {
-      if (mine === generation.current) {
-        setLoading(false);
-      }
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, deps);
+    const load = useCallback(async () => {
+        const mine = ++generation.current;
+        try {
+            const result = await fetcher();
+            if (mine === generation.current) {
+                setData(result);
+                setError(undefined);
+            }
+        } catch (err) {
+            if (mine === generation.current) {
+                setError(err instanceof Error ? err.message : String(err));
+            }
+        } finally {
+            if (mine === generation.current) {
+                setLoading(false);
+            }
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, deps);
 
-  useEffect(() => {
-    setLoading(true);
-    void load();
-    if (intervalMs <= 0) {
-      return;
-    }
-    const id = setInterval(() => {
-      if (document.visibilityState === 'visible') {
+    useEffect(() => {
+        setLoading(true);
         void load();
-      }
-    }, intervalMs);
-    const onVisible = () => {
-      if (document.visibilityState === 'visible') {
-        void load();
-      }
-    };
-    document.addEventListener('visibilitychange', onVisible);
-    return () => {
-      clearInterval(id);
-      document.removeEventListener('visibilitychange', onVisible);
-    };
-  }, [load, intervalMs]);
+        if (intervalMs <= 0) {
+            return;
+        }
+        const id = setInterval(() => {
+            if (document.visibilityState === "visible") {
+                void load();
+            }
+        }, intervalMs);
+        const onVisible = () => {
+            if (document.visibilityState === "visible") {
+                void load();
+            }
+        };
+        document.addEventListener("visibilitychange", onVisible);
+        return () => {
+            clearInterval(id);
+            document.removeEventListener("visibilitychange", onVisible);
+        };
+    }, [load, intervalMs]);
 
-  useResourceEvents(watchKind, () => void load());
+    useResourceEvents(watchKind, () => void load());
 
-  return { data, error, loading, reload: () => void load() };
+    return { data, error, loading, reload: () => void load() };
 }

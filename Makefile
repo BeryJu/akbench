@@ -138,6 +138,14 @@ ui-dev: ## Run the web UI's Vite dev server on :5173, proxying the API to BENCH_
 ui-test: ## Typecheck and unit-test the web UI.
 	cd web/ui && npm run typecheck && npm test
 
+.PHONY: ui-lint
+ui-lint: ## Lint (oxlint) and check formatting (oxfmt) of the web UI.
+	cd web/ui && npm run lint && npm run format:check
+
+.PHONY: ui-lint-fix
+ui-lint-fix: ## Apply oxlint fixes and oxfmt formatting to the web UI.
+	cd web/ui && npm run lint:fix && npm run format
+
 .PHONY: dev
 dev: ## Start the operator and web API against the current kubeconfig context (see also make ui-dev).
 	./hack/dev.sh

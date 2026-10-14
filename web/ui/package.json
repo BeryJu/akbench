@@ -1,35 +1,43 @@
 {
-  "name": "authentik-bench-ui",
-  "private": true,
-  "version": "0.1.0",
-  "type": "module",
-  "scripts": {
-    "dev": "vite",
-    "build": "tsc --noEmit && vite build",
-    "preview": "vite preview",
-    "test": "vitest run",
-    "typecheck": "tsc --noEmit"
-  },
-  "dependencies": {
-    "@goauthentik/fonts": "^2.0.0",
-    "@goauthentik/theme": "^2.0.1",
-    "@monaco-editor/react": "^4.7.0",
-    "chart.js": "^4.5.1",
-    "ghostty-web": "0.4.0",
-    "monaco-editor": "^0.57.0",
-    "oidc-client-ts": "^3.5.0",
-    "react": "^19.3.0",
-    "react-chartjs-2": "^5.3.1",
-    "react-dom": "^19.3.0",
-    "react-router": "^8.4.0",
-    "yaml": "^2.9.1"
-  },
-  "devDependencies": {
-    "@types/react": "^19.3.0",
-    "@types/react-dom": "^19.3.0",
-    "@vitejs/plugin-react": "^6.1.2",
-    "typescript": "7.0",
-    "vite": "^8.3.4",
-    "vitest": "^5.0.3"
-  }
+    "name": "authentik-bench-ui",
+    "version": "0.1.0",
+    "private": true,
+    "type": "module",
+    "scripts": {
+        "dev": "vite",
+        "build": "tsc --noEmit && vite build",
+        "preview": "vite preview",
+        "test": "vitest run",
+        "typecheck": "tsc --noEmit",
+        "lint": "oxlint",
+        "lint:fix": "oxlint --fix",
+        "format": "oxfmt",
+        "format:check": "oxfmt --check"
+    },
+    "dependencies": {
+        "@goauthentik/fonts": "^2.0.0",
+        "@goauthentik/theme": "^2.0.1",
+        "@monaco-editor/react": "^4.7.0",
+        "chart.js": "^4.5.1",
+        "ghostty-web": "0.4.0",
+        "monaco-editor": "^0.57.0",
+        "oidc-client-ts": "^3.5.0",
+        "react": "^19.3.0",
+        "react-chartjs-2": "^5.3.1",
+        "react-dom": "^19.3.0",
+        "react-router": "^8.4.0",
+        "yaml": "^2.9.1"
+    },
+    "devDependencies": {
+        "@goauthentik/oxfmt-config": "^9.1.0",
+        "@goauthentik/oxlint-config": "^1.0.1",
+        "@types/react": "^19.3.0",
+        "@types/react-dom": "^19.3.0",
+        "@vitejs/plugin-react": "^6.1.2",
+        "oxfmt": "^0.73.0",
+        "oxlint": "^1.88.0",
+        "typescript": "7.0",
+        "vite": "^8.3.4",
+        "vitest": "^5.0.3"
+    }
 }
