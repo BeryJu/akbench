@@ -1,7 +1,7 @@
 apiVersion: v2
 name: authentik-bench-operator
 description: CRDs and controller for authentik-bench, a Kubernetes-native benchmark harness for authentik
-home: https://github.com/BeryJu/akbench
+home: https://github.com/authentik-labs/akbench
 # A chart can be either an 'application' or a 'library' chart.
 #
 # Application charts are a collection of templates that can be packaged into versioned archives

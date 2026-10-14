@@ -13,7 +13,7 @@ controllerManager:
     env:
       benchNamespace: default
     image:
-      repository: ghcr.io/beryju/akbench
+      repository: ghcr.io/authentik-labs/akbench
       tag: latest
     resources:
       limits:

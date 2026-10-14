@@ -40,7 +40,7 @@ ARG TARGETARCH
 # tag the appliance installs - CI passes the same version it publishes those
 # under, so one appliance image always pins one akbench build.
 ARG VERSION=dev
-ARG IMAGE_REPO=ghcr.io/beryju/akbench
+ARG IMAGE_REPO=ghcr.io/authentik-labs/akbench
 
 WORKDIR /workspace
 COPY go.mod go.mod

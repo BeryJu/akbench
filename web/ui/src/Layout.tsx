@@ -45,7 +45,7 @@ const navSections: NavSection[] = [
   }
 ];
 
-const REPO_URL = 'https://github.com/BeryJu/akbench';
+const REPO_URL = 'https://github.com/authentik-labs/akbench';
 
 /** BuildBadge identifies the running build, so a screenshot or bug report
  * always says which one it came from. Links to the commit when known. */

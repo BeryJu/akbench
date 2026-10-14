@@ -189,7 +189,7 @@ func TestRenderStack(t *testing.T) {
 
 	containers, _, _ := unstructured.NestedSlice(docs["Deployment/apiserver"].Object, "spec", "template", "spec", "containers")
 	c := containers[0].(map[string]any)
-	if c["image"] != "ghcr.io/beryju/akbench-apiserver:1.2.3" {
+	if c["image"] != "ghcr.io/authentik-labs/akbench-apiserver:1.2.3" {
 		t.Errorf("apiserver image = %v", c["image"])
 	}
 	env := map[string]any{}

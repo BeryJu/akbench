@@ -14,7 +14,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 NAME="${AKBENCH_CONTAINER:-akbench-dev}"
 VERSION="${AKBENCH_VERSION:-0.0.0-main.$(git -C "$ROOT" rev-parse --short origin/main)}"
 APPLIANCE_IMG="akbench-appliance:dev"
-APISERVER_IMG="ghcr.io/beryju/akbench-apiserver:${VERSION}"
+APISERVER_IMG="ghcr.io/authentik-labs/akbench-apiserver:${VERSION}"
 # Kept (not a temp dir): it stays bind-mounted into the running container.
 IMAGES_DIR="$ROOT/bin/appliance-images"
 mkdir -p "$IMAGES_DIR"

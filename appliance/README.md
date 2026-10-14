@@ -23,7 +23,7 @@ added without changing how the appliance is run.
 docker run -d --name akbench --privileged --restart unless-stopped \
   -v akbench:/var/lib/rancher/k3s \
   -p 8443:8443 -p 6443:6443 \
-  ghcr.io/beryju/akbench-appliance:latest
+  ghcr.io/authentik-labs/akbench-appliance:latest
 ```
 
 Follow the first boot (2-5 minutes, mostly image pulls):
@@ -130,9 +130,9 @@ Every boot re-runs the whole bootstrap, and every step is idempotent. To upgrade
 replace the container and keep the volume:
 
 ```sh
-docker pull ghcr.io/beryju/akbench-appliance:<new>
+docker pull ghcr.io/authentik-labs/akbench-appliance:<new>
 docker rm -f akbench
-docker run -d --name akbench … ghcr.io/beryju/akbench-appliance:<new>   # same flags as before
+docker run -d --name akbench … ghcr.io/authentik-labs/akbench-appliance:<new>   # same flags as before
 ```
 
 This rolls out:

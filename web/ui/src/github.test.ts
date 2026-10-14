@@ -14,7 +14,7 @@ describe('parsePullRequestNumber', () => {
   });
 
   it("rejects another repository's pull request", () => {
-    expect(parsePullRequestNumber('https://github.com/BeryJu/akbench/pull/1')).toBeUndefined();
+    expect(parsePullRequestNumber('https://github.com/authentik-labs/akbench/pull/1')).toBeUndefined();
   });
 
   it('rejects anything else', () => {

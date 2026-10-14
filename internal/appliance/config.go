@@ -18,9 +18,9 @@ import (
 // matching AKBENCH_* environment variable.
 var (
 	Version        = "dev"
-	OperatorImage  = "ghcr.io/beryju/akbench"
-	APIServerImage = "ghcr.io/beryju/akbench-apiserver"
-	OperatorChart  = "oci://ghcr.io/beryju/akbench-charts/authentik-bench-operator"
+	OperatorImage  = "ghcr.io/authentik-labs/akbench"
+	APIServerImage = "ghcr.io/authentik-labs/akbench-apiserver"
+	OperatorChart  = "oci://ghcr.io/authentik-labs/akbench-charts/authentik-bench-operator"
 )
 
 // Config is the appliance's runtime configuration, read from the container's
