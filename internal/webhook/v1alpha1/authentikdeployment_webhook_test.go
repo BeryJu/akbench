@@ -1,54 +1,110 @@
 package v1alpha1
 
 import (
+	"context"
+	"errors"
+
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
 	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
-	// TODO (user): Add any additional imports if needed
 )
+
+// fakeTags answers TagExists from a fixed set of "image:tag" strings, or
+// fails every lookup with err.
+type fakeTags struct {
+	existing map[string]bool
+	err      error
+	lookups  int
+}
+
+func (f *fakeTags) TagExists(_ context.Context, image, tag string) (bool, error) {
+	f.lookups++
+	if f.err != nil {
+		return false, f.err
+	}
+	return f.existing[image+":"+tag], nil
+}
 
 var _ = Describe("AuthentikDeployment Webhook", func() {
 	var (
 		obj       *benchv1alpha1.AuthentikDeployment
-		oldObj    *benchv1alpha1.AuthentikDeployment
+		tags      *fakeTags
 		validator AuthentikDeploymentValidator
 	)
 
 	BeforeEach(func() {
-		obj = &benchv1alpha1.AuthentikDeployment{}
-		oldObj = &benchv1alpha1.AuthentikDeployment{}
-		validator = AuthentikDeploymentValidator{}
-		Expect(validator).NotTo(BeNil(), "Expected validator to be initialized")
-		Expect(oldObj).NotTo(BeNil(), "Expected oldObj to be initialized")
-		Expect(obj).NotTo(BeNil(), "Expected obj to be initialized")
+		obj = &benchv1alpha1.AuthentikDeployment{
+			Name: "ak", Namespace: "default",
+			Spec: benchv1alpha1.AuthentikDeploymentSpec{
+				Authentik: benchv1alpha1.AuthentikSpec{Image: "ghcr.io/goauthentik/server", Tag: "2026.8.1"},
+			},
+		}
+		tags = &fakeTags{existing: map[string]bool{
+			"ghcr.io/goauthentik/server:2026.8.1":   true,
+			"ghcr.io/goauthentik/dev-server:gh-abc": true,
+		}}
+		validator = AuthentikDeploymentValidator{Images: tags}
 	})
 
-	AfterEach(func() {
-		// TODO (user): Add any teardown logic common to all tests
-	})
+	Context("image tag", func() {
+		It("admits a tag that exists", func() {
+			Expect(validator.ValidateCreate(ctx, obj)).To(BeEmpty())
+		})
 
-	Context("When creating or updating AuthentikDeployment under Validating Webhook", func() {
-		// TODO (user): Add logic for validating webhooks
-		// Example:
-		// It("Should deny creation if a required field is missing", func() {
-		//     By("simulating an invalid creation scenario")
-		//     obj.SomeRequiredField = ""
-		//     Expect(validator.ValidateCreate(ctx, obj)).Error().To(HaveOccurred())
-		// })
-		//
-		// It("Should admit creation if all required fields are present", func() {
-		//     By("simulating an invalid creation scenario")
-		//     obj.SomeRequiredField = "valid_value"
-		//     Expect(validator.ValidateCreate(ctx, obj)).To(BeNil())
-		// })
-		//
-		// It("Should validate updates correctly", func() {
-		//     By("simulating a valid update scenario")
-		//     oldObj.SomeRequiredField = "updated_value"
-		//     obj.SomeRequiredField = "updated_value"
-		//     Expect(validator.ValidateUpdate(ctx, oldObj, obj)).To(BeNil())
-		// })
-	})
+		It("rejects a tag that doesn't exist", func() {
+			obj.Spec.Authentik.Tag = "2026.8.99"
+			_, err := validator.ValidateCreate(ctx, obj)
+			Expect(err).To(MatchError(ContainSubstring("spec.authentik.tag")))
+			Expect(err).To(MatchError(ContainSubstring("ghcr.io/goauthentik/server:2026.8.99")))
+		})
 
+		It("rejects a malformed tag without asking the registry", func() {
+			obj.Spec.Authentik.Tag = "../latest"
+			_, err := validator.ValidateCreate(ctx, obj)
+			Expect(err).To(MatchError(ContainSubstring("must be a valid image tag")))
+			Expect(tags.lookups).To(BeZero())
+		})
+
+		It("rejects an image that carries its own tag", func() {
+			obj.Spec.Authentik.Image = "ghcr.io/goauthentik/server:2026.8.1"
+			_, err := validator.ValidateCreate(ctx, obj)
+			Expect(err).To(MatchError(ContainSubstring("spec.authentik.image")))
+		})
+
+		It("leaves an unset tag (the chart's default) alone", func() {
+			obj.Spec.Authentik.Tag = ""
+			Expect(validator.ValidateCreate(ctx, obj)).To(BeEmpty())
+			Expect(tags.lookups).To(BeZero())
+		})
+
+		It("only warns when the registry can't be reached", func() {
+			tags.err = errors.New("connection refused")
+			warnings, err := validator.ValidateCreate(ctx, obj)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(warnings).To(ConsistOf(ContainSubstring("could not verify")))
+		})
+
+		It("checks the default image when none is set", func() {
+			obj.Spec.Authentik.Image = ""
+			Expect(validator.ValidateCreate(ctx, obj)).To(BeEmpty())
+			Expect(tags.lookups).To(Equal(1))
+		})
+
+		It("checks a changed tag on update", func() {
+			oldObj := obj.DeepCopy()
+			obj.Spec.Authentik.Image = "ghcr.io/goauthentik/dev-server"
+			obj.Spec.Authentik.Tag = "gh-missing"
+			_, err := validator.ValidateUpdate(ctx, oldObj, obj)
+			Expect(err).To(HaveOccurred())
+		})
+
+		It("doesn't re-check an unchanged tag on update", func() {
+			obj.Spec.Authentik.Tag = "since-deleted"
+			oldObj := obj.DeepCopy()
+			obj.Spec.Server.Replicas = 3
+			Expect(validator.ValidateUpdate(ctx, oldObj, obj)).To(BeEmpty())
+			Expect(tags.lookups).To(BeZero())
+		})
+	})
 })
