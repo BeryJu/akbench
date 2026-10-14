@@ -21,8 +21,13 @@ let ghosttyReady: Promise<void> | undefined;
 // authentik's own monospace face (@goauthentik/fonts). ghostty-web draws to a
 // canvas and measures the cell size once at open(), so the face must be
 // loaded before then or the grid is measured against the fallback font.
-const FONT_FAMILY = "RedHatMono, ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace";
 const FONT_SIZE = 13;
+
+// Read off the document (styles.css) so the canvas matches the CSS around it.
+// ghostty-web only parses hex colors, hence --terminal-bg being a literal.
+function cssToken(name: string, fallback: string): string {
+    return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
+}
 
 function loadTerminal(): Promise<void> {
     ghosttyReady ??= Promise.all([
@@ -83,10 +88,10 @@ export function TerminalSession({
                 }
                 const term = new Terminal({
                     cursorBlink: true,
-                    fontFamily: FONT_FAMILY,
+                    fontFamily: cssToken("--ak-global--font-family--code", "monospace"),
                     fontSize: FONT_SIZE,
                     scrollback: 10000,
-                    theme,
+                    theme: { ...theme, background: cssToken("--terminal-bg", theme.background) },
                 });
                 const fit = new FitAddon();
                 term.loadAddon(fit);

@@ -1,14 +1,18 @@
 /* Plain CSS, no UI framework: the whole point of this app is a small,
- * fast bundle. Colors/type are authentik's own design system
- * (@goauthentik/theme, @goauthentik/fonts) rather than a bespoke palette -
- * our own --bg/--panel/etc. names below are kept (every other rule in this
- * file already uses them) but now just alias the real --ak-global--* tokens,
- * so this app actually looks like part of authentik rather than a
- * lookalike. Dark mode: @goauthentik/theme keys its dark values off
- * html[data-theme="dark"], not a prefers-color-scheme media query - main.tsx
- * sets that attribute from the OS preference once at startup, preserving
- * the "follows the OS" behavior this app already had. */
-@import "@goauthentik/theme/index.css";
+ * fast bundle. Colors, type, radii and shadows are authentik's own design
+ * system (@goauthentik/theme, @goauthentik/fonts) rather than a bespoke
+ * palette - our own --bg/--panel/etc. names below are kept (every other rule
+ * in this file already uses them) but just alias the real --ak-global--*
+ * tokens, so this app looks like part of authentik rather than a lookalike.
+ * Only the token groups this file uses are imported: the package's
+ * index.css also carries the raw palette and a PatternFly (--pf-*) bridge,
+ * neither of which anything here reads. Dark mode: @goauthentik/theme keys
+ * its dark values off html[data-theme="dark"], not a prefers-color-scheme
+ * media query - main.tsx sets that attribute from the OS preference. */
+@import "@goauthentik/theme/color.css";
+@import "@goauthentik/theme/typography.css";
+@import "@goauthentik/theme/shape.css";
+@import "@goauthentik/theme/shadow.css";
 @import "@goauthentik/fonts/faces.css";
 
 :root {
@@ -36,8 +40,12 @@
     --info-text: var(--link);
     --code-bg: var(--ak-global--color--surface--raised);
     --radius: 6px;
+    --radius-sm: var(--ak-global--radius--sm);
+    --radius-pill: var(--ak-global--radius--pill);
+    --shadow-sm: var(--ak-global--box-shadow--sm);
+    --shadow-lg: var(--ak-global--box-shadow--lg);
+    --terminal-bg: #0f1115;
     font-family: var(--ak-global--font-family--body);
-    font-size: 14px;
     line-height: 1.45;
     color: var(--text);
     background: var(--bg);
@@ -45,8 +53,11 @@
 * {
     box-sizing: border-box;
 }
+/* The base size lives on body, not :root: the theme's tokens are in rem and
+ * assume authentik's 16px root. */
 body {
     margin: 0;
+    font-size: 14px;
 }
 a {
     color: var(--link);
@@ -58,13 +69,13 @@ a:hover {
 code,
 pre,
 .mono {
-    font-family: var(--ak-global--font-family--monospace);
+    font-family: var(--ak-global--font-family--code);
     font-size: 12.5px;
 }
 code {
     background: var(--code-bg);
     padding: 1px 4px;
-    border-radius: 3px;
+    border-radius: var(--radius-sm);
 }
 h1,
 h2 {
@@ -152,9 +163,9 @@ h3 {
     align-self: flex-start;
     padding: 1px 8px;
     border: 1px solid var(--border);
-    border-radius: 999px;
+    border-radius: var(--radius-pill);
     color: var(--muted);
-    font: 11px var(--ak-global--font-family--monospace);
+    font: 11px var(--ak-global--font-family--code);
     white-space: nowrap;
     max-width: 100%;
     overflow: hidden;
@@ -489,7 +500,7 @@ legend {
     background: var(--bg);
 }
 .section-nav button {
-    border-radius: 999px;
+    border-radius: var(--radius-pill);
     padding: 3px 12px;
     font-size: 13px;
     color: var(--muted);
@@ -585,7 +596,7 @@ legend {
     height: 20px;
     flex: none;
     border-radius: 4px;
-    font: 600 11px var(--ak-global--font-family--monospace);
+    font: 600 11px var(--ak-global--font-family--code);
 }
 .delta.better {
     color: var(--ok);
@@ -634,7 +645,7 @@ legend {
 .seg button.on {
     background: var(--panel);
     color: var(--text);
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
+    box-shadow: var(--shadow-sm);
 }
 .chips {
     display: flex;
@@ -649,9 +660,9 @@ legend {
     gap: 6px;
     padding: 3px 10px;
     border: 1px solid var(--border);
-    border-radius: 999px;
+    border-radius: var(--radius-pill);
     color: var(--text);
-    font-family: var(--ak-global--font-family--monospace);
+    font-family: var(--ak-global--font-family--code);
     font-size: 12.5px;
 }
 .chip.current {
@@ -724,7 +735,7 @@ legend {
     text-overflow: ellipsis;
     white-space: nowrap;
     color: var(--muted);
-    font-family: var(--ak-global--font-family--monospace);
+    font-family: var(--ak-global--font-family--code);
     font-size: 12px;
 }
 .checklist > .muted {
@@ -766,7 +777,7 @@ legend {
     border-radius: var(--radius);
     border: 1px solid var(--border);
     background: var(--panel);
-    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.18);
+    box-shadow: var(--shadow-lg);
     cursor: pointer;
     font-size: 13px;
 }
@@ -782,7 +793,7 @@ legend {
 .badge {
     display: inline-block;
     padding: 1px 8px;
-    border-radius: 999px;
+    border-radius: var(--radius-pill);
     font-size: 12px;
     font-weight: 600;
     border: 1px solid currentColor;
@@ -818,7 +829,7 @@ legend {
     border: 1px solid var(--border);
     border-radius: var(--radius);
     padding: 10px 12px;
-    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.18);
+    box-shadow: var(--shadow-lg);
 }
 /* One shared grid for every row, so the type column is as wide as its
  * longest name and messages line up instead of wrapping under the badge. */
@@ -868,7 +879,7 @@ legend {
 }
 .log time {
     color: var(--muted);
-    font-family: var(--ak-global--font-family--monospace);
+    font-family: var(--ak-global--font-family--code);
     font-size: 12px;
     white-space: nowrap;
 }
@@ -936,7 +947,7 @@ details > summary {
 .terminal-host {
     flex: 1;
     min-height: 0;
-    background: #0f1115;
+    background: var(--terminal-bg);
     padding: 6px 0 0 8px;
 }
 .terminal-host canvas {
@@ -992,5 +1003,5 @@ details > summary {
     display: inline-block;
     width: 12px;
     height: 12px;
-    border-radius: 3px;
+    border-radius: var(--radius-sm);
 }
