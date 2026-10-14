@@ -11,11 +11,11 @@ import (
 // fakeVerifier accepts exactly one token.
 type fakeVerifier struct{ valid string }
 
-func (f fakeVerifier) Verify(_ context.Context, raw string) error {
+func (f fakeVerifier) Verify(_ context.Context, raw string) (string, error) {
 	if raw != f.valid {
-		return errors.New("bad token")
+		return "", errors.New("bad token")
 	}
-	return nil
+	return "alice", nil
 }
 
 func requestWithBearer(t *testing.T, s *Server, target, token string) *httptest.ResponseRecorder {

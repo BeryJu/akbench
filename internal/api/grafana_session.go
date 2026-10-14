@@ -98,7 +98,11 @@ func (s *Server) grafanaAuthorized(r *http.Request) bool {
 		return true
 	}
 	presented, ok := bearerToken(r)
-	return ok && s.authenticate(r, presented)
+	if !ok {
+		return false
+	}
+	_, ok = s.authenticate(r, presented)
+	return ok
 }
 
 // stripProxyCredentials removes this server's own credentials from a request

@@ -131,7 +131,7 @@ const probeStatusField = "status"
 // events.go). /healthz, /readyz and the UI's static assets are public.
 func (s *Server) Router() http.Handler {
 	r := chi.NewRouter()
-	r.Use(middleware.RequestID, middleware.Recoverer)
+	r.Use(middleware.RequestID, middleware.Recoverer, securityHeaders)
 
 	probeOK := func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, r, http.StatusOK, map[string]string{probeStatusField: "ok"})
@@ -214,7 +214,7 @@ func (s *Server) Router() http.Handler {
 	})
 
 	if s.cfg.UI != nil {
-		spa := spaHandler(s.cfg.UI)
+		spa := spaHandler(s.cfg.UI, spaCSP(s.cfg.OIDCConfig.Issuer))
 		r.Get("/*", spa.ServeHTTP)
 		r.Head("/*", spa.ServeHTTP)
 	}

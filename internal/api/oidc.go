@@ -35,9 +35,10 @@ type OIDCConfig struct {
 	RequiredGroup string
 }
 
-// TokenVerifier checks a presented bearer token.
+// TokenVerifier checks a presented bearer token and returns who it belongs
+// to, for the audit log.
 type TokenVerifier interface {
-	Verify(ctx context.Context, rawToken string) error
+	Verify(ctx context.Context, rawToken string) (string, error)
 }
 
 // authConfigResponse is what GET /api/v1/auth/config returns, so the SPA can
@@ -109,27 +110,33 @@ func (v *oidcVerifier) get(ctx context.Context) (*oidc.IDTokenVerifier, error) {
 
 // Verify checks signature, issuer, audience and expiry. go-oidc's
 // IDTokenVerifier applies to any JWT with those claims, which includes the
-// access tokens authentik issues (aud is the client ID there too).
-func (v *oidcVerifier) Verify(ctx context.Context, rawToken string) error {
+// access tokens authentik issues (aud is the client ID there too). It
+// returns the token's preferred_username, falling back to email and then
+// sub.
+func (v *oidcVerifier) Verify(ctx context.Context, rawToken string) (string, error) {
 	verifier, err := v.get(ctx)
 	if err != nil {
-		return err
+		return "", err
 	}
 	token, err := verifier.Verify(ctx, rawToken)
 	if err != nil {
-		return err
-	}
-	if v.cfg.RequiredGroup == "" {
-		return nil
+		return "", err
 	}
 	var claims struct {
-		Groups []string `json:"groups"`
+		PreferredUsername string   `json:"preferred_username"`
+		Email             string   `json:"email"`
+		Groups            []string `json:"groups"`
 	}
 	if err := token.Claims(&claims); err != nil {
-		return fmt.Errorf("decode claims: %w", err)
+		return "", fmt.Errorf("decode claims: %w", err)
 	}
-	if !slices.Contains(claims.Groups, v.cfg.RequiredGroup) {
-		return fmt.Errorf("token lacks required group %q", v.cfg.RequiredGroup)
+	if v.cfg.RequiredGroup != "" && !slices.Contains(claims.Groups, v.cfg.RequiredGroup) {
+		return "", fmt.Errorf("token lacks required group %q", v.cfg.RequiredGroup)
 	}
-	return nil
+	for _, who := range []string{claims.PreferredUsername, claims.Email} {
+		if who != "" {
+			return who, nil
+		}
+	}
+	return token.Subject, nil
 }

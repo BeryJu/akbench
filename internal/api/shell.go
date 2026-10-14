@@ -100,6 +100,8 @@ type shellContext struct {
 
 type shellTicket struct {
 	context string
+	// user is who minted the ticket (principal), for the session's log lines.
+	user    string
 	expires time.Time
 }
 
@@ -115,7 +117,7 @@ func newShellState() *shellState {
 	return &shellState{tickets: map[string]shellTicket{}}
 }
 
-func (st *shellState) mint(contextName string, now time.Time) (string, error) {
+func (st *shellState) mint(contextName, user string, now time.Time) (string, error) {
 	raw := make([]byte, 32)
 	if _, err := rand.Read(raw); err != nil {
 		return "", err
@@ -128,21 +130,21 @@ func (st *shellState) mint(contextName string, now time.Time) (string, error) {
 			delete(st.tickets, t)
 		}
 	}
-	st.tickets[ticket] = shellTicket{context: contextName, expires: now.Add(shellTicketTTL)}
+	st.tickets[ticket] = shellTicket{context: contextName, user: user, expires: now.Add(shellTicketTTL)}
 	return ticket, nil
 }
 
 // redeem consumes a ticket. It is deleted whether or not it was still
 // valid, so a ticket can never be used twice.
-func (st *shellState) redeem(ticket string, now time.Time) (string, bool) {
+func (st *shellState) redeem(ticket string, now time.Time) (shellTicket, bool) {
 	st.mu.Lock()
 	defer st.mu.Unlock()
 	v, ok := st.tickets[ticket]
 	delete(st.tickets, ticket)
 	if !ok || now.After(v.expires) {
-		return "", false
+		return shellTicket{}, false
 	}
-	return v.context, true
+	return v, true
 }
 
 func (st *shellState) acquire() bool {
@@ -235,7 +237,7 @@ func (s *Server) createShellSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := time.Now()
-	ticket, err := s.shell.mint(body.Context, now)
+	ticket, err := s.shell.mint(body.Context, principal(r.Context()), now)
 	if err != nil {
 		writeError(w, r, http.StatusInternalServerError, err.Error())
 		return
@@ -263,11 +265,12 @@ func (s *Server) connectShell(w http.ResponseWriter, r *http.Request) {
 	}
 	log := logf.FromContext(r.Context()).WithName("shell")
 
-	contextName, ok := s.shell.redeem(r.URL.Query().Get("ticket"), time.Now())
+	redeemed, ok := s.shell.redeem(r.URL.Query().Get("ticket"), time.Now())
 	if !ok {
 		writeError(w, r, http.StatusUnauthorized, "missing, expired or already used shell ticket")
 		return
 	}
+	contextName := redeemed.context
 	contexts, raw, err := s.loadShellContexts(r.Context())
 	if err != nil {
 		writeError(w, r, http.StatusServiceUnavailable, err.Error())
@@ -309,7 +312,7 @@ func (s *Server) connectShell(w http.ResponseWriter, r *http.Request) {
 		_ = conn.Close(websocket.StatusInternalError, "could not start shell")
 		return
 	}
-	log.Info("Started shell session", "context", contextName, "pid", cmd.Process.Pid)
+	log.Info("Started shell session", "user", redeemed.user, "context", contextName, "pid", cmd.Process.Pid)
 
 	// Not the request context: that one is cancelled the moment the
 	// handler returns, and the teardown below has to outlive it.
@@ -338,7 +341,7 @@ func (s *Server) connectShell(w http.ResponseWriter, r *http.Request) {
 	_ = ptmx.Close()
 	_ = conn.Close(websocket.StatusNormalClosure, "shell exited")
 	wg.Wait()
-	log.Info("Ended shell session", "context", contextName, "pid", cmd.Process.Pid)
+	log.Info("Ended shell session", "user", redeemed.user, "context", contextName, "pid", cmd.Process.Pid)
 }
 
 func pumpPTYToSocket(ctx context.Context, ptmx io.Reader, conn *websocket.Conn) {

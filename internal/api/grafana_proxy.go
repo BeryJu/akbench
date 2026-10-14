@@ -70,7 +70,9 @@ func (s *Server) grafanaProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	w.Header().Set("Content-Security-Policy", grafanaCSP)
 	proxy := &httputil.ReverseProxy{
+		ModifyResponse: dropUpstreamSecurityHeaders,
 		// Rewrite, not the deprecated Director: ProxyRequest.SetURL also
 		// joins target's own path onto the outbound request's, which isn't
 		// what's wanted here (see doc comment above) - Out's fields are set

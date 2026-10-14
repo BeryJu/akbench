@@ -114,18 +114,18 @@ func TestShellTicketIsSingleUseAndExpires(t *testing.T) {
 	st := newShellState()
 	now := time.Now()
 
-	ticket, err := st.mint("management", now)
+	ticket, err := st.mint("management", "alice", now)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ctx, ok := st.redeem(ticket, now); !ok || ctx != "management" {
-		t.Fatalf("first redeem = %q, %v; want management, true", ctx, ok)
+	if got, ok := st.redeem(ticket, now); !ok || got.context != "management" || got.user != "alice" {
+		t.Fatalf("first redeem = %+v, %v; want management/alice, true", got, ok)
 	}
 	if _, ok := st.redeem(ticket, now); ok {
 		t.Fatal("ticket redeemed twice")
 	}
 
-	expired, _ := st.mint("management", now)
+	expired, _ := st.mint("management", "alice", now)
 	if _, ok := st.redeem(expired, now.Add(shellTicketTTL+time.Second)); ok {
 		t.Fatal("expired ticket accepted")
 	}

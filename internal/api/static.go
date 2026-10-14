@@ -15,9 +15,13 @@ import (
 //
 // Unauthenticated: the bundle holds no secrets, and the SPA has to load
 // before it can ask anyone to log in.
-func spaHandler(fsys fs.FS) http.Handler {
+//
+// Every response carries csp (spaCSP), not just index.html: Monaco's worker
+// scripts are governed by their own response's policy.
+func spaHandler(fsys fs.FS, csp string) http.Handler {
 	files := http.FileServerFS(fsys)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Security-Policy", csp)
 		name := strings.TrimPrefix(path.Clean(r.URL.Path), "/")
 		if name != "" {
 			if info, err := fs.Stat(fsys, name); err == nil && !info.IsDir() {
