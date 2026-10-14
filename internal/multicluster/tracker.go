@@ -67,3 +67,10 @@ func (t *Tracker) GetClient(ctx context.Context, cluster client.ObjectKey) (clie
 func (t *Tracker) GetRESTConfig(ctx context.Context, cluster client.ObjectKey) (*rest.Config, error) {
 	return t.cache.GetRESTConfig(ctx, cluster)
 }
+
+// GetUncachedClient returns a live, uncached client for the named Cluster -
+// for one-off reads (an admission webhook's capacity check) that shouldn't
+// start a cluster-wide informer for every type they touch.
+func (t *Tracker) GetUncachedClient(ctx context.Context, cluster client.ObjectKey) (client.Client, error) {
+	return t.cache.GetUncachedClient(ctx, cluster)
+}

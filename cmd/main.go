@@ -236,11 +236,11 @@ func main() {
 		os.Exit(1)
 	}
 	if os.Getenv("ENABLE_WEBHOOKS") != "false" {
-		if err := webhookv1alpha1.SetupAuthentikDeploymentWebhookWithManager(mgr); err != nil {
+		if err := webhookv1alpha1.SetupAuthentikDeploymentWebhookWithManager(mgr, tracker); err != nil {
 			setupLog.Error(err, "Failed to create webhook", "webhook", "AuthentikDeployment")
 			os.Exit(1)
 		}
-		if err := webhookv1alpha1.SetupTestCaseWebhookWithManager(mgr); err != nil {
+		if err := webhookv1alpha1.SetupTestCaseWebhookWithManager(mgr, tracker); err != nil {
 			setupLog.Error(err, "Failed to create webhook", "webhook", "TestCase")
 			os.Exit(1)
 		}

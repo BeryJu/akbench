@@ -93,10 +93,10 @@ var _ = BeforeSuite(func() {
 	})
 	Expect(err).NotTo(HaveOccurred())
 
-	err = SetupAuthentikDeploymentWebhookWithManager(mgr)
+	err = SetupAuthentikDeploymentWebhookWithManager(mgr, nil)
 	Expect(err).NotTo(HaveOccurred())
 
-	err = SetupTestCaseWebhookWithManager(mgr)
+	err = SetupTestCaseWebhookWithManager(mgr, nil)
 	Expect(err).NotTo(HaveOccurred())
 
 	// +kubebuilder:scaffold:webhook

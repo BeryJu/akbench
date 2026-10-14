@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"time"
 
+	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/validation/field"
@@ -14,6 +15,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
 	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
+	"github.com/goauthentik/authentik-bench/internal/multicluster"
 	"github.com/goauthentik/authentik-bench/internal/registry"
 )
 
@@ -31,10 +33,12 @@ type TagChecker interface {
 }
 
 // SetupAuthentikDeploymentWebhookWithManager registers the webhook for AuthentikDeployment in the manager.
-func SetupAuthentikDeploymentWebhookWithManager(mgr ctrl.Manager) error {
+// tracker may be nil, which skips the capacity check.
+func SetupAuthentikDeploymentWebhookWithManager(mgr ctrl.Manager, tracker *multicluster.Tracker) error {
 	return ctrl.NewWebhookManagedBy(mgr, &benchv1alpha1.AuthentikDeployment{}).
 		WithValidator(&AuthentikDeploymentValidator{
-			Images: &registry.Checker{HTTP: &http.Client{Timeout: registryTimeout}},
+			Images:   &registry.Checker{HTTP: &http.Client{Timeout: registryTimeout}},
+			Capacity: newCapacityChecker(mgr, tracker),
 		}).
 		Complete()
 }
@@ -42,13 +46,16 @@ func SetupAuthentikDeploymentWebhookWithManager(mgr ctrl.Manager) error {
 // +kubebuilder:webhook:path=/validate-bench-goauthentik-io-v1alpha1-authentikdeployment,mutating=false,failurePolicy=fail,sideEffects=None,groups=bench.goauthentik.io,resources=authentikdeployments,verbs=create;update,versions=v1alpha1,name=vauthentikdeployment-v1alpha1.kb.io,admissionReviewVersions=v1
 
 // AuthentikDeploymentValidator rejects an AuthentikDeployment whose
-// authentik image tag is malformed or doesn't exist in its registry, so a
-// typo'd or not-yet-published tag fails at apply time instead of as an
-// ImagePullBackOff on the workload cluster.
+// authentik image tag is malformed or doesn't exist in its registry, or
+// whose pods can't fit on its workload cluster - so a typo'd tag or an
+// oversized deployment fails at apply time instead of as an
+// ImagePullBackOff or a Pending pod on the workload cluster.
 //
 // +kubebuilder:object:generate=false
 type AuthentikDeploymentValidator struct {
 	Images TagChecker
+	// Capacity is optional: nil skips the capacity check.
+	Capacity *CapacityChecker
 }
 
 // ValidateCreate implements admission.Validator so a webhook will be registered for the type AuthentikDeployment.
@@ -72,6 +79,9 @@ func (v *AuthentikDeploymentValidator) ValidateDelete(_ context.Context, _ *benc
 
 func (v *AuthentikDeploymentValidator) validate(ctx context.Context, oldObj, obj *benchv1alpha1.AuthentikDeployment) (admission.Warnings, error) {
 	warnings, errs := v.validateImage(ctx, oldObj, obj)
+	capWarnings, capErrs := v.validateCapacity(ctx, oldObj, obj)
+	warnings = append(warnings, capWarnings...)
+	errs = append(errs, capErrs...)
 	if len(errs) == 0 {
 		return warnings, nil
 	}
@@ -119,4 +129,31 @@ func (v *AuthentikDeploymentValidator) validateImage(ctx context.Context, oldObj
 		return nil, field.ErrorList{field.NotFound(tagPath, fmt.Sprintf("%s:%s", image, tag))}
 	}
 	return nil, nil
+}
+
+// validateCapacity checks that the deployment's pods fit on its cluster, on
+// create and whenever an update changes what or where it schedules. Its own
+// running pods don't count against it, since an update replaces them.
+func (v *AuthentikDeploymentValidator) validateCapacity(ctx context.Context, oldObj, obj *benchv1alpha1.AuthentikDeployment) (admission.Warnings, field.ErrorList) {
+	if v.Capacity == nil || obj.Spec.ClusterRef.Name == "" {
+		return nil, nil
+	}
+	if oldObj != nil && equality.Semantic.DeepEqual(schedulingSpec(oldObj), schedulingSpec(obj)) {
+		return nil, nil
+	}
+	warning, err := v.Capacity.fit(ctx, obj.Namespace, obj.Spec.ClusterRef.Name,
+		deploymentPlacement(obj), ownDeploymentPod(obj.Name), deploymentPods(obj))
+	if err != nil {
+		return nil, field.ErrorList{field.Forbidden(field.NewPath("spec"), err.Error())}
+	}
+	if warning != "" {
+		return admission.Warnings{warning}, nil
+	}
+	return nil, nil
+}
+
+// schedulingSpec is the part of an AuthentikDeployment's spec that decides
+// what it schedules, and where.
+func schedulingSpec(d *benchv1alpha1.AuthentikDeployment) []any {
+	return []any{d.Spec.ClusterRef, d.Spec.Server, d.Spec.Worker, d.Spec.Placement, d.Spec.Postgres}
 }
