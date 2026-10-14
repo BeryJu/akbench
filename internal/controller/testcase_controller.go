@@ -61,6 +61,7 @@ type TestCaseReconciler struct {
 // +kubebuilder:rbac:groups=bench.goauthentik.io,resources=testcases/finalizers,verbs=update
 // +kubebuilder:rbac:groups=bench.goauthentik.io,resources=authentikdeployments,verbs=get;list;watch
 // +kubebuilder:rbac:groups=bench.goauthentik.io,resources=testcasetemplates,verbs=get;list;watch
+// +kubebuilder:rbac:groups=bench.goauthentik.io,resources=workloadclusters,verbs=get;list;watch
 // +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=core,resources=configmaps,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=core,resources=services,verbs=get;list;watch;create;update
@@ -139,11 +140,21 @@ func (r *TestCaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	// local cluster), so stale Burn Deployments are cleaned up once per
 	// cluster after every target has been reconciled.
 	runnerClients := map[string]client.Client{}
+	previousRunners := map[string]string{}
+	for _, st := range tc.Status.Deployments {
+		previousRunners[st.Name] = st.RunnerCluster
+	}
 
 	for _, ref := range refs {
 		result, err := r.reconcileTarget(ctx, &tc, tmpl, ref)
 		if err != nil {
 			return ctrl.Result{}, err
+		}
+		if result.runnerClient == nil {
+			// The target couldn't be resolved this pass (its deployment is
+			// gone or not Ready, or its cluster is unreachable) - remember
+			// where its k6 workload last ran, so a later delete still finds it.
+			result.status.RunnerCluster = previousRunners[ref.Name]
 		}
 		statuses = append(statuses, result.status)
 		if result.runnerClient != nil {
@@ -163,16 +174,23 @@ func (r *TestCaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	}
 
 	// Cleans up a target that's been removed from DeploymentRefs (or every
-	// target, switching Burn->Quick) on each runner cluster visited above.
-	// This must run after the loop, with the complete keep set: running it
-	// per target would delete every later target's Burn Deployment on a
-	// shared runner cluster, only for the next iteration to recreate it.
-	// Known limitation: if a target is removed entirely and no remaining
-	// target shares its runner cluster, that cluster is never visited, so its
-	// now-orphaned Burn Deployment is never cleaned up - the same class of
-	// gap as this project's other "day-2 removal" boundaries (e.g.
-	// WorkloadCluster worker pool resize), not something silently assumed
-	// away.
+	// target, switching Burn->Quick) on each runner cluster visited above,
+	// plus every runner cluster a removed target last ran on (from the
+	// previous status). This must run after the loop, with the complete keep
+	// set: running it per target would delete every later target's Burn
+	// Deployment on a shared runner cluster, only for the next iteration to
+	// recreate it.
+	for _, cluster := range previousRunners {
+		if _, ok := runnerClients[cluster]; ok {
+			continue
+		}
+		rc, _, err := resolveRunnerClient(ctx, r.Tracker, r.Client, tc.Namespace, nil, corev1.LocalObjectReference{Name: cluster})
+		if err != nil {
+			log.Info("Skipped stale burn cleanup on unreachable runner cluster", "cluster", cluster, "error", err.Error())
+			continue
+		}
+		runnerClients[cluster] = rc
+	}
 	for cluster, rc := range runnerClients {
 		if err := r.cleanupStaleBurnDeployments(ctx, rc, &tc, keepBurnNames); err != nil {
 			return ctrl.Result{}, fmt.Errorf("clean up stale burn deployments on runner cluster %q: %w", cluster, err)
@@ -256,6 +274,7 @@ func (r *TestCaseReconciler) reconcileTarget(ctx context.Context, tc *benchv1alp
 	}
 	result.runnerCluster = runnerClusterName(tc, topo)
 	result.runnerClient = rc
+	result.status.RunnerCluster = result.runnerCluster
 	if remote {
 		if err := ensureNamespace(ctx, rc, tc.Namespace); err != nil {
 			return targetResult{}, fmt.Errorf("ensure runner namespace for %q: %w", ref.Name, err)
@@ -326,31 +345,93 @@ func (r *TestCaseReconciler) reconcileTarget(ctx context.Context, tc *benchv1alp
 }
 
 func (r *TestCaseReconciler) reconcileDelete(ctx context.Context, tc *benchv1alpha1.TestCase) (ctrl.Result, error) {
+	log := logf.FromContext(ctx)
 	if !controllerutil.ContainsFinalizer(tc, testCaseFinalizer) {
 		return ctrl.Result{}, nil
 	}
 
-	// Resolve every target's runner cluster the same way Reconcile does, so
-	// a Burn Deployment on a remote cluster gets cleaned up there too. If a
-	// deployment or its cluster is already gone, skip remote cleanup for
-	// that one rather than block finalizer removal forever on a cluster
-	// that may never come back.
-	for _, ref := range tc.Deployments() {
-		var topo benchv1alpha1.AuthentikDeployment
-		if err := r.Get(ctx, types.NamespacedName{Name: ref.Name, Namespace: tc.Namespace}, &topo); err != nil {
+	clusters, err := r.deleteCandidateClusters(ctx, tc)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	pending := false
+	for _, cluster := range clusters {
+		rc, _, err := resolveRunnerClient(ctx, r.Tracker, r.Client, tc.Namespace, nil, corev1.LocalObjectReference{Name: cluster.name})
+		if err == nil {
+			err = r.cleanupStaleBurnDeployments(ctx, rc, tc, nil)
+		}
+		if err == nil {
 			continue
 		}
-		rc, _, err := resolveRunnerClient(ctx, r.Tracker, r.Client, tc.Namespace, tc.Spec.RunnerClusterRef, topo.Spec.ClusterRef)
-		if err != nil {
-			logf.FromContext(ctx).Info("runner cluster unreachable during delete, skipping remote cleanup", "deployment", ref.Name, "error", err.Error())
+		// A cluster this TestCase is known to have run k6 on gets a grace
+		// period to come back, so a brief outage doesn't leave a load
+		// generator running forever. Any other cluster is only swept on a
+		// best-effort basis.
+		if cluster.recorded && time.Since(tc.DeletionTimestamp.Time) < deleteCleanupGracePeriod {
+			log.Info("Failed to clean up burn Deployments, retrying", "cluster", cluster.name, "error", err.Error())
+			pending = true
 			continue
 		}
-		if err := r.cleanupStaleBurnDeployments(ctx, rc, tc, nil); err != nil {
-			return ctrl.Result{}, err
+		log.Info("Skipped burn Deployment cleanup on unreachable cluster", "cluster", cluster.name, "error", err.Error())
+		if cluster.recorded && r.Recorder != nil {
+			r.Recorder.Eventf(tc, corev1.EventTypeWarning, "CleanupSkipped",
+				"Gave up deleting k6 burn Deployments on cluster %q: %v", cluster.name, err)
 		}
+	}
+	if pending {
+		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
 	}
 	controllerutil.RemoveFinalizer(tc, testCaseFinalizer)
 	return ctrl.Result{}, r.Update(ctx, tc)
+}
+
+// deleteCleanupGracePeriod bounds how long a deleting TestCase waits for an
+// unreachable runner cluster it is known to have used.
+const deleteCleanupGracePeriod = 5 * time.Minute
+
+type cleanupCluster struct {
+	name string
+	// recorded is true when the TestCase is known to have placed a k6
+	// workload on this cluster (its status, spec.runnerClusterRef, or a
+	// still-existing target deployment's clusterRef).
+	recorded bool
+}
+
+// deleteCandidateClusters lists every cluster a deleting TestCase may have
+// left a Burn Deployment on. Its targets' AuthentikDeployments are often
+// deleted alongside it, so their clusterRefs can't be relied on alone: the
+// status' recorded runner clusters and every WorkloadCluster are swept too.
+func (r *TestCaseReconciler) deleteCandidateClusters(ctx context.Context, tc *benchv1alpha1.TestCase) ([]cleanupCluster, error) {
+	recorded := map[string]bool{"": true}
+	for _, st := range tc.Status.Deployments {
+		recorded[st.RunnerCluster] = true
+	}
+	if tc.Spec.RunnerClusterRef != nil {
+		recorded[tc.Spec.RunnerClusterRef.Name] = true
+	}
+	for _, ref := range tc.Deployments() {
+		var topo benchv1alpha1.AuthentikDeployment
+		if err := r.Get(ctx, types.NamespacedName{Name: ref.Name, Namespace: tc.Namespace}, &topo); err == nil {
+			recorded[runnerClusterName(tc, &topo)] = true
+		}
+	}
+	all := map[string]bool{}
+	var wcs benchv1alpha1.WorkloadClusterList
+	if err := r.List(ctx, &wcs, client.InNamespace(tc.Namespace)); err != nil {
+		return nil, err
+	}
+	for _, wc := range wcs.Items {
+		all[wc.Name] = true
+	}
+	for name := range recorded {
+		all[name] = true
+	}
+	out := make([]cleanupCluster, 0, len(all))
+	for name := range all {
+		out = append(out, cleanupCluster{name: name, recorded: recorded[name]})
+	}
+	slices.SortFunc(out, func(a, b cleanupCluster) int { return strings.Compare(a.name, b.name) })
+	return out, nil
 }
 
 // cleanupStaleBurnDeployments deletes every Burn Deployment this TestCase

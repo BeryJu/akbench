@@ -12,6 +12,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
@@ -278,6 +279,35 @@ var _ = Describe("TestCase Controller", func() {
 			var after appsv1.Deployment
 			Expect(k8sClient.Get(context.Background(), depBKey, &after)).To(Succeed())
 			Expect(after.UID).To(Equal(before.UID), "a later target's burn Deployment must not be deleted by an earlier target's cleanup")
+		})
+
+		It("deletes every burn Deployment even when its AuthentikDeployments were deleted first", func() {
+			r := &TestCaseReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Recorder: record.NewFakeRecorder(100), Tracker: testTracker}
+			_, err := r.Reconcile(context.Background(), reconcile.Request{NamespacedName: typeNamespacedName})
+			Expect(err).NotTo(HaveOccurred())
+
+			var tc benchv1alpha1.TestCase
+			Expect(k8sClient.Get(context.Background(), typeNamespacedName, &tc)).To(Succeed())
+			Expect(findDeploymentStatus(tc.Status.Deployments, topoB.Name).RunnerCluster).To(Equal(testClusterName))
+
+			// The UI deletes the deployments and the TestCase together; the
+			// deployments' removal is usually observed first.
+			forceDelete(context.Background(), topo)
+			forceDelete(context.Background(), topoB)
+			_, err = r.Reconcile(context.Background(), reconcile.Request{NamespacedName: typeNamespacedName})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(k8sClient.Get(context.Background(), typeNamespacedName, &tc)).To(Succeed())
+			Expect(findDeploymentStatus(tc.Status.Deployments, topoB.Name).RunnerCluster).To(Equal(testClusterName),
+				"an unresolvable target must keep the runner cluster it last ran on")
+
+			Expect(k8sClient.Delete(context.Background(), &tc)).To(Succeed())
+			_, err = r.Reconcile(context.Background(), reconcile.Request{NamespacedName: typeNamespacedName})
+			Expect(err).NotTo(HaveOccurred())
+
+			var deps appsv1.DeploymentList
+			Expect(k8sClient.List(context.Background(), &deps, client.InNamespace("default"),
+				client.MatchingLabels{benchv1alpha1.LabelTestCase: resourceName})).To(Succeed())
+			Expect(deps.Items).To(BeEmpty())
 		})
 	})
 

@@ -137,6 +137,13 @@ type TestCaseDeploymentStatus struct {
 	// (Burn Deployment, or readiness to accept a Quick TestRun) is set up.
 	Ready bool `json:"ready"`
 
+	// runnerCluster is the cluster this target's k6 workload was last
+	// placed on ("" is the management cluster). Kept even once the
+	// AuthentikDeployment itself is gone, so the TestCase can still find
+	// and delete a Burn Deployment it left on a remote cluster.
+	// +optional
+	RunnerCluster string `json:"runnerCluster,omitempty"`
+
 	// burnWorkloadRef names the owned Deployment driving this target when
 	// profile is Burn.
 	// +optional

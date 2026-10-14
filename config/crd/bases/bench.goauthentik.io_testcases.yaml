@@ -376,6 +376,13 @@ spec:
                         ready mirrors whether this specific deployment's own k6 workload
                         (Burn Deployment, or readiness to accept a Quick TestRun) is set up.
                       type: boolean
+                    runnerCluster:
+                      description: |-
+                        runnerCluster is the cluster this target's k6 workload was last
+                        placed on ("" is the management cluster). Kept even once the
+                        AuthentikDeployment itself is gone, so the TestCase can still find
+                        and delete a Burn Deployment it left on a remote cluster.
+                      type: string
                   required:
                   - name
                   - ready
