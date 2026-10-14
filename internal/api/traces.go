@@ -13,7 +13,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"golang.org/x/sync/singleflight"
 	"k8s.io/apimachinery/pkg/types"
 
 	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
@@ -35,17 +34,10 @@ import (
 // to tie a database or stage span to a target is a spanset-level && within
 // a search, which TraceQL metrics don't support.
 const (
-	traceBreakdownLimit    = 15
-	traceBreakdownCacheTTL = 2 * time.Minute
-	traceTopQueries        = 8
-	maxStatementLength     = 400
+	traceBreakdownLimit = 15
+	traceTopQueries     = 8
+	maxStatementLength  = 400
 )
-
-var traceBreakdownWindows = map[string]time.Duration{
-	"15m": 15 * time.Minute,
-	"1h":  time.Hour,
-	"6h":  6 * time.Hour,
-}
 
 // TraceStage is one flow stage's latency across the sampled requests.
 type TraceStage struct {
@@ -92,39 +84,34 @@ type TraceBreakdown struct {
 	Targets     []TraceTarget `json:"targets"`
 }
 
-type traceBreakdownCache struct {
-	mu      sync.Mutex
-	entries map[string]TraceBreakdown
-	// inflight shares one search between concurrent requests for the same
-	// testid and window.
-	inflight singleflight.Group
-}
-
-// traceBreakdownTimeout bounds one breakdown's Tempo searches. They run
-// detached from the request that started them, so a reload or a closed tab
-// mid-search still completes the search for the next viewer instead of
-// failing it with "context canceled".
-const traceBreakdownTimeout = time.Minute
-
-// tempoTarget is one deployment a testid drives, with the Tempo that holds
-// its traces: its own workload cluster's, reached through that cluster's
-// Grafana datasource proxy.
-type tempoTarget struct {
-	Target        string
-	TempoURL      string
+// grafanaTarget is one deployment a testid drives, with the Grafana of its
+// own workload cluster, whose datasource proxy reaches that cluster's
+// Tempo and Pyroscope.
+type grafanaTarget struct {
+	Target string
+	// Deployment is the AuthentikDeployment's name, which is also its Helm
+	// release name and so the prefix of its pods' names.
+	Deployment string
+	// GrafanaURL is the base of Grafana's API, ending in a slash.
+	GrafanaURL    string
 	AdminPassword string
 	Error         string
 }
 
-func (s *Server) tempoTargetsForTestID(ctx context.Context, tc *benchv1alpha1.TestCase) []tempoTarget {
-	var targets []tempoTarget
+// datasourceURL is the Grafana datasource proxy for the datasource uid.
+func (t grafanaTarget) datasourceURL(uid string) string {
+	return t.GrafanaURL + "api/datasources/proxy/uid/" + uid
+}
+
+func (s *Server) grafanaTargetsForTestID(ctx context.Context, tc *benchv1alpha1.TestCase) []grafanaTarget {
+	var targets []grafanaTarget
 	for _, ref := range tc.Deployments() {
 		var topo benchv1alpha1.AuthentikDeployment
 		if err := s.client.Get(ctx, types.NamespacedName{Name: ref.Name, Namespace: s.cfg.Namespace}, &topo); err != nil {
-			targets = append(targets, tempoTarget{Target: ref.Name, Error: "deployment not found"})
+			targets = append(targets, grafanaTarget{Target: ref.Name, Deployment: ref.Name, Error: "deployment not found"})
 			continue
 		}
-		target := tempoTarget{Target: topo.Spec.TargetName}
+		target := grafanaTarget{Target: topo.Spec.TargetName, Deployment: topo.Name}
 		if target.Target == "" {
 			target.Target = topo.Name
 		}
@@ -135,14 +122,15 @@ func (s *Server) tempoTargetsForTestID(ctx context.Context, tc *benchv1alpha1.Te
 		// rather than rely on fmt's %q escaping matching whatever escaping
 		// rules Tempo's own TraceQL parser happens to implement.
 		if !safeLabelValue.MatchString(target.Target) {
-			targets = append(targets, tempoTarget{Target: target.Target, Error: "targetName contains characters that aren't safe to query Tempo with"})
+			target.Error = "targetName contains characters that aren't safe to query Tempo with"
+			targets = append(targets, target)
 			continue
 		}
 		var wc benchv1alpha1.WorkloadCluster
 		wcKey := types.NamespacedName{Name: topo.Spec.ClusterRef.Name, Namespace: s.cfg.Namespace}
 		switch {
 		case topo.Spec.ClusterRef.Name == "":
-			target.Error = "deployment runs on the management cluster, which has no Tempo"
+			target.Error = "deployment runs on the management cluster, which has no Tempo or Pyroscope"
 		case s.client.Get(ctx, wcKey, &wc) != nil:
 			target.Error = "workload cluster not found"
 		case wc.Status.GrafanaURL == "":
@@ -153,8 +141,7 @@ func (s *Server) tempoTargetsForTestID(ctx context.Context, tc *benchv1alpha1.Te
 				target.Error = err.Error()
 				break
 			}
-			target.TempoURL = strings.TrimSuffix(wc.Status.GrafanaURL, "/") +
-				render.GrafanaProxyPathPrefix(&wc) + "api/datasources/proxy/uid/" + render.TempoDatasourceUID
+			target.GrafanaURL = strings.TrimSuffix(wc.Status.GrafanaURL, "/") + render.GrafanaProxyPathPrefix(&wc)
 			target.AdminPassword = adminPassword
 		}
 		targets = append(targets, target)
@@ -169,45 +156,14 @@ func (s *Server) traceBreakdown(w http.ResponseWriter, r *http.Request) {
 	if window == "" {
 		window = "1h"
 	}
-	span, ok := traceBreakdownWindows[window]
+	span, ok := breakdownWindows[window]
 	if testid == "" || !ok {
 		writeError(w, r, http.StatusBadRequest, "testid and window (15m, 1h or 6h) are required")
 		return
 	}
-	cacheKey := testid + "|" + window
-	s.traces.mu.Lock()
-	cached, hit := s.traces.entries[cacheKey]
-	s.traces.mu.Unlock()
-	if hit && time.Since(cached.GeneratedAt) < traceBreakdownCacheTTL {
-		writeJSON(w, r, http.StatusOK, cached)
-		return
-	}
-
-	var tc benchv1alpha1.TestCase
-	if err := s.client.Get(r.Context(), types.NamespacedName{Name: testid, Namespace: s.cfg.Namespace}, &tc); err != nil {
-		writeAPIError(w, r, err)
-		return
-	}
-	result := s.traces.inflight.DoChan(cacheKey, func() (any, error) {
-		ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), traceBreakdownTimeout)
-		defer cancel()
-		resp, complete := s.searchTraceBreakdown(ctx, &tc, window, span)
-		// A failed search (Tempo down, slow or restarting) isn't cached, so
-		// the next request retries it rather than serving the error for the
-		// whole TTL.
-		if complete {
-			s.traces.mu.Lock()
-			s.traces.entries[cacheKey] = resp
-			s.traces.mu.Unlock()
-		}
-		return resp, nil
+	serveBreakdown(s, w, r, s.traces, testid, testid+"|"+window, func(ctx context.Context, tc *benchv1alpha1.TestCase) (TraceBreakdown, bool) {
+		return s.searchTraceBreakdown(ctx, tc, window, span)
 	})
-	select {
-	case res := <-result:
-		writeJSON(w, r, http.StatusOK, res.Val.(TraceBreakdown))
-	case <-r.Context().Done():
-		// The client is gone; the search carries on for the cache.
-	}
 }
 
 // searchTraceBreakdown runs one Tempo search per target of tc over the
@@ -215,7 +171,7 @@ func (s *Server) traceBreakdown(w http.ResponseWriter, r *http.Request) {
 func (s *Server) searchTraceBreakdown(ctx context.Context, tc *benchv1alpha1.TestCase, window string, span time.Duration) (resp TraceBreakdown, complete bool) {
 	end := time.Now()
 	resp = TraceBreakdown{TestID: tc.Name, Window: window, GeneratedAt: end}
-	targets := s.tempoTargetsForTestID(ctx, tc)
+	targets := s.grafanaTargetsForTestID(ctx, tc)
 	resp.Targets = make([]TraceTarget, len(targets))
 	var failed atomic.Bool
 	var wg sync.WaitGroup
@@ -225,7 +181,7 @@ func (s *Server) searchTraceBreakdown(ctx context.Context, tc *benchv1alpha1.Tes
 			continue
 		}
 		wg.Go(func() {
-			result, err := s.searchTraceSpans(ctx, target.TempoURL, target.AdminPassword, tc.Name, target.Target, end.Add(-span), end)
+			result, err := s.searchTraceSpans(ctx, target.datasourceURL(render.TempoDatasourceUID), target.AdminPassword, tc.Name, target.Target, end.Add(-span), end)
 			if err != nil {
 				resp.Targets[i].Error = err.Error()
 				failed.Store(true)

@@ -7,8 +7,21 @@ import { ObjectYaml } from '../components/ObjectYaml';
 import { ActivityLog } from '../components/ActivityLog';
 import { Badge, ConditionList, StatusBadge } from '../components/Status';
 import { buildTargetRows, burningFor, TargetTable } from '../components/Targets';
+import { ProfileBreakdownSection } from '../components/ProfileBreakdown';
 import { TraceBreakdownSection } from '../components/TraceBreakdown';
-import { Alert, confirmAndRun, Empty, errorMessage, Field, formatTimestamp, Page, Table, TimeRangeSelect } from '../components/ui';
+import {
+  Alert,
+  confirmAndRun,
+  Empty,
+  errorMessage,
+  Field,
+  formatTimestamp,
+  Page,
+  Section,
+  SectionNav,
+  Table,
+  TimeRangeSelect,
+} from '../components/ui';
 import { toast } from '../components/Toast';
 import { earliestBurnStart, metricsAnchorFromRuns, parseTimeRange, shortTag, timeRangeSeconds } from '../format';
 import { shellLinkForCluster } from '../shell/links';
@@ -370,6 +383,14 @@ export function TestCaseEditPage() {
 
 const DEFAULT_TIMELINE_RANGE = '6h';
 
+const SECTIONS = [
+  { id: 'targets', label: 'Targets & timeline' },
+  { id: 'tracing', label: 'Tracing' },
+  { id: 'profiling', label: 'Profiling' },
+  { id: 'resources', label: 'Resources' },
+  { id: 'status', label: 'Status' },
+];
+
 export function TestCaseViewPage() {
   const { name = '' } = useParams();
   const testCase = useResource(() => api.testCase(name), [name], 10000, 'TestCase');
@@ -475,105 +496,110 @@ export function TestCaseViewPage() {
       }
     >
       <Alert>{testCase.error ?? actionError ?? summary.error}</Alert>
+      <SectionNav sections={SECTIONS} />
 
-      <div className="section-head">
-        <div>
-          <h2>Targets</h2>
-          <div className="muted">
-            {profile === 'Quick'
-              ? anchor
-                ? `The last 5 minutes of the latest completed run (${new Date(anchor.endSeconds * 1000).toLocaleString()}).`
-                : 'Shows once a run has completed.'
-              : 'Same script and load on each target. Δ is relative to the baseline target.'}
-          </div>
-        </div>
-        {profile === 'Burn' && (
-          <TimeRangeSelect
-            value={timelineRangeValue}
-            sinceStartLabel={burnStart !== undefined ? 'Since burn start' : undefined}
-            onChange={v => updateParams({ range: v === DEFAULT_TIMELINE_RANGE ? undefined : v })}
+      <Section
+        id="targets"
+        title="Targets & timeline"
+        description={
+          profile === 'Quick'
+            ? anchor
+              ? `The last 5 minutes of the latest completed run (${new Date(anchor.endSeconds * 1000).toLocaleString()}).`
+              : 'Shows once a run has completed.'
+            : 'Same script and load on each target. Δ is relative to the baseline target.'
+        }
+        actions={
+          profile === 'Burn' && (
+            <TimeRangeSelect
+              value={timelineRangeValue}
+              sinceStartLabel={burnStart !== undefined ? 'Since burn start' : undefined}
+              onChange={v => updateParams({ range: v === DEFAULT_TIMELINE_RANGE ? undefined : v })}
+            />
+          )
+        }
+      >
+        {tc && rows.length === 0 ? (
+          <Empty>This test case has no target deployments - edit it to pick at least one.</Empty>
+        ) : (
+          <TargetTable
+            rows={rows}
+            metrics={summary.data?.metrics ?? []}
+            baseline={baseline}
+            onBaseline={target => updateParams({ baseline: target === rows[0]?.target ? undefined : target })}
+            actions={row => {
+              const cluster = tc?.spec.runnerClusterRef?.name ?? row.deployment?.spec.clusterRef?.name;
+              return (
+                row.burnWorkload &&
+                tc?.metadata.namespace && (
+                  <Link
+                    className="button small"
+                    to={shellLinkForCluster(
+                      cluster,
+                      `kubectl logs -n ${tc.metadata.namespace} deploy/${row.burnWorkload} -f --tail=200`
+                    )}
+                  >
+                    k6 logs
+                  </Link>
+                )
+              );
+            }}
           />
         )}
-      </div>
-      {tc && rows.length === 0 ? (
-        <Empty>This test case has no target deployments - edit it to pick at least one.</Empty>
-      ) : (
-        <TargetTable
-          rows={rows}
-          metrics={summary.data?.metrics ?? []}
-          baseline={baseline}
-          onBaseline={target => updateParams({ baseline: target === rows[0]?.target ? undefined : target })}
-          actions={row => {
-            const cluster = tc?.spec.runnerClusterRef?.name ?? row.deployment?.spec.clusterRef?.name;
-            return (
-              row.burnWorkload &&
-              tc?.metadata.namespace && (
-                <Link
-                  className="button small"
-                  to={shellLinkForCluster(
-                    cluster,
-                    `kubectl logs -n ${tc.metadata.namespace} deploy/${row.burnWorkload} -f --tail=200`
-                  )}
-                >
-                  k6 logs
-                </Link>
-              )
-            );
-          }}
-        />
-      )}
 
-      {profile === 'Quick' && (
-        <>
-          <h2>Runs</h2>
-          <Table
-            rows={runs.data && sortedRuns.slice(0, 10)}
-            rowKey={r => r.metadata.name}
-            empty="No runs yet."
-            columns={[
-              { label: 'Run', render: r => <Link to={`/testruns/${r.metadata.name}`}>{r.metadata.name}</Link> },
-              { label: 'Target', render: r => testRunDeployment(r) ?? <span className="muted">-</span> },
-              { label: 'Phase', render: r => <Badge value={r.status?.phase ?? 'Pending'} /> },
-              { label: 'Started', render: r => formatTimestamp(r.status?.startTime ?? r.metadata.creationTimestamp) },
-              { label: 'Completed', render: r => formatTimestamp(r.status?.completionTime) },
-            ]}
-          />
-        </>
-      )}
+        {profile === 'Quick' && (
+          <>
+            <h3>Runs</h3>
+            <Table
+              rows={runs.data && sortedRuns.slice(0, 10)}
+              rowKey={r => r.metadata.name}
+              empty="No runs yet."
+              columns={[
+                { label: 'Run', render: r => <Link to={`/testruns/${r.metadata.name}`}>{r.metadata.name}</Link> },
+                { label: 'Target', render: r => testRunDeployment(r) ?? <span className="muted">-</span> },
+                { label: 'Phase', render: r => <Badge value={r.status?.phase ?? 'Pending'} /> },
+                { label: 'Started', render: r => formatTimestamp(r.status?.startTime ?? r.metadata.creationTimestamp) },
+                { label: 'Completed', render: r => formatTimestamp(r.status?.completionTime) },
+              ]}
+            />
+          </>
+        )}
 
-      <div className="section-head">
-        <div>
-          <h2>Timeline</h2>
-          <div className="muted">One line per target, colored as in the table above.</div>
+        <div className="sub-head">
+          <div>
+            <h3>Timeline</h3>
+            <div className="muted">One line per target, colored as in the table above.</div>
+          </div>
         </div>
-      </div>
-      {profile === 'Quick' && !anchor && (runs.data?.length ?? 0) > 0 && (
-        <Alert kind="info">Latest run is still in progress - metrics will show once it completes.</Alert>
-      )}
-      <MetricsGrid
-        testids={[name]}
-        endSeconds={anchor?.endSeconds}
-        rangeSeconds={profile === 'Quick' ? anchor?.rangeSeconds : timelineRange}
-      />
+        {profile === 'Quick' && !anchor && (runs.data?.length ?? 0) > 0 && (
+          <Alert kind="info">Latest run is still in progress - metrics will show once it completes.</Alert>
+        )}
+        <MetricsGrid
+          testids={[name]}
+          endSeconds={anchor?.endSeconds}
+          rangeSeconds={profile === 'Quick' ? anchor?.rangeSeconds : timelineRange}
+        />
+      </Section>
+
       {tc && <TraceBreakdownSection testid={name} rows={rows} baseline={baseline} />}
+      {tc && <ProfileBreakdownSection testid={name} rows={rows} baseline={baseline} />}
 
-      <h2>Resource usage</h2>
-      <ResourceCharts
-        testids={[name]}
-        endSeconds={anchor?.endSeconds}
-        rangeSeconds={profile === 'Quick' ? anchor?.rangeSeconds : timelineRange}
-      />
+      <Section id="resources" title="Resources" description="CPU and memory of each target's pods over the timeline's range.">
+        <ResourceCharts
+          testids={[name]}
+          endSeconds={anchor?.endSeconds}
+          rangeSeconds={profile === 'Quick' ? anchor?.rangeSeconds : timelineRange}
+        />
+      </Section>
 
-      {tc && (
-        <>
-          <h2>Status</h2>
-          <div className="panel">
+      <Section id="status" title="Status" description="Conditions, recent events and the full object.">
+        {tc && (
+          <>
             <ConditionList conditions={tc.status?.conditions} />
             <ActivityLog path="testcases" name={name} />
-          </div>
-        </>
-      )}
-      <ObjectYaml object={tc} />
+          </>
+        )}
+        <ObjectYaml object={tc} />
+      </Section>
     </Page>
   );
 }

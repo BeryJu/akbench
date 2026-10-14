@@ -8,9 +8,9 @@ import { formatMetricValue, relativeDelta } from '../format';
 import { TraceTarget } from '../types';
 import { useResource } from '../useResource';
 import { Delta, TargetKey, TargetRow } from './Targets';
-import { Alert, Empty, Segmented } from './ui';
+import { Alert, Empty, Section, Segmented } from './ui';
 
-const WINDOWS = [
+export const BREAKDOWN_WINDOWS = [
   { value: '15m', label: '15 m' },
   { value: '1h', label: '1 h' },
   { value: '6h', label: '6 h' },
@@ -38,17 +38,17 @@ export function TraceBreakdownSection({
   const stageNames = [...new Set(sampled.flatMap(t => t.stages.map(s => s.name)))].sort();
 
   return (
-    <>
-      <div className="section-head">
-        <div>
-          <h2>Where login time goes</h2>
-          <div className="muted">
-            From each target's most recent traces in Tempo. Times are per request to authentik; a login is several
-            requests.
-          </div>
-        </div>
-        <Segmented label="Trace window" options={WINDOWS} value={traceWindow} onChange={setTraceWindow} />
-      </div>
+    <Section
+      id="tracing"
+      title="Tracing"
+      description={
+        <>
+          Where login time goes, from each target's most recent traces in Tempo. Times are per request to authentik; a
+          login is several requests.
+        </>
+      }
+      actions={<Segmented label="Trace window" options={BREAKDOWN_WINDOWS} value={traceWindow} onChange={setTraceWindow} />}
+    >
       <Alert>{breakdown.error}</Alert>
       {targets
         .filter(t => t.error)
@@ -115,7 +115,7 @@ export function TraceBreakdownSection({
 
             {stageNames.length > 0 && (
               <>
-                <h3 style={{ marginTop: 18 }}>Flow stages · p50 (p95)</h3>
+                <h3>Flow stages · p50 (p95)</h3>
                 <div className="table-scroll">
                   <table className="table">
                     <thead>
@@ -163,7 +163,7 @@ export function TraceBreakdownSection({
           </>
         )
       )}
-    </>
+    </Section>
   );
 }
 

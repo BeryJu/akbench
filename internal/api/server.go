@@ -84,7 +84,8 @@ type Server struct {
 	// would pick up anyway.
 	grafanaAdminMu    sync.Mutex
 	grafanaAdminCache map[string]string
-	traces            *traceBreakdownCache
+	traces            *breakdownCache[TraceBreakdown]
+	profiles          *breakdownCache[ProfileBreakdown]
 	events            *eventHub
 	eventsTickets     *eventsState
 	// podExec runs a command in a workload cluster pod (sql.go); a field so
@@ -109,7 +110,8 @@ func New(c client.WithWatch, cfg Config) *Server {
 	return &Server{
 		client: c, cfg: cfg, http: httpClient, shell: newShellState(), grafanaKey: newGrafanaSessionKey(),
 		grafanaAdminCache: map[string]string{},
-		traces:            &traceBreakdownCache{entries: map[string]TraceBreakdown{}},
+		traces:            newBreakdownCache[TraceBreakdown](),
+		profiles:          newBreakdownCache[ProfileBreakdown](),
 		events:            newEventHub(),
 		eventsTickets:     newEventsState(),
 		podExec:           execInPod,
@@ -152,6 +154,7 @@ func (s *Server) Router() http.Handler {
 
 			r.Post("/grafana/session", s.createGrafanaSession)
 			r.Get("/traces/breakdown", s.traceBreakdown)
+			r.Get("/profiles/breakdown", s.profileBreakdown)
 			r.Get("/version", s.getVersion)
 			r.Get("/clusters", s.listClusters)
 			r.Post("/clusters", s.registerCluster)

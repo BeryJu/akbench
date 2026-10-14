@@ -28,6 +28,53 @@ export function Page({
   );
 }
 
+/** Section is one titled card of a long page: a header bar with the
+ * section's own controls, then its body. id is its SectionNav anchor. */
+export function Section({
+  id,
+  title,
+  description,
+  actions,
+  children,
+}: {
+  id: string;
+  title: ReactNode;
+  description?: ReactNode;
+  actions?: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <section className="section" id={id} aria-labelledby={`${id}-title`}>
+      <header className="section-bar">
+        <div>
+          <h2 id={`${id}-title`}>{title}</h2>
+          {description && <div className="muted">{description}</div>}
+        </div>
+        {actions && <div className="row">{actions}</div>}
+      </header>
+      <div className="section-body">{children}</div>
+    </section>
+  );
+}
+
+/** SectionNav jumps between a page's Sections. It scrolls rather than
+ * linking to #id, so the page's own search params and history stay put. */
+export function SectionNav({ sections }: { sections: { id: string; label: string }[] }) {
+  return (
+    <nav className="section-nav" aria-label="Sections">
+      {sections.map(s => (
+        <button
+          key={s.id}
+          type="button"
+          onClick={() => document.getElementById(s.id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+        >
+          {s.label}
+        </button>
+      ))}
+    </nav>
+  );
+}
+
 export function Alert({ kind = 'error', children }: { kind?: 'error' | 'info' | 'success'; children: ReactNode }) {
   if (!children) {
     return null;

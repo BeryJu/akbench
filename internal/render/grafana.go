@@ -69,6 +69,10 @@ func GrafanaProxyPathPrefix(wc *benchv1alpha1.WorkloadCluster) string {
 // itself is only a ClusterIP Service inside the workload cluster.
 const TempoDatasourceUID = "tempo"
 
+// PyroscopeDatasourceUID is the Pyroscope datasource's fixed uid, queried
+// through Grafana's datasource proxy the same way as TempoDatasourceUID.
+const PyroscopeDatasourceUID = "pyroscope"
+
 // grafanaDatasources is adapted directly from the reference harness's own
 // provisioning YAML (goauthentik/benchmark@dev:roles/metrics/files/grafana/datasources,
 // templates/datasources/prometheus.yml.j2) - same datasource shape, only the
@@ -89,7 +93,7 @@ func grafanaDatasources() map[string]any {
 				"jsonData": map[string]any{"timeInterval": "15s"},
 			},
 			{
-				"name": "Pyroscope", "type": "grafana-pyroscope-datasource", "access": "proxy", "orgId": 1, "uid": "pyroscope",
+				"name": "Pyroscope", "type": "grafana-pyroscope-datasource", "access": "proxy", "orgId": 1, "uid": PyroscopeDatasourceUID,
 				"url": url(PyroscopeServiceName, PyroscopePort),
 			},
 			{

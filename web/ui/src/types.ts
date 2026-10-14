@@ -371,6 +371,34 @@ export interface TraceTarget {
   error?: string;
 }
 
+// ProfileBreakdown mirrors internal/api/profiles.go: each target's merged CPU
+// profile from its workload cluster's Pyroscope. Shares are 0..1 of the
+// target's profiled CPU time.
+export interface ProfileBreakdown {
+  testid: string;
+  window: string;
+  component: string;
+  generatedAt: string;
+  targets: ProfileTarget[];
+}
+
+export interface ProfileTarget {
+  target: string;
+  cpuSeconds: number;
+  cores: number;
+  categories: { name: string; share: number }[];
+  functions: ProfileFunction[];
+  error?: string;
+}
+
+export interface ProfileFunction {
+  name: string;
+  file: string;
+  category: string;
+  self: number;
+  total: number;
+}
+
 /** readyCondition is the one condition every list view renders. */
 export function readyCondition(conditions?: Condition[]): Condition | undefined {
   return conditions?.find(c => c.type === 'Ready');

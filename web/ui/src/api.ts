@@ -21,6 +21,7 @@ import {
   ObjectEvent,
   TestCaseTemplateSpec,
   TestRun,
+  ProfileBreakdown,
   TraceBreakdown,
   WorkloadCluster,
   WorkloadClusterSpec,
@@ -238,6 +239,13 @@ export const api = {
   // target, from each target's own workload cluster Tempo.
   traceBreakdown: (testid: string, window: string) =>
     request<TraceBreakdown>(`/api/v1/traces/breakdown?testid=${seg(testid)}&window=${seg(window)}`),
+
+  // -- Profiles (internal/api/profiles.go): each target's merged CPU profile
+  // from Pyroscope, cached server-side for two minutes.
+  profileBreakdown: (testid: string, window: string, component: string) =>
+    request<ProfileBreakdown>(
+      `/api/v1/profiles/breakdown?testid=${seg(testid)}&window=${seg(window)}&component=${seg(component)}`
+    ),
 
   // -- Kubernetes Events about one bench object, newest first
   // (internal/api/objectevents.go).
