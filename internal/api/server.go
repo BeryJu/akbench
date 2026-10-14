@@ -90,7 +90,7 @@ type Server struct {
 	// podExec runs a command in a workload cluster pod (sql.go); a field so
 	// tests can fake it.
 	podExec podExecFunc
-	// imageRegistry overrides defaultImageRegistry (images.go) in tests.
+	// imageRegistry overrides the ghcr.io endpoint checkImage (images.go) queries, in tests.
 	imageRegistry string
 }
 

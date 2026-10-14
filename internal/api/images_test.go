@@ -8,22 +8,26 @@ import (
 
 func newFakeRegistry(t *testing.T, existing string) *httptest.Server {
 	t.Helper()
-	registry := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/token":
+	var registry *httptest.Server
+	registry = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/token" {
 			if r.URL.Query().Get("scope") != "repository:goauthentik/dev-server:pull" {
 				t.Errorf("unexpected token scope %q", r.URL.Query().Get("scope"))
 			}
 			_, _ = w.Write([]byte(`{"token":"anon"}`))
-		case "/v2/goauthentik/dev-server/manifests/" + existing:
-			if r.Header.Get("Authorization") != "Bearer anon" {
-				w.WriteHeader(http.StatusUnauthorized)
-				return
-			}
-			w.WriteHeader(http.StatusOK)
-		default:
-			w.WriteHeader(http.StatusNotFound)
+			return
 		}
+		// ghcr.io challenges every unauthenticated request, even for public images.
+		if r.Header.Get("Authorization") != "Bearer anon" {
+			w.Header().Set("WWW-Authenticate", `Bearer realm="`+registry.URL+`/token",service="ghcr.io"`)
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		if r.URL.Path == "/v2/goauthentik/dev-server/manifests/"+existing {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
 	}))
 	t.Cleanup(registry.Close)
 	return registry

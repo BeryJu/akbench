@@ -12,6 +12,11 @@ resources:
 - ../crd
 - ../rbac
 - ../manager
+# Validating webhooks for AuthentikDeployment and TestCase, served on :9443
+# with a cert-manager issued certificate (cert-manager is always installed
+# alongside Cluster API).
+- ../webhook
+- ../certmanager
 # Expose the controller manager metrics service.
 - metrics_service.yaml
 
@@ -21,8 +26,82 @@ patches:
 - path: manager_metrics_patch.yaml
   target:
     kind: Deployment
+# Mount the webhook serving certificate and expose the webhook port.
+- path: manager_webhook_patch.yaml
+  target:
+    kind: Deployment
 
 # kubebuilder injects cert-manager CA injection for conversion webhooks at the
-# markers below; this project has no webhooks.
+# markers below; this project has no conversion webhooks.
 # +kubebuilder:scaffold:crdkustomizecainjectionns
 # +kubebuilder:scaffold:crdkustomizecainjectionname
+
+# Fill the webhook certificate's DNS names from the webhook Service, and have
+# cert-manager's CA injector set the ValidatingWebhookConfiguration's caBundle.
+replacements:
+- source:
+    kind: Service
+    version: v1
+    name: webhook-service
+    fieldPath: .metadata.name
+  targets:
+  - select:
+      kind: Certificate
+      group: cert-manager.io
+      version: v1
+      name: serving-cert
+    fieldPaths:
+    - .spec.dnsNames.0
+    - .spec.dnsNames.1
+    options:
+      delimiter: '.'
+      index: 0
+      create: true
+- source:
+    kind: Service
+    version: v1
+    name: webhook-service
+    fieldPath: .metadata.namespace
+  targets:
+  - select:
+      kind: Certificate
+      group: cert-manager.io
+      version: v1
+      name: serving-cert
+    fieldPaths:
+    - .spec.dnsNames.0
+    - .spec.dnsNames.1
+    options:
+      delimiter: '.'
+      index: 1
+      create: true
+- source:
+    kind: Certificate
+    group: cert-manager.io
+    version: v1
+    name: serving-cert
+    fieldPath: .metadata.namespace
+  targets:
+  - select:
+      kind: ValidatingWebhookConfiguration
+    fieldPaths:
+    - .metadata.annotations.[cert-manager.io/inject-ca-from]
+    options:
+      delimiter: '/'
+      index: 0
+      create: true
+- source:
+    kind: Certificate
+    group: cert-manager.io
+    version: v1
+    name: serving-cert
+    fieldPath: .metadata.name
+  targets:
+  - select:
+      kind: ValidatingWebhookConfiguration
+    fieldPaths:
+    - .metadata.annotations.[cert-manager.io/inject-ca-from]
+    options:
+      delimiter: '/'
+      index: 1
+      create: true

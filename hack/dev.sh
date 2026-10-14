@@ -56,7 +56,10 @@ fi
 export BENCH_PROMETHEUS_URL="${BENCH_PROMETHEUS_URL:-}"
 
 echo "==> Starting the operator manager"
-(cd "${root}" && go run ./cmd/main.go) &
+# The validating webhooks need a cert-manager issued certificate and an
+# in-cluster Service the API server can reach - neither exists for a
+# locally running manager.
+(cd "${root}" && ENABLE_WEBHOOKS=false go run ./cmd/main.go) &
 pids+=($!)
 wait_for "http://127.0.0.1:8081/healthz" "operator manager"
 
