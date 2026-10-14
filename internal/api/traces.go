@@ -10,8 +10,10 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
+	"golang.org/x/sync/singleflight"
 	"k8s.io/apimachinery/pkg/types"
 
 	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
@@ -93,7 +95,16 @@ type TraceBreakdown struct {
 type traceBreakdownCache struct {
 	mu      sync.Mutex
 	entries map[string]TraceBreakdown
+	// inflight shares one search between concurrent requests for the same
+	// testid and window.
+	inflight singleflight.Group
 }
+
+// traceBreakdownTimeout bounds one breakdown's Tempo searches. They run
+// detached from the request that started them, so a reload or a closed tab
+// mid-search still completes the search for the next viewer instead of
+// failing it with "context canceled".
+const traceBreakdownTimeout = time.Minute
 
 // tempoTarget is one deployment a testid drives, with the Tempo that holds
 // its traces: its own workload cluster's, reached through that cluster's
@@ -177,10 +188,36 @@ func (s *Server) traceBreakdown(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, r, err)
 		return
 	}
+	result := s.traces.inflight.DoChan(cacheKey, func() (any, error) {
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), traceBreakdownTimeout)
+		defer cancel()
+		resp, complete := s.searchTraceBreakdown(ctx, &tc, window, span)
+		// A failed search (Tempo down, slow or restarting) isn't cached, so
+		// the next request retries it rather than serving the error for the
+		// whole TTL.
+		if complete {
+			s.traces.mu.Lock()
+			s.traces.entries[cacheKey] = resp
+			s.traces.mu.Unlock()
+		}
+		return resp, nil
+	})
+	select {
+	case res := <-result:
+		writeJSON(w, r, http.StatusOK, res.Val.(TraceBreakdown))
+	case <-r.Context().Done():
+		// The client is gone; the search carries on for the cache.
+	}
+}
+
+// searchTraceBreakdown runs one Tempo search per target of tc over the
+// trailing span. complete is false when any search failed.
+func (s *Server) searchTraceBreakdown(ctx context.Context, tc *benchv1alpha1.TestCase, window string, span time.Duration) (resp TraceBreakdown, complete bool) {
 	end := time.Now()
-	resp := TraceBreakdown{TestID: testid, Window: window, GeneratedAt: end}
-	targets := s.tempoTargetsForTestID(r.Context(), &tc)
+	resp = TraceBreakdown{TestID: tc.Name, Window: window, GeneratedAt: end}
+	targets := s.tempoTargetsForTestID(ctx, tc)
 	resp.Targets = make([]TraceTarget, len(targets))
+	var failed atomic.Bool
 	var wg sync.WaitGroup
 	for i, target := range targets {
 		resp.Targets[i] = TraceTarget{Target: target.Target, Error: target.Error}
@@ -188,20 +225,17 @@ func (s *Server) traceBreakdown(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		wg.Go(func() {
-			result, err := s.searchTraceSpans(r.Context(), target.TempoURL, target.AdminPassword, testid, target.Target, end.Add(-span), end)
+			result, err := s.searchTraceSpans(ctx, target.TempoURL, target.AdminPassword, tc.Name, target.Target, end.Add(-span), end)
 			if err != nil {
 				resp.Targets[i].Error = err.Error()
+				failed.Store(true)
 				return
 			}
 			resp.Targets[i] = summarizeTraceSpans(target.Target, result)
 		})
 	}
 	wg.Wait()
-
-	s.traces.mu.Lock()
-	s.traces.entries[cacheKey] = resp
-	s.traces.mu.Unlock()
-	writeJSON(w, r, http.StatusOK, resp)
+	return resp, !failed.Load()
 }
 
 // tempoSearchResponse is the subset of Tempo's /api/search response used here.

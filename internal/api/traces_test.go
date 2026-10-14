@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"net/http"
@@ -99,6 +100,85 @@ func TestTraceBreakdown(t *testing.T) {
 	requireStatus(t, do(t, s, http.MethodGet, "/api/v1/traces/breakdown?testid=login&window=1h", nil), http.StatusOK)
 	if n := searches.Load(); n != 1 {
 		t.Errorf("Tempo searched %d times, want 1 (cached)", n)
+	}
+}
+
+// traceFixture is one TestCase whose single target's traces live behind
+// grafana.
+func traceFixture(t *testing.T, grafana http.Handler) *Server {
+	t.Helper()
+	srv := httptest.NewServer(grafana)
+	t.Cleanup(srv.Close)
+	wc := &benchv1alpha1.WorkloadCluster{Name: "bench", Namespace: testNamespace}
+	wc.Status.GrafanaURL = srv.URL
+	adminSecret := &corev1.Secret{
+		Name: render.GrafanaAdminSecretName(wc), Namespace: testNamespace,
+		Data: map[string][]byte{"password": []byte(grafanaTestAdminPassword)},
+	}
+	d := &benchv1alpha1.AuthentikDeployment{Name: "ak-a", Namespace: testNamespace}
+	d.Spec.ClusterRef = corev1.LocalObjectReference{Name: "bench"}
+	tc := &benchv1alpha1.TestCase{Name: "login", Namespace: testNamespace}
+	tc.Spec.DeploymentRefs = []corev1.LocalObjectReference{{Name: "ak-a"}}
+	s, _ := newServer(t, Config{}, wc, adminSecret, d, tc)
+	return s
+}
+
+func TestTraceBreakdownSurvivesCancelledRequest(t *testing.T) {
+	var searches atomic.Int32
+	release := make(chan struct{})
+	started := make(chan struct{}, 1)
+	s := traceFixture(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		searches.Add(1)
+		started <- struct{}{}
+		<-release
+		_, _ = fmt.Fprint(w, fakeTempoSearch)
+	}))
+
+	// The browser goes away while Tempo is still searching...
+	ctx, cancel := context.WithCancel(context.Background())
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/traces/breakdown?testid=login&window=1h", nil).WithContext(ctx)
+	req.Header.Set("Authorization", "Bearer "+testToken)
+	done := make(chan struct{})
+	go func() {
+		s.Router().ServeHTTP(httptest.NewRecorder(), req)
+		close(done)
+	}()
+	<-started
+	cancel()
+	<-done
+
+	// ...the search still completes, and the next request gets its result
+	// rather than a cached "context canceled".
+	close(release)
+	rec := do(t, s, http.MethodGet, "/api/v1/traces/breakdown?testid=login&window=1h", nil)
+	requireStatus(t, rec, http.StatusOK)
+	got := decodeBody[TraceBreakdown](t, rec)
+	if len(got.Targets) != 1 || got.Targets[0].Error != "" || got.Targets[0].Requests != 2 {
+		t.Fatalf("expected the completed search's result, got %+v", got.Targets)
+	}
+	if n := searches.Load(); n != 1 {
+		t.Errorf("Tempo searched %d times, want 1 (shared with the cancelled request)", n)
+	}
+}
+
+func TestTraceBreakdownDoesNotCacheFailures(t *testing.T) {
+	var searches atomic.Int32
+	s := traceFixture(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if searches.Add(1) == 1 {
+			w.WriteHeader(http.StatusBadGateway)
+			return
+		}
+		_, _ = fmt.Fprint(w, fakeTempoSearch)
+	}))
+
+	rec := do(t, s, http.MethodGet, "/api/v1/traces/breakdown?testid=login&window=1h", nil)
+	requireStatus(t, rec, http.StatusOK)
+	if got := decodeBody[TraceBreakdown](t, rec); got.Targets[0].Error == "" {
+		t.Fatalf("expected the first search's error, got %+v", got.Targets[0])
+	}
+	rec = do(t, s, http.MethodGet, "/api/v1/traces/breakdown?testid=login&window=1h", nil)
+	if got := decodeBody[TraceBreakdown](t, rec); got.Targets[0].Error != "" {
+		t.Errorf("a failed search must not be cached: %+v", got.Targets[0])
 	}
 }
 
