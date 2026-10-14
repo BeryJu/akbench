@@ -9,6 +9,7 @@ import { ActivityLog } from '../components/ActivityLog';
 import { ConditionList, StatusBadge } from '../components/Status';
 import { Alert, confirmAndRun, Empty, errorMessage, Field, Page, Table } from '../components/ui';
 import { toast } from '../components/Toast';
+import { targetNameOf } from '../format';
 import { shellLinkForCluster } from '../shell/links';
 import { AuthentikDeployment, AuthentikDeploymentSpec, PlacementMode, PostgresMode, testCaseDeployments } from '../types';
 import { useResource } from '../useResource';
@@ -718,7 +719,9 @@ export function DeploymentViewPage() {
       {testids.length === 0 ? (
         <Empty>No test cases reference this deployment yet.</Empty>
       ) : (
-        <MetricsGrid testids={testids} />
+        // Test cases can drive other deployments too (e.g. a PR comparison):
+        // chart only this deployment's own target.
+        d && <MetricsGrid testids={testids} targets={[targetNameOf(d)]} />
       )}
 
       <ObjectYaml object={d} />

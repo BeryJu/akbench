@@ -14,7 +14,7 @@ import {
 } from 'chart.js';
 import { Line } from 'react-chartjs-2';
 import { api } from '../api';
-import { colorFor, formatMetricValue, stepFor } from '../format';
+import { colorFor, formatMetricValue, onlyTargets, stepFor } from '../format';
 import { useDarkTheme } from '../theme';
 import { CompareMetric, RangeResponse } from '../types';
 import { useResource } from '../useResource';
@@ -167,6 +167,7 @@ function rangeDatasets(data: RangeResponse | undefined, dark: boolean) {
 export function MetricsChart({
   metric,
   testids,
+  targets,
   rangeSeconds = 900,
   step,
   refreshMs = 15000,
@@ -175,6 +176,8 @@ export function MetricsChart({
 }: {
   metric: string;
   testids: string[];
+  /** Only chart these k6 targets (default: every target of the tests). */
+  targets?: string[];
   rangeSeconds?: number;
   /** Defaults to stepFor(rangeSeconds). */
   step?: string;
@@ -200,7 +203,12 @@ export function MetricsChart({
   const unit = data?.metric.unit ?? '';
   const label = data?.metric.label ?? metric;
   const theme = useChartTheme();
-  const datasets = useMemo(() => rangeDatasets(data, theme.dark), [data, theme.dark]);
+  const targetKey = targets?.join(',');
+  const datasets = useMemo(
+    () => rangeDatasets(onlyTargets(data, targets), theme.dark),
+    // targetKey, not targets: a fresh array literal each render would rebuild every time.
+    [data, targetKey, theme.dark]
+  );
   const hasData = datasets.some(d => d.data.length > 0);
   const options = useMemo(() => rangeChartOptions(unit, datasets.length > 1, theme), [unit, datasets.length, theme]);
 
@@ -224,10 +232,13 @@ export function MetricsChart({
 /** MetricsGrid charts every available metric for the given tests. */
 export function MetricsGrid({
   testids,
+  targets,
   endSeconds,
   rangeSeconds,
 }: {
   testids: string[];
+  /** Only chart these k6 targets (default: every target of the tests). */
+  targets?: string[];
   endSeconds?: number;
   rangeSeconds?: number;
 }) {
@@ -239,6 +250,7 @@ export function MetricsGrid({
           key={m.key}
           metric={m.key}
           testids={testids}
+          targets={targets}
           endSeconds={endSeconds}
           rangeSeconds={rangeSeconds}
         />

@@ -81,6 +81,17 @@ export function targetNameOf(deployment: { metadata: { name: string }; spec: { t
   return deployment.spec.targetName || deployment.metadata.name;
 }
 
+/** onlyTargets keeps just the series for the given k6 targets - a TestCase
+ * driving several deployments (e.g. a PR comparison) returns one series per
+ * target, and a single deployment's page must not show its siblings'.
+ * Undefined keeps everything. */
+export function onlyTargets<T extends { series: { target: string }[] }>(data: T | undefined, targets?: string[]): T | undefined {
+  if (!data || !targets) {
+    return data;
+  }
+  return { ...data, series: data.series.filter(s => targets.includes(s.target)) };
+}
+
 // A small qualitative palette, cycled by index so the same test keeps the
 // same color across every chart on a page. One variant per theme: each
 // color holds at least 3:1 against its own theme's surface, which a single

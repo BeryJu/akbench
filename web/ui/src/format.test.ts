@@ -5,6 +5,7 @@ import {
   formatDuration,
   formatMetricValue,
   metricsAnchorFromRuns,
+  onlyTargets,
   readableTextOn,
   relativeDelta,
   shortTag,
@@ -176,5 +177,23 @@ describe('buildLabel', () => {
 
   it('shows just the version without a commit', () => {
     expect(buildLabel({ version: 'dev' })).toBe('dev');
+  });
+});
+
+describe('onlyTargets', () => {
+  const data = {
+    series: [
+      { testid: 'pr-compare', target: 'ak', points: [] },
+      { testid: 'pr-compare', target: 'ak-pr-123', points: [] },
+    ],
+  };
+
+  it("drops other deployments' series", () => {
+    expect(onlyTargets(data, ['ak'])?.series.map(s => s.target)).toEqual(['ak']);
+  });
+
+  it('keeps everything without a target filter', () => {
+    expect(onlyTargets(data, undefined)).toBe(data);
+    expect(onlyTargets(undefined, ['ak'])).toBeUndefined();
   });
 });
