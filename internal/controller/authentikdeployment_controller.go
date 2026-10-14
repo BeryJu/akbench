@@ -333,6 +333,13 @@ func (r *AuthentikDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.
 	}
 
 	rc, err := r.resolveClient(ctx, &topo)
+	if err != nil && r.Tracker.WarmingUp(ctx, client.ObjectKey{Namespace: topo.Namespace, Name: topo.Spec.ClusterRef.Name}, err) &&
+		meta.FindStatusCondition(topo.Status.Conditions, benchv1alpha1.ConditionReady) != nil {
+		// Right after an operator restart: keep the last known status
+		// instead of flapping every deployment to not-Ready until the
+		// ClusterCache has connected.
+		return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
+	}
 	if err != nil {
 		setCondition(r.Recorder, &topo, &topo.Status.Conditions, topo.Generation, benchv1alpha1.ConditionReady, metav1.ConditionFalse,
 			benchv1alpha1.ReasonDependencyNotReady, fmt.Sprintf("waiting for cluster %q to be reachable: %v", topo.Spec.ClusterRef.Name, err))

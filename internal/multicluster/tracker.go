@@ -7,6 +7,8 @@ package multicluster
 
 import (
 	"context"
+	"errors"
+	"time"
 
 	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -29,12 +31,17 @@ var ErrClusterNotConnected = clustercache.ErrClusterNotConnected
 // same Secret WorkloadClusterReconciler's provisioning produces once a
 // Cluster's control plane is initialized.
 type Tracker struct {
-	cache clustercache.ClusterCache
+	cache   clustercache.ClusterCache
+	started time.Time
 }
+
+// StartupGrace bounds how long after the operator starts WarmingUp may
+// report a cluster as still connecting rather than unreachable.
+const StartupGrace = 2 * time.Minute
 
 // NewTracker wraps an existing ClusterCache.
 func NewTracker(cc clustercache.ClusterCache) *Tracker {
-	return &Tracker{cache: cc}
+	return &Tracker{cache: cc, started: time.Now()}
 }
 
 // SetupWithManager creates the underlying ClusterCache and registers its
@@ -51,7 +58,21 @@ func SetupWithManager(ctx context.Context, mgr ctrl.Manager) (*Tracker, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Tracker{cache: cc}, nil
+	return NewTracker(cc), nil
+}
+
+// WarmingUp reports whether err is ErrClusterNotConnected only because the
+// ClusterCache hasn't tried to connect to cluster yet since the operator
+// started - it connects asynchronously from its own controller, so every
+// reconcile right after a restart races it. Callers should requeue without
+// touching status: the cluster's last known state is still the best answer.
+// A connection attempt that has actually failed (a probe was recorded), or
+// one still pending after StartupGrace, is a real outage.
+func (t *Tracker) WarmingUp(ctx context.Context, cluster client.ObjectKey, err error) bool {
+	if t == nil || !errors.Is(err, ErrClusterNotConnected) || time.Since(t.started) > StartupGrace {
+		return false
+	}
+	return t.cache.GetHealthCheckingState(ctx, cluster).LastProbeTime.IsZero()
 }
 
 // GetClient returns a live client for the named Cluster (namespace/name of

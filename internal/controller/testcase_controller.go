@@ -12,6 +12,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -148,7 +149,7 @@ func (r *TestCaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	for _, ref := range refs {
 		result, err := r.reconcileTarget(ctx, &tc, tmpl, ref)
 		if err != nil {
-			return ctrl.Result{}, err
+			return requeueWhileWarmingUp(err)
 		}
 		if result.runnerClient == nil {
 			// The target couldn't be resolved this pass (its deployment is
@@ -229,6 +230,21 @@ func (r *TestCaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	return ctrl.Result{}, nil
 }
 
+// errClusterWarmingUp aborts a reconcile without touching status because a
+// cluster it needs is unreachable only since the operator just started (see
+// multicluster.Tracker.WarmingUp): keeping the last known status beats
+// flapping every TestCase to not-Ready on each restart.
+var errClusterWarmingUp = errors.New("cluster connection is still warming up")
+
+// requeueWhileWarmingUp turns errClusterWarmingUp into a short requeue and
+// passes any other error through.
+func requeueWhileWarmingUp(err error) (ctrl.Result, error) {
+	if errors.Is(err, errClusterWarmingUp) {
+		return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
+	}
+	return ctrl.Result{}, err
+}
+
 // targetResult is one target deployment's own outcome from reconcileTarget.
 // runnerClient is non-nil whenever resolveRunnerClient itself succeeded,
 // even if a later step for this same target (e.g. OAuth provisioning) still
@@ -268,6 +284,10 @@ func (r *TestCaseReconciler) reconcileTarget(ctx context.Context, tc *benchv1alp
 
 	rc, remote, err := resolveRunnerClient(ctx, r.Tracker, r.Client, tc.Namespace, tc.Spec.RunnerClusterRef, topo.Spec.ClusterRef)
 	if err != nil {
+		if r.Tracker.WarmingUp(ctx, client.ObjectKey{Namespace: tc.Namespace, Name: runnerClusterName(tc, topo)}, err) &&
+			meta.FindStatusCondition(tc.Status.Conditions, benchv1alpha1.ConditionReady) != nil {
+			return targetResult{}, errClusterWarmingUp
+		}
 		result.requeue = true
 		result.notReadyMsg = fmt.Sprintf("%s: runner cluster unreachable: %v", ref.Name, err)
 		return result, nil
