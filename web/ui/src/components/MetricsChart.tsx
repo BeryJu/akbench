@@ -21,8 +21,26 @@ import { useResource } from '../useResource';
 
 ChartJS.register(LinearScale, PointElement, LineElement, ChartJSLegend, ChartJSTooltip);
 
-function formatTime(seconds: number): string {
-  return new Date(seconds * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+function formatTime(seconds: number, withDate = false): string {
+  const date = new Date(seconds * 1000);
+  if (withDate) {
+    return date.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  }
+  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
+/** ChartWindow is the [start, end] (unix seconds) a range query covered -
+ * the x axis spans exactly this, not whatever the data happens to cover
+ * rounded out to "nice" ticks. */
+interface ChartWindow {
+  start: number;
+  end: number;
+}
+
+/** WindowedRange is a range response plus the window it was asked for. */
+interface WindowedRange {
+  response: RangeResponse;
+  window: ChartWindow;
 }
 
 /**
@@ -82,8 +100,15 @@ function useChartTheme(): ChartTheme {
  * 'time' scale, which would need the date-fns adapter as an extra
  * dependency for a feature (calendar-aware ticks) nothing here needs.
  */
-function rangeChartOptions(unit: string, showLegend: boolean, theme: ChartTheme): ChartOptions<'line'> {
+function rangeChartOptions(
+  unit: string,
+  showLegend: boolean,
+  theme: ChartTheme,
+  window?: ChartWindow
+): ChartOptions<'line'> {
   const font = { family: theme.font, size: 11 };
+  // Past a day, a bare time of day no longer says which day it is.
+  const withDate = !!window && window.end - window.start > 86400;
   return {
     responsive: true,
     maintainAspectRatio: false,
@@ -93,7 +118,9 @@ function rangeChartOptions(unit: string, showLegend: boolean, theme: ChartTheme)
     scales: {
       x: {
         type: 'linear',
-        ticks: { callback: v => formatTime(v as number), color: theme.muted, font, maxTicksLimit: 8 },
+        min: window?.start,
+        max: window?.end,
+        ticks: { callback: v => formatTime(v as number, withDate), color: theme.muted, font, maxTicksLimit: 8 },
         grid: { color: theme.border },
         border: { color: theme.border },
       },
@@ -121,7 +148,7 @@ function rangeChartOptions(unit: string, showLegend: boolean, theme: ChartTheme)
         titleFont: { ...font, size: 12 },
         bodyFont: { ...font, size: 12 },
         callbacks: {
-          title: items => formatTime(items[0]?.parsed.x ?? 0),
+          title: items => formatTime(items[0]?.parsed.x ?? 0, withDate),
           label: (item: TooltipItem<'line'>) =>
             `${item.dataset.label}: ${formatMetricValue(item.parsed.y ?? undefined, unit)}`,
         },
@@ -187,19 +214,23 @@ export function MetricsChart({
    * TestCase whose k6 Job already exited (format.ts's metricsAnchorFromRuns). */
   endSeconds?: number;
 }) {
-  const { data, error } = useResource<RangeResponse | undefined>(
+  const { data: windowed, error } = useResource<WindowedRange | undefined>(
     () => {
       if (testids.length === 0) {
         return Promise.resolve(undefined);
       }
       const end = endSeconds ?? Math.floor(Date.now() / 1000);
-      return api.metricsRange(testids, metric, end - rangeSeconds, end, step ?? stepFor(rangeSeconds));
+      const window = { start: end - rangeSeconds, end };
+      return api
+        .metricsRange(testids, metric, window.start, window.end, step ?? stepFor(rangeSeconds))
+        .then(response => ({ response, window }));
     },
     [testids.join(','), metric, rangeSeconds, step, endSeconds],
     // A fixed-in-the-past window never gains new data - don't poll it.
     endSeconds !== undefined ? 0 : refreshMs
   );
 
+  const data = windowed?.response;
   const unit = data?.metric.unit ?? '';
   const label = data?.metric.label ?? metric;
   const theme = useChartTheme();
@@ -210,7 +241,10 @@ export function MetricsChart({
     [data, targetKey, theme.dark]
   );
   const hasData = datasets.some(d => d.data.length > 0);
-  const options = useMemo(() => rangeChartOptions(unit, datasets.length > 1, theme), [unit, datasets.length, theme]);
+  const options = useMemo(
+    () => rangeChartOptions(unit, datasets.length > 1, theme, windowed?.window),
+    [unit, datasets.length, theme, windowed?.window]
+  );
 
   return (
     <div className="panel">
@@ -287,24 +321,31 @@ export function ResourceChart({
   height?: number;
   endSeconds?: number;
 }) {
-  const { data, error } = useResource<RangeResponse | undefined>(
+  const { data: windowed, error } = useResource<WindowedRange | undefined>(
     () => {
       if (testids.length === 0) {
         return Promise.resolve(undefined);
       }
       const end = endSeconds ?? Math.floor(Date.now() / 1000);
-      return api.resourceRange(testids, resource, end - rangeSeconds, end, step ?? stepFor(rangeSeconds));
+      const window = { start: end - rangeSeconds, end };
+      return api
+        .resourceRange(testids, resource, window.start, window.end, step ?? stepFor(rangeSeconds))
+        .then(response => ({ response, window }));
     },
     [testids.join(','), resource, rangeSeconds, step, endSeconds],
     endSeconds !== undefined ? 0 : refreshMs
   );
 
+  const data = windowed?.response;
   const unit = data?.metric.unit ?? '';
   const label = data?.metric.label ?? resource;
   const theme = useChartTheme();
   const datasets = useMemo(() => rangeDatasets(data, theme.dark), [data, theme.dark]);
   const hasData = datasets.some(d => d.data.length > 0);
-  const options = useMemo(() => rangeChartOptions(unit, datasets.length > 1, theme), [unit, datasets.length, theme]);
+  const options = useMemo(
+    () => rangeChartOptions(unit, datasets.length > 1, theme, windowed?.window),
+    [unit, datasets.length, theme, windowed?.window]
+  );
 
   return (
     <div className="panel">
