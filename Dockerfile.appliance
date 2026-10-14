@@ -64,6 +64,6 @@ COPY --from=builder /workspace/akbench-appliance /usr/local/bin/akbench-applianc
 COPY appliance/entrypoint.sh /usr/local/bin/akbench-entrypoint
 ENV KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 VOLUME /var/lib/rancher/k3s
-# 8080: web UI (AKBENCH_UI_PORT); 6443: the management cluster's own API.
-EXPOSE 8080 6443
+# 8443: web UI (HTTPS) (AKBENCH_UI_PORT); 6443: the management cluster's own API.
+EXPOSE 8443 6443
 ENTRYPOINT ["/usr/local/bin/akbench-entrypoint"]

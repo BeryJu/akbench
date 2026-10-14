@@ -5,17 +5,19 @@ import { defineConfig } from 'vitest/config';
 // running cmd/apiserver, so the browser only ever talks to one origin - the
 // same shape as production, where cmd/apiserver serves this app's build
 // output itself (internal/api/static.go). No CORS setup needed for dev.
-const apiTarget = process.env.BENCH_API_URL ?? 'http://localhost:8080';
+// cmd/apiserver only speaks HTTPS, by default with a self-signed certificate,
+// hence secure: false on every proxy entry.
+const apiTarget = process.env.BENCH_API_URL ?? 'https://localhost:8443';
 
 export default defineConfig({
   plugins: [react()],
   server: {
     port: 5173,
     proxy: {
-      '/api': { target: apiTarget, ws: true, changeOrigin: true },
+      '/api': { target: apiTarget, ws: true, changeOrigin: true, secure: false },
       // Grafana Live uses a WebSocket too.
-      '/grafana-proxy': { target: apiTarget, ws: true, changeOrigin: true },
-      '/healthz': { target: apiTarget },
+      '/grafana-proxy': { target: apiTarget, ws: true, changeOrigin: true, secure: false },
+      '/healthz': { target: apiTarget, secure: false },
     },
   },
   build: {

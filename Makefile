@@ -131,7 +131,7 @@ ui: ## Build the web UI (web/ui) into web/ui/dist, which run-apiserver then serv
 	cd web/ui && npm ci && npm run build
 
 .PHONY: ui-dev
-ui-dev: ## Run the web UI's Vite dev server on :5173, proxying the API to BENCH_API_URL (default http://localhost:8080).
+ui-dev: ## Run the web UI's Vite dev server on :5173, proxying the API to BENCH_API_URL (default https://localhost:8443).
 	cd web/ui && npm install && npm run dev
 
 .PHONY: ui-test

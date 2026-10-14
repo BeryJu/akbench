@@ -28,13 +28,13 @@ docker volume create "$NAME" >/dev/null
 docker run -d --name "$NAME" --privileged \
     -v "$NAME:/var/lib/rancher/k3s" \
     -v "$IMAGES_DIR/apiserver.tar:/var/lib/rancher/k3s/agent/images/apiserver.tar:ro" \
-    -p 8080:8080 -p 6443:6443 \
+    -p 8443:8443 -p 6443:6443 \
     "$APPLIANCE_IMG" >/dev/null
 
 cat <<EOF
 
 Started $NAME (akbench $VERSION). Follow the bootstrap with:
   docker logs -f $NAME 2>&1 | grep '\[akbench\]'
-Then open http://localhost:8080 with the token from:
+Then open https://localhost:8443 with the token from:
   docker exec $NAME akbench-appliance token
 EOF

@@ -31,7 +31,7 @@ trap cleanup EXIT INT TERM
 wait_for() {
   local url="$1" name="$2" attempt
   for attempt in $(seq 1 60); do
-    if curl -fsS -o /dev/null "${url}"; then
+    if curl -kfsS -o /dev/null "${url}"; then
       return 0
     fi
     sleep 1
@@ -70,16 +70,16 @@ fi
 # The kubectl shell is opt-in here: set BENCH_SHELL_KUBECONFIG to a
 # kubeconfig holding only the clusters you mean to expose. Defaulting to
 # your own ~/.kube/config would hand every context in it to anyone with the
-# (well-known) dev token who can reach :8080.
+# (well-known) dev token who can reach :8443.
 export BENCH_SHELL="${BENCH_SHELL:-$(command -v bash || echo /bin/sh)}"
 (cd "${root}" && go run ./cmd/apiserver) &
 pids+=($!)
-wait_for "http://127.0.0.1:8080/healthz" "web API"
+wait_for "https://127.0.0.1:8443/healthz" "web API"
 
 cat <<EOF
 
 authentik-bench dev environment is up:
-  API backend + UI  http://localhost:8080  (token: ${BENCH_API_TOKEN:-dev-token})
+  API backend + UI  https://localhost:8443  (self-signed; token: ${BENCH_API_TOKEN:-dev-token})
   operator manager  health probe on :8081
 
 The UI is served from web/ui/dist (run \`make ui\` to build it); for

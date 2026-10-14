@@ -50,6 +50,8 @@ func main() {
 func run() error {
 	var (
 		addr            string
+		tlsCertFile     string
+		tlsKeyFile      string
 		namespace       string
 		prometheusURL   string
 		tokenSecretName string
@@ -61,7 +63,12 @@ func run() error {
 		shellKubeconfig string
 		shellSecret     string
 	)
-	flag.StringVar(&addr, "bind-address", ":8080", "The address the web API binds to.")
+	flag.StringVar(&addr, "bind-address", ":8443", "The address the web API serves HTTPS on.")
+	flag.StringVar(&tlsCertFile, "tls-cert-file", os.Getenv("BENCH_TLS_CERT_FILE"),
+		"PEM certificate the web API serves. Without this and --tls-key-file, a self-signed certificate "+
+			"is generated at startup.")
+	flag.StringVar(&tlsKeyFile, "tls-key-file", os.Getenv("BENCH_TLS_KEY_FILE"),
+		"PEM private key for --tls-cert-file.")
 	flag.StringVar(&namespace, "namespace", envOr("BENCH_NAMESPACE", "authentik-bench"),
 		"The namespace bench CRs are read from and written to.")
 	flag.StringVar(&prometheusURL, "prometheus-url", os.Getenv("BENCH_PROMETHEUS_URL"),
@@ -172,9 +179,18 @@ func run() error {
 		handler = withCORS(handler, corsOrigin)
 	}
 
+	tlsCfg, selfSigned, err := tlsConfig(tlsCertFile, tlsKeyFile)
+	if err != nil {
+		return err
+	}
+	if selfSigned {
+		log.Info("No TLS certificate configured; serving a self-signed certificate")
+	}
+
 	httpServer := &http.Server{
 		Addr:              addr,
 		Handler:           handler,
+		TLSConfig:         tlsCfg,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	go func() {
@@ -187,7 +203,8 @@ func run() error {
 	}()
 
 	log.Info("Serving web API", "address", addr, "namespace", namespace)
-	if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+	// The certificate comes from TLSConfig, hence the empty file arguments.
+	if err := httpServer.ListenAndServeTLS("", ""); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}
 	return nil

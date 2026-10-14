@@ -146,12 +146,13 @@ spec:
               value: {{ toJSON . }}
 {{- end }}
           ports:
-            - name: http
-              containerPort: 8080
+            - name: https
+              containerPort: 8443
           readinessProbe:
             httpGet:
               path: /healthz
-              port: http
+              port: https
+              scheme: HTTPS
           resources:
             requests:
               cpu: 20m
@@ -169,6 +170,6 @@ spec:
   selector:
     app: authentik-bench-apiserver
   ports:
-    - name: http
+    - name: https
       port: {{ .Config.UIPort }}
-      targetPort: http
+      targetPort: https

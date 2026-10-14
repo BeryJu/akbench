@@ -76,7 +76,7 @@ func LoadConfig(getenv func(string) string) (*Config, error) {
 		APIServerImage:    or("AKBENCH_APISERVER_IMAGE", APIServerImage),
 		OperatorChart:     or("AKBENCH_OPERATOR_CHART", OperatorChart),
 		Namespace:         or("AKBENCH_NAMESPACE", "default"),
-		UIPort:            or("AKBENCH_UI_PORT", "8080"),
+		UIPort:            or("AKBENCH_UI_PORT", "8443"),
 		APIToken:          getenv("AKBENCH_API_TOKEN"),
 		OIDCIssuer:        getenv("AKBENCH_OIDC_ISSUER"),
 		OIDCClientID:      getenv("AKBENCH_OIDC_CLIENT_ID"),

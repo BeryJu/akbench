@@ -22,7 +22,7 @@ added without changing how the appliance is run.
 ```sh
 docker run -d --name akbench --privileged --restart unless-stopped \
   -v akbench:/var/lib/rancher/k3s \
-  -p 8080:8080 -p 6443:6443 \
+  -p 8443:8443 -p 6443:6443 \
   ghcr.io/beryju/akbench-appliance:latest
 ```
 
@@ -32,7 +32,9 @@ Follow the first boot (2-5 minutes, mostly image pulls):
 docker logs -f akbench 2>&1 | grep '\[akbench\]'
 ```
 
-Then open `http://<host>:8080/` and log in with the API token:
+Then open `https://<host>:8443/` and log in with the API token. The web UI
+serves a self-signed certificate (regenerated on every start), so expect a
+browser warning:
 
 ```sh
 docker exec akbench akbench-appliance token
@@ -112,7 +114,7 @@ Everything infrastructure-specific lives in the web UI.
 | Variable | Default | |
 |---|---|---|
 | `AKBENCH_NAMESPACE` | `default` | Namespace for your akbench objects and infrastructure connections. |
-| `AKBENCH_UI_PORT` | `8080` | Port the web UI listens on (publish it with `-p`). |
+| `AKBENCH_UI_PORT` | `8443` | Port the web UI serves HTTPS on (publish it with `-p`). |
 | `AKBENCH_API_TOKEN` | generated | Pin the web UI's bearer token. |
 | `AKBENCH_OIDC_ISSUER`, `AKBENCH_OIDC_CLIENT_ID`, `AKBENCH_OIDC_REQUIRED_GROUP`, `AKBENCH_OIDC_SCOPES` | | OIDC login for the web UI (see the main README). |
 | `AKBENCH_VERSION` | the image's own | Operator chart/image and apiserver image version to install. |

@@ -84,7 +84,7 @@ with (Flux, CAPI, CNPG, CSI). For changes to `internal/render` or
 
 ```bash
 make dev          # CRDs + operator + cmd/apiserver against the current kubeconfig context
-make ui-dev       # Vite dev server on :5173, proxying to the API on :8080
+make ui-dev       # Vite dev server on :5173, proxying to the API on :8443
 make dev-metrics  # minimal Prometheus for local metrics
 make fixtures     # synthetic users + k6 credentials Secret
 make help         # every target

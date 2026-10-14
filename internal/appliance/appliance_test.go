@@ -28,7 +28,7 @@ func TestLoadConfigDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Namespace != "default" || cfg.UIPort != "8080" || cfg.Version != Version {
+	if cfg.Namespace != "default" || cfg.UIPort != "8443" || cfg.Version != Version {
 		t.Errorf("unexpected defaults: %+v", cfg)
 	}
 }

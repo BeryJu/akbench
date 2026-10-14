@@ -297,7 +297,7 @@ func (b *Bootstrapper) writeStatus(ctx context.Context, syncErr error) {
 // PrintBanner reports where the UI is and how to log in.
 func (b *Bootstrapper) PrintBanner() {
 	b.logf("akbench %s is ready", b.Config.Version)
-	b.logf("  Web UI:    http://<host>:%s/", b.Config.UIPort)
+	b.logf("  Web UI:    https://<host>:%s/ (self-signed certificate)", b.Config.UIPort)
 	b.logf("  API token: docker exec <container> akbench-appliance token")
 	b.logf("  Next:      enable an infrastructure provider and add its credentials under Infrastructure in the web UI")
 }

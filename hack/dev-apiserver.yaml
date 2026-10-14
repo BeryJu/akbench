@@ -3,7 +3,7 @@
 # from one process. Applied by
 # hack/deploy-apiserver.sh (make deploy-apiserver) against whatever image
 # that script just built/loaded (authentik-bench-apiserver:dev for local
-# dev - see that script). Open the UI at http://<node>:30911/.
+# dev - see that script). Open the UI at https://<node>:30911/.
 #
 # cluster-admin, matching this repo's existing dev-only security posture
 # (the operator itself is bound the same way) - not
@@ -112,12 +112,13 @@ spec:
             # - name: BENCH_OIDC_REQUIRED_GROUP
             #   value: authentik-bench-admins
           ports:
-            - name: http
-              containerPort: 8080
+            - name: https
+              containerPort: 8443
           readinessProbe:
             httpGet:
               path: /healthz
-              port: http
+              port: https
+              scheme: HTTPS
 ---
 apiVersion: v1
 kind: Service
@@ -128,9 +129,9 @@ spec:
   selector:
     app: authentik-bench-apiserver
   ports:
-    - name: http
-      port: 8080
-      targetPort: 8080
+    - name: https
+      port: 8443
+      targetPort: 8443
 ---
 # NodePort twin of the ClusterIP Service above, matching
 # render.PrometheusNodePortServiceName/GrafanaNodePortServiceName's own
@@ -147,7 +148,7 @@ spec:
   selector:
     app: authentik-bench-apiserver
   ports:
-    - name: http
-      port: 8080
-      targetPort: 8080
+    - name: https
+      port: 8443
+      targetPort: 8443
       nodePort: 30911
