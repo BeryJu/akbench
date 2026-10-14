@@ -1,4 +1,4 @@
-import { FormEvent, useState } from 'react';
+import { FormEvent, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import { api } from '../api';
 import { CodeEditor } from '../components/CodeEditor';
@@ -23,9 +23,9 @@ import {
   TimeRangeSelect,
 } from '../components/ui';
 import { toast } from '../components/Toast';
-import { earliestBurnStart, metricsAnchorFromRuns, parseTimeRange, shortTag, timeRangeSeconds } from '../format';
+import { earliestBurnStart, metricsAnchorFromRuns, parseTimeRange, shortTag, SINCE_START, timeRangeSeconds } from '../format';
 import { shellLinkForCluster } from '../shell/links';
-import { TestCase, TestCaseSpec, TestProfile, testCaseDeployments, testRunDeployment } from '../types';
+import { TestCase, TestCaseSpec, TestProfile, testCaseBaseline, testCaseDeployments, testRunDeployment } from '../types';
 import { useResource } from '../useResource';
 
 export function TestCasesPage() {
@@ -172,8 +172,13 @@ function TestCaseForm({ existing }: { existing?: TestCase }) {
     // Always write deploymentRefs going forward and drop the deprecated
     // singular field, even if it's what this TestCase was loaded with -
     // any edit through this form migrates it cleanly.
-    patch({ deploymentRefs: next.map(n => ({ name: n })), deploymentRef: undefined });
+    patch({
+      deploymentRefs: next.map(n => ({ name: n })),
+      deploymentRef: undefined,
+      baselineRef: spec.baselineRef && next.includes(spec.baselineRef.name) ? spec.baselineRef : undefined,
+    });
   }
+  const baselineChoice = testCaseBaseline(spec);
 
   // scriptConfigMapRef (bring-your-own ConfigMap) is a power-user escape
   // hatch deliberately not offered here - it survives a save untouched.
@@ -238,6 +243,17 @@ function TestCaseForm({ existing }: { existing?: TestCase }) {
                 or setups side by side; Run now starts one test run per target.
               </span>
             </div>
+            {selectedDeployments.length > 1 && (
+              <Field label="Baseline" help="The target the others are compared against">
+                <select value={baselineChoice} onChange={e => patch({ baselineRef: { name: e.target.value } })}>
+                  {selectedDeployments.map(n => (
+                    <option key={n} value={n}>
+                      {n}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            )}
           </div>
         </fieldset>
 
@@ -381,7 +397,8 @@ export function TestCaseEditPage() {
   return existing.data ? <TestCaseForm key={name} existing={existing.data} /> : null;
 }
 
-const DEFAULT_TIMELINE_RANGE = '6h';
+// Until a burn has started there's no start to range from.
+const FALLBACK_TIMELINE_RANGE = '6h';
 
 const SECTIONS = [
   { id: 'targets', label: 'Targets & timeline' },
@@ -399,8 +416,8 @@ export function TestCaseViewPage() {
   const tc = testCase.data;
   const profile = tc?.spec.profile;
 
-  // Time range and baseline live in the URL, so a comparison
-  // can be shared exactly as configured.
+  // The time range lives in the URL, so a view can be shared exactly as
+  // configured; the baseline is stored on the TestCase itself.
   const [params, setParams] = useSearchParams();
   function updateParams(patch: Record<string, string | undefined>) {
     const next = new URLSearchParams(params);
@@ -414,7 +431,8 @@ export function TestCaseViewPage() {
     setParams(next, { replace: true });
   }
   const burnStart = tc ? earliestBurnStart([tc]) : undefined;
-  const timelineRangeValue = parseTimeRange(params.get('range'), DEFAULT_TIMELINE_RANGE, burnStart);
+  const defaultTimelineRange = burnStart !== undefined ? SINCE_START : FALLBACK_TIMELINE_RANGE;
+  const timelineRangeValue = parseTimeRange(params.get('range'), defaultTimelineRange, burnStart);
   const timelineRange = timeRangeSeconds(timelineRangeValue, burnStart);
 
   const sortedRuns = [...(runs.data ?? [])].sort((a, b) =>
@@ -430,7 +448,32 @@ export function TestCaseViewPage() {
     15000
   );
   const rows = tc ? buildTargetRows(tc, summary.data?.results ?? [], deployments.data ?? []) : [];
-  const baseline = params.get('baseline') ?? rows[0]?.target;
+  // pendingBaseline shows a picked baseline (a deployment name) right away,
+  // until the reloaded TestCase carries it.
+  const [pendingBaseline, setPendingBaseline] = useState<string>();
+  const storedBaseline = tc ? testCaseBaseline(tc.spec) : undefined;
+  useEffect(() => {
+    if (pendingBaseline !== undefined && tc?.spec.baselineRef?.name === pendingBaseline) {
+      setPendingBaseline(undefined);
+    }
+  }, [pendingBaseline, tc]);
+  const baselineDeployment = pendingBaseline ?? storedBaseline;
+  const baseline = (rows.find(r => r.deploymentName === baselineDeployment) ?? rows[0])?.target;
+
+  async function saveBaseline(target: string) {
+    const row = rows.find(r => r.target === target);
+    if (!tc || !row || row.deploymentName === baselineDeployment) {
+      return;
+    }
+    setPendingBaseline(row.deploymentName);
+    try {
+      await api.updateTestCase(name, { spec: { ...tc.spec, baselineRef: { name: row.deploymentName } } });
+      testCase.reload();
+    } catch (err) {
+      setPendingBaseline(undefined);
+      toast.error(errorMessage(err));
+    }
+  }
   const since = tc && profile === 'Burn' ? burningFor(tc) : undefined;
 
   const [busy, setBusy] = useState(false);
@@ -513,7 +556,7 @@ export function TestCaseViewPage() {
             <TimeRangeSelect
               value={timelineRangeValue}
               sinceStartLabel={burnStart !== undefined ? 'Since burn start' : undefined}
-              onChange={v => updateParams({ range: v === DEFAULT_TIMELINE_RANGE ? undefined : v })}
+              onChange={v => updateParams({ range: v === defaultTimelineRange ? undefined : v })}
             />
           )
         }
@@ -525,7 +568,7 @@ export function TestCaseViewPage() {
             rows={rows}
             metrics={summary.data?.metrics ?? []}
             baseline={baseline}
-            onBaseline={target => updateParams({ baseline: target === rows[0]?.target ? undefined : target })}
+            onBaseline={target => void saveBaseline(target)}
             actions={row => {
               const cluster = tc?.spec.runnerClusterRef?.name ?? row.deployment?.spec.clusterRef?.name;
               return (

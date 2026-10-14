@@ -46,6 +46,13 @@ type TestCaseSpec struct {
 	// +optional
 	DeploymentRefs []corev1.LocalObjectReference `json:"deploymentRefs,omitempty"`
 
+	// baselineRef names the deployment, among this test's deployments, that
+	// the others are compared against. Only views read it - it doesn't
+	// change how the test runs. Unset, or naming a deployment the test no
+	// longer drives, means the first of its deployments.
+	// +optional
+	BaselineRef corev1.LocalObjectReference `json:"baselineRef,omitzero"`
+
 	// runnerClusterRef names the cluster.x-k8s.io/v1beta1 Cluster the k6
 	// workload itself runs on. Defaults to the deployment's clusterRef.
 	// +optional

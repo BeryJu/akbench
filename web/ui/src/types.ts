@@ -120,6 +120,9 @@ export interface TestCaseSpec {
   // this layer; the CRD/controller require at least one to resolve.
   deploymentRef?: { name: string };
   deploymentRefs?: { name: string }[];
+  // baselineRef is the deployment the others are compared against; unset or
+  // stale means the first one (testCaseBaseline).
+  baselineRef?: { name: string };
   runnerClusterRef?: { name: string };
   template?: string;
   inline?: string;
@@ -171,6 +174,14 @@ export function testCaseDeployments(spec: TestCaseSpec): { name: string }[] {
     return [spec.deploymentRef];
   }
   return [];
+}
+
+/** testCaseBaseline is the deployment a TestCase's other targets are
+ * compared against: spec.baselineRef while it names one of its deployments,
+ * otherwise the first. */
+export function testCaseBaseline(spec: TestCaseSpec): string | undefined {
+  const deployments = testCaseDeployments(spec);
+  return deployments.find(d => d.name === spec.baselineRef?.name)?.name ?? deployments[0]?.name;
 }
 
 export interface TestCaseTemplateSpec {

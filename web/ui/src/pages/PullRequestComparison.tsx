@@ -187,6 +187,7 @@ export function PullRequestComparisonPage() {
         metadata: { name: testCaseName, labels },
         spec: {
           deploymentRefs: deployments.map(d => ({ name: d.name })),
+          baselineRef: { name: baselineName },
           template,
           profile: 'Burn',
           vus,

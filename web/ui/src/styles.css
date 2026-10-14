@@ -127,7 +127,7 @@ legend { font-weight: 700; font-size: 15px; margin: 18px 0 8px; padding: 0; }
 .section-bar h2 { margin: 0 0 2px; font-size: 16px; }
 .section-body { padding: 16px; min-width: 0; }
 .section-body > :last-child { margin-bottom: 0; }
-.section-body h3 { color: var(--text); font-size: 13.5px; margin: 22px 0 4px; }
+.section-body h3 { color: var(--text); font-size: 13.5px; }
 .section-body > h3:first-child, .section-body > .sub-head:first-child h3 { margin-top: 0; }
 .sub-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
 .sub-head h3 { margin: 22px 0 2px; }
