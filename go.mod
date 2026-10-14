@@ -11,7 +11,7 @@ require (
 	github.com/fluxcd/source-controller/api v1.9.6
 	github.com/go-chi/chi/v5 v5.3.2
 	github.com/lxc/incus/v7 v7.5.1
-	github.com/onsi/ginkgo/v2 v2.33.0
+	github.com/onsi/ginkgo/v2 v2.33.1
 	github.com/onsi/gomega v1.44.0
 	go.yaml.in/yaml/v3 v3.0.5
 	k8s.io/api v0.37.1
