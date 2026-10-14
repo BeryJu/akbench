@@ -280,10 +280,14 @@ export const api = {
         startSeconds: number,
         endSeconds: number,
         step: string,
+        // Only that authentik process's pods; omitted, every non-Job pod in
+        // the namespace (postgres included).
+        component?: "server" | "worker",
     ) =>
         request<RangeResponse>(
             `/api/v1/metrics/resources?testids=${seg(testids.join(","))}` +
-                `&resource=${seg(resource)}&start=${startSeconds}&end=${endSeconds}&step=${seg(step)}`,
+                `&resource=${seg(resource)}&start=${startSeconds}&end=${endSeconds}&step=${seg(step)}` +
+                (component ? `&component=${seg(component)}` : ""),
         ),
 
     // -- Grafana proxy (internal/api/grafana_session.go): sets the cookie the

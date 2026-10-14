@@ -773,7 +773,7 @@ export function TestCaseViewPage() {
             <Section
                 id="resources"
                 title="Resources"
-                description="CPU and memory of each target's pods over the timeline's range."
+                description="CPU and memory of each target's server and worker pods over the timeline's range."
             >
                 <ResourceCharts
                     testids={[name]}

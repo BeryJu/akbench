@@ -344,6 +344,7 @@ export function MetricsGrid({
  */
 export function ResourceChart({
     resource,
+    component,
     testids,
     rangeSeconds = 900,
     step,
@@ -352,6 +353,8 @@ export function ResourceChart({
     endSeconds,
 }: {
     resource: "cpu" | "memory";
+    /** Only this authentik process's pods (default: every pod of the deployment). */
+    component?: "server" | "worker";
     testids: string[];
     rangeSeconds?: number;
     /** Defaults to stepFor(rangeSeconds). */
@@ -374,16 +377,18 @@ export function ResourceChart({
                     window.start,
                     window.end,
                     step ?? stepFor(rangeSeconds),
+                    component,
                 )
                 .then((response) => ({ response, window }));
         },
-        [testids.join(","), resource, rangeSeconds, step, endSeconds],
+        [testids.join(","), resource, component, rangeSeconds, step, endSeconds],
         endSeconds !== undefined ? 0 : refreshMs,
     );
 
     const data = windowed?.response;
     const unit = data?.metric.unit ?? "";
-    const label = data?.metric.label ?? resource;
+    const resourceLabel = data?.metric.label ?? resource;
+    const label = component ? `${resourceLabel} · ${component}` : resourceLabel;
     const theme = useChartTheme();
     const datasets = useMemo(() => rangeDatasets(data, theme.dark), [data, theme.dark]);
     const hasData = datasets.some((d) => d.data.length > 0);
@@ -410,8 +415,9 @@ export function ResourceChart({
 }
 
 /**
- * ResourceCharts renders exactly two big charts - CPU and memory - each
- * with one line per given test.
+ * ResourceCharts renders four big charts - CPU and memory, each for
+ * authentik's server and worker pods - with one line per given test and
+ * target.
  */
 export function ResourceCharts({
     testids,
@@ -422,20 +428,24 @@ export function ResourceCharts({
     endSeconds?: number;
     rangeSeconds?: number;
 }) {
+    const charts = [
+        { resource: "cpu", component: "server" },
+        { resource: "cpu", component: "worker" },
+        { resource: "memory", component: "server" },
+        { resource: "memory", component: "worker" },
+    ] as const;
     return (
         <div className="grid2">
-            <ResourceChart
-                resource="cpu"
-                testids={testids}
-                endSeconds={endSeconds}
-                rangeSeconds={rangeSeconds}
-            />
-            <ResourceChart
-                resource="memory"
-                testids={testids}
-                endSeconds={endSeconds}
-                rangeSeconds={rangeSeconds}
-            />
+            {charts.map(({ resource, component }) => (
+                <ResourceChart
+                    key={`${resource}-${component}`}
+                    resource={resource}
+                    component={component}
+                    testids={testids}
+                    endSeconds={endSeconds}
+                    rangeSeconds={rangeSeconds}
+                />
+            ))}
         </div>
     );
 }

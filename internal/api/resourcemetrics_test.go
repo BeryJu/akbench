@@ -171,3 +171,31 @@ func TestListResourceMetricsSkipsUnresolvableTestID(t *testing.T) {
 		t.Errorf("got %d series for an unresolvable testid, want 0: %+v", len(body.Series), body.Series)
 	}
 }
+
+// component narrows the sum to that authentik process's own pods, the
+// same <deployment>-authentik-<component>- names profiles.go selects by.
+func TestListResourceMetricsComponentFiltersPods(t *testing.T) {
+	var gotQuery string
+	prom := fakePrometheusRange(t, func(query string) [][2]any {
+		gotQuery = query
+		return [][2]any{{1700000000, "1"}}
+	})
+
+	deployment := sampleDeployment("topo3")
+	deployment.Spec.Namespace = "ak-topo3"
+	tc := sampleTestCase("login-topo3", "topo3", benchv1alpha1.ProfileBurn)
+
+	s, _ := newServer(t, Config{PrometheusURL: prom.URL}, deployment, tc)
+	rec := do(t, s, http.MethodGet, "/api/v1/metrics/resources?testids=login-topo3&resource=memory&component=worker&start=1700000000&end=1700003600", nil)
+	requireStatus(t, rec, http.StatusOK)
+
+	if strings.Contains(gotQuery, "%!") || strings.Contains(gotQuery, "MISSING") {
+		t.Fatalf("query has an unsubstituted format verb: %q", gotQuery)
+	}
+	if !strings.Contains(gotQuery, `pod=~"topo3-authentik-worker-.+"`) {
+		t.Errorf("query doesn't filter to the worker's pods: %q", gotQuery)
+	}
+
+	rec = do(t, s, http.MethodGet, "/api/v1/metrics/resources?testids=login-topo3&resource=memory&component=postgres&start=1700000000&end=1700003600", nil)
+	requireStatus(t, rec, http.StatusBadRequest)
+}

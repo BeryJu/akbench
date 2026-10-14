@@ -255,8 +255,8 @@ export function ComparePage() {
 
                     <h2>Resource usage</h2>
                     <p className="muted">
-                        CPU and memory for each test's own deployment, summed across its pods - one
-                        line per test, same as the charts above.
+                        CPU and memory of each test's authentik server and worker pods, summed per
+                        target - one line per test, same as the charts above.
                     </p>
                     <ResourceCharts
                         testids={selected}
