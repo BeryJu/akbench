@@ -134,3 +134,13 @@ __bench_alias_complete() {
   __start_kubectl
 }
 complete -o default -F __bench_alias_complete $(compgen -a)
+
+# kubectx/kubens release tarballs ship no completion scripts.
+__bench_kubectx_complete() {
+  COMPREPLY=($(compgen -W "- $(kubectl config get-contexts -o name 2>/dev/null)" -- "${COMP_WORDS[COMP_CWORD]}"))
+}
+__bench_kubens_complete() {
+  COMPREPLY=($(compgen -W "- $(kubectl get namespaces -o name 2>/dev/null | sed 's|^namespace/||')" -- "${COMP_WORDS[COMP_CWORD]}"))
+}
+complete -F __bench_kubectx_complete kubectx
+complete -F __bench_kubens_complete kubens
