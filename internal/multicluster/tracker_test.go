@@ -23,7 +23,8 @@ func (f fakeCache) GetHealthCheckingState(context.Context, client.ObjectKey) clu
 
 func TestWarmingUp(t *testing.T) {
 	key := client.ObjectKey{Namespace: "ns", Name: "wc"}
-	probed := clustercache.HealthCheckingState{LastProbeTime: time.Now(), ConsecutiveFailures: 1}
+	failed := clustercache.HealthCheckingState{LastProbeTime: time.Now(), ConsecutiveFailures: 1}
+	dropped := clustercache.HealthCheckingState{LastProbeTime: time.Now(), LastProbeSuccessTime: time.Now().Add(-time.Minute), ConsecutiveFailures: 5}
 	cases := []struct {
 		name    string
 		tracker *Tracker
@@ -32,7 +33,8 @@ func TestWarmingUp(t *testing.T) {
 	}{
 		{"not yet probed after start", &Tracker{cache: fakeCache{}, started: time.Now()}, ErrClusterNotConnected, true},
 		{"wrapped error", &Tracker{cache: fakeCache{}, started: time.Now()}, errors.Join(errors.New("ctx"), ErrClusterNotConnected), true},
-		{"probe already failed", &Tracker{cache: fakeCache{state: probed}, started: time.Now()}, ErrClusterNotConnected, false},
+		{"first connect failed", &Tracker{cache: fakeCache{state: failed}, started: time.Now()}, ErrClusterNotConnected, true},
+		{"connected once then dropped", &Tracker{cache: fakeCache{state: dropped}, started: time.Now()}, ErrClusterNotConnected, false},
 		{"past startup grace", &Tracker{cache: fakeCache{}, started: time.Now().Add(-StartupGrace - time.Second)}, ErrClusterNotConnected, false},
 		{"other error", &Tracker{cache: fakeCache{}, started: time.Now()}, errors.New("boom"), false},
 		{"nil tracker", nil, ErrClusterNotConnected, false},

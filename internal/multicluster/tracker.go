@@ -62,17 +62,20 @@ func SetupWithManager(ctx context.Context, mgr ctrl.Manager) (*Tracker, error) {
 }
 
 // WarmingUp reports whether err is ErrClusterNotConnected only because the
-// ClusterCache hasn't tried to connect to cluster yet since the operator
-// started - it connects asynchronously from its own controller, so every
-// reconcile right after a restart races it. Callers should requeue without
-// touching status: the cluster's last known state is still the best answer.
-// A connection attempt that has actually failed (a probe was recorded), or
-// one still pending after StartupGrace, is a real outage.
+// ClusterCache hasn't connected to cluster yet since the operator started -
+// it connects asynchronously from its own controller, so every reconcile
+// right after a restart races it. Callers should requeue without touching
+// status: the cluster's last known state is still the best answer.
+//
+// A failed first attempt still counts as warming up: right after a restart
+// the first Connect regularly fails and only the retry succeeds. A cluster
+// that has connected once and dropped since, or that still hasn't connected
+// after StartupGrace, is a real outage.
 func (t *Tracker) WarmingUp(ctx context.Context, cluster client.ObjectKey, err error) bool {
 	if t == nil || !errors.Is(err, ErrClusterNotConnected) || time.Since(t.started) > StartupGrace {
 		return false
 	}
-	return t.cache.GetHealthCheckingState(ctx, cluster).LastProbeTime.IsZero()
+	return t.cache.GetHealthCheckingState(ctx, cluster).LastProbeSuccessTime.IsZero()
 }
 
 // GetClient returns a live client for the named Cluster (namespace/name of
