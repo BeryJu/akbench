@@ -5,20 +5,14 @@ import { useMemo } from 'react';
 import { useSearchParams } from 'react-router';
 import { api } from '../api';
 import { MetricsChart, ResourceCharts } from '../components/MetricsChart';
-import { Alert, Empty, Field, Page } from '../components/ui';
-import { formatMetricValue, metricsAnchorFromRuns } from '../format';
+import { Alert, Empty, Field, Page, TimeRangeSelect } from '../components/ui';
+import { earliestBurnStart, formatMetricValue, metricsAnchorFromRuns, parseTimeRange, timeRangeSeconds } from '../format';
 import { CompareResponse } from '../types';
 import { useResource } from '../useResource';
 
 const SUMMARY_WINDOWS = ['1m', '5m', '15m', '1h'];
 const DEFAULT_SUMMARY_WINDOW = '5m';
-const CHART_RANGES = [
-  { label: 'Last 15 minutes', seconds: 900 },
-  { label: 'Last 1 hour', seconds: 3600 },
-  { label: 'Last 6 hours', seconds: 21600 },
-  { label: 'Last 24 hours', seconds: 86400 },
-];
-const DEFAULT_RANGE_SECONDS = CHART_RANGES[0].seconds;
+const DEFAULT_RANGE = '15m';
 
 /** resultKey/resultLabel identify and label one compare row - a (testid,
  * target) pair, since a multi-deployment TestCase now produces more than one
@@ -52,8 +46,6 @@ export function ComparePage() {
   const selected = useMemo(() => (params.get('tests') ?? '').split(',').filter(Boolean), [params]);
   const summaryWindowParam = params.get('window');
   const summaryWindow = summaryWindowParam && SUMMARY_WINDOWS.includes(summaryWindowParam) ? summaryWindowParam : DEFAULT_SUMMARY_WINDOW;
-  const rangeSecondsParam = Number(params.get('range'));
-  const rangeSeconds = CHART_RANGES.some(r => r.seconds === rangeSecondsParam) ? rangeSecondsParam : DEFAULT_RANGE_SECONDS;
 
   /** updateParams patches only the given keys, preserving the rest of the
    * query string - setSearchParams itself replaces the whole thing, so
@@ -80,6 +72,26 @@ export function ComparePage() {
   const anchor = allQuick
     ? metricsAnchorFromRuns((testRuns.data ?? []).filter(r => selected.includes(r.spec.testCaseRef.name)))
     : undefined;
+  // "Since test start" begins at the earliest of the selected Burn tests'
+  // start and each selected Quick test's latest run.
+  const testStart = useMemo(() => {
+    const chosen = (testCases.data ?? []).filter(tc => selected.includes(tc.metadata.name));
+    const starts = chosen
+      .filter(tc => tc.spec.profile === 'Quick')
+      .flatMap(tc => {
+        const runStarts = (testRuns.data ?? [])
+          .filter(r => r.spec.testCaseRef.name === tc.metadata.name && r.status?.startTime)
+          .map(r => Date.parse(r.status!.startTime!) / 1000);
+        return runStarts.length ? [Math.max(...runStarts)] : [];
+      });
+    const burnStart = earliestBurnStart(chosen.filter(tc => tc.spec.profile === 'Burn'));
+    if (burnStart !== undefined) {
+      starts.push(burnStart);
+    }
+    return starts.length ? Math.min(...starts) : undefined;
+  }, [testCases.data, testRuns.data, selected]);
+  const range = parseTimeRange(params.get('range'), DEFAULT_RANGE, testStart);
+  const rangeSeconds = timeRangeSeconds(range, testStart, anchor?.endSeconds);
 
   const comparison = useResource(
     () => (selected.length ? api.compare(selected, summaryWindow, anchor?.endSeconds) : Promise.resolve(undefined)),
@@ -134,16 +146,11 @@ export function ComparePage() {
             </select>
           </Field>
           <Field label="Chart range">
-            <select
-              value={rangeSeconds}
-              onChange={e => updateParams({ range: Number(e.target.value) === DEFAULT_RANGE_SECONDS ? undefined : e.target.value })}
-            >
-              {CHART_RANGES.map(r => (
-                <option key={r.seconds} value={r.seconds}>
-                  {r.label}
-                </option>
-              ))}
-            </select>
+            <TimeRangeSelect
+              value={range}
+              sinceStartLabel={testStart !== undefined ? 'Since test start' : undefined}
+              onChange={v => updateParams({ range: v === DEFAULT_RANGE ? undefined : v })}
+            />
           </Field>
         </div>
       </div>

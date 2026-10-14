@@ -7,9 +7,9 @@ import { ObjectYaml } from '../components/ObjectYaml';
 import { NodePlacement } from '../components/Placement';
 import { ActivityLog } from '../components/ActivityLog';
 import { ConditionList, StatusBadge } from '../components/Status';
-import { Alert, confirmAndRun, Empty, errorMessage, Field, Page, Table } from '../components/ui';
+import { Alert, confirmAndRun, Empty, errorMessage, Field, Page, Table, TimeRangeSelect } from '../components/ui';
 import { toast } from '../components/Toast';
-import { targetNameOf } from '../format';
+import { earliestBurnStart, parseTimeRange, targetNameOf, timeRangeSeconds } from '../format';
 import { shellLinkForCluster } from '../shell/links';
 import { AuthentikDeployment, AuthentikDeploymentSpec, PlacementMode, PostgresMode, testCaseDeployments } from '../types';
 import { useResource } from '../useResource';
@@ -596,6 +596,8 @@ export function DeploymentEditPage() {
   return existing.data ? <DeploymentForm key={name} existing={existing.data} /> : null;
 }
 
+const DEFAULT_METRICS_RANGE = '15m';
+
 /**
  * The deployment's view: its status, shell hand-offs for its pods on
  * whichever cluster it runs on, and metrics for every TestCase pointed at it.
@@ -604,9 +606,20 @@ export function DeploymentViewPage() {
   const { name = '' } = useParams();
   const deployment = useResource(() => api.deployment(name), [name], 10000, 'AuthentikDeployment');
   const testCases = useResource(() => api.testCases(), [], 15000, 'TestCase');
-  const testids = (testCases.data ?? [])
-    .filter(tc => testCaseDeployments(tc.spec).some(ref => ref.name === name))
-    .map(tc => tc.metadata.name);
+  const relevant = (testCases.data ?? []).filter(tc => testCaseDeployments(tc.spec).some(ref => ref.name === name));
+  const testids = relevant.map(tc => tc.metadata.name);
+  const burnStart = earliestBurnStart(relevant, name);
+  const [params, setParams] = useSearchParams();
+  const range = parseTimeRange(params.get('range'), DEFAULT_METRICS_RANGE, burnStart);
+  const setRange = (value: string) => {
+    const next = new URLSearchParams(params);
+    if (value === DEFAULT_METRICS_RANGE) {
+      next.delete('range');
+    } else {
+      next.set('range', value);
+    }
+    setParams(next, { replace: true });
+  };
   const [kicking, setKicking] = useState(false);
 
   const d = deployment.data;
@@ -715,13 +728,24 @@ export function DeploymentViewPage() {
         </>
       )}
 
-      <h2>Metrics</h2>
+      <div className="section-head">
+        <h2>Metrics</h2>
+        {testids.length > 0 && (
+          <TimeRangeSelect
+            value={range}
+            sinceStartLabel={burnStart !== undefined ? 'Since burn start' : undefined}
+            onChange={setRange}
+          />
+        )}
+      </div>
       {testids.length === 0 ? (
         <Empty>No test cases reference this deployment yet.</Empty>
       ) : (
         // Test cases can drive other deployments too (e.g. a PR comparison):
         // chart only this deployment's own target.
-        d && <MetricsGrid testids={testids} targets={[targetNameOf(d)]} />
+        d && (
+          <MetricsGrid testids={testids} targets={[targetNameOf(d)]} rangeSeconds={timeRangeSeconds(range, burnStart)} />
+        )
       )}
 
       <ObjectYaml object={d} />

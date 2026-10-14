@@ -1,6 +1,7 @@
 // The handful of layout/feedback primitives every page shares.
 import { ReactNode } from 'react';
 import { toast } from './Toast';
+import { SINCE_START, TIME_RANGES } from '../format';
 
 export function Page({
   title,
@@ -105,7 +106,31 @@ export function Stat({ value, label, hint }: { value: ReactNode; label: string; 
   );
 }
 
-/** Segmented is a small single-choice toggle (time ranges, windows). */
+/** TimeRangeSelect picks a chart time range (format.ts's TIME_RANGES).
+ * sinceStartLabel, when set, adds the SINCE_START option under that label
+ * (e.g. "Since burn start") - only offer it where a start is known. */
+export function TimeRangeSelect({
+  value,
+  onChange,
+  sinceStartLabel,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  sinceStartLabel?: string;
+}) {
+  return (
+    <select aria-label="Time range" value={value} onChange={e => onChange(e.target.value)}>
+      {sinceStartLabel && <option value={SINCE_START}>{sinceStartLabel}</option>}
+      {TIME_RANGES.map(r => (
+        <option key={r.value} value={r.value}>
+          {r.label}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+/** Segmented is a small single-choice toggle (windows). */
 export function Segmented<T extends string | number>({
   label,
   options,

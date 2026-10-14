@@ -2,15 +2,19 @@ import { describe, expect, it } from 'vitest';
 import {
   buildLabel,
   colorFor,
+  earliestBurnStart,
   formatDuration,
   formatMetricValue,
   metricsAnchorFromRuns,
   onlyTargets,
+  parseTimeRange,
   readableTextOn,
   relativeDelta,
   shortTag,
+  SINCE_START,
   stepFor,
   targetNameOf,
+  timeRangeSeconds,
 } from './format';
 
 describe('formatMetricValue', () => {
@@ -195,5 +199,46 @@ describe('onlyTargets', () => {
   it('keeps everything without a target filter', () => {
     expect(onlyTargets(data, undefined)).toBe(data);
     expect(onlyTargets(undefined, ['ak'])).toBeUndefined();
+  });
+});
+
+describe('parseTimeRange', () => {
+  it('accepts known ranges and falls back otherwise', () => {
+    expect(parseTimeRange('7d', '15m')).toBe('7d');
+    expect(parseTimeRange(null, '15m')).toBe('15m');
+    expect(parseTimeRange('13m', '15m')).toBe('15m');
+  });
+
+  it('maps the seconds older links carry', () => {
+    expect(parseTimeRange('21600', '15m')).toBe('6h');
+  });
+
+  it('only keeps "since start" while a start is known', () => {
+    expect(parseTimeRange(SINCE_START, '15m', 1000)).toBe(SINCE_START);
+    expect(parseTimeRange(SINCE_START, '15m')).toBe('15m');
+  });
+});
+
+describe('timeRangeSeconds', () => {
+  it('resolves a relative range', () => {
+    expect(timeRangeSeconds('90d')).toBe(90 * 86400);
+  });
+
+  it('spans "since start" with a minute of lead-in, rounded up to 5 minutes', () => {
+    expect(timeRangeSeconds(SINCE_START, 10_000, 10_000 + 3600)).toBe(3900);
+    expect(timeRangeSeconds(SINCE_START, 10_000, 10_010)).toBe(300);
+  });
+});
+
+describe('earliestBurnStart', () => {
+  const testCases = [
+    { status: { deployments: [{ name: 'a', burningSince: '2026-10-14T10:00:00Z' }, { name: 'b' }] } },
+    { status: { deployments: [{ name: 'b', burningSince: '2026-10-14T12:00:00Z' }] } },
+  ];
+
+  it('picks the earliest burn, optionally for one deployment', () => {
+    expect(earliestBurnStart(testCases)).toBe(Date.parse('2026-10-14T10:00:00Z') / 1000);
+    expect(earliestBurnStart(testCases, 'b')).toBe(Date.parse('2026-10-14T12:00:00Z') / 1000);
+    expect(earliestBurnStart(testCases, 'c')).toBeUndefined();
   });
 });

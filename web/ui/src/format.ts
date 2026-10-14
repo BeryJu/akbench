@@ -167,3 +167,77 @@ export function buildLabel(info: { version: string; commit?: string; dirty?: boo
   }
   return info.dirty ? `${label}-dirty` : label;
 }
+
+/** TimeRange is one entry of the chart time range picker. */
+export interface TimeRange {
+  value: string;
+  label: string;
+  seconds: number;
+}
+
+/** TIME_RANGES are Grafana's relative "Last ..." quick ranges, up to 90 days. */
+export const TIME_RANGES: TimeRange[] = [
+  { value: '5m', label: 'Last 5 minutes', seconds: 300 },
+  { value: '15m', label: 'Last 15 minutes', seconds: 900 },
+  { value: '30m', label: 'Last 30 minutes', seconds: 1800 },
+  { value: '1h', label: 'Last 1 hour', seconds: 3600 },
+  { value: '3h', label: 'Last 3 hours', seconds: 10800 },
+  { value: '6h', label: 'Last 6 hours', seconds: 21600 },
+  { value: '12h', label: 'Last 12 hours', seconds: 43200 },
+  { value: '24h', label: 'Last 24 hours', seconds: 86400 },
+  { value: '2d', label: 'Last 2 days', seconds: 172800 },
+  { value: '7d', label: 'Last 7 days', seconds: 604800 },
+  { value: '30d', label: 'Last 30 days', seconds: 2592000 },
+  { value: '90d', label: 'Last 90 days', seconds: 7776000 },
+];
+
+/** SINCE_START is the range from a test's (or burn's) start until now. */
+export const SINCE_START = 'start';
+
+/** parseTimeRange reads a ?range= value: a TIME_RANGES value, SINCE_START
+ * (only while startSeconds is known), or the number of seconds older links
+ * carry. Anything else is fallback. */
+export function parseTimeRange(param: string | null, fallback: string, startSeconds?: number): string {
+  if (!param) {
+    return fallback;
+  }
+  if (param === SINCE_START) {
+    return startSeconds === undefined ? fallback : param;
+  }
+  if (TIME_RANGES.some(r => r.value === param)) {
+    return param;
+  }
+  return TIME_RANGES.find(r => String(r.seconds) === param)?.value ?? fallback;
+}
+
+/**
+ * timeRangeSeconds resolves a range to the seconds the charts span, ending
+ * at endSeconds. SINCE_START spans from startSeconds (with a minute of lead
+ * in), rounded up to 5 minutes so the window - and with it every chart's
+ * query - doesn't change on every render; without a known start it falls
+ * back to the shortest range.
+ */
+export function timeRangeSeconds(value: string, startSeconds?: number, endSeconds = Date.now() / 1000): number {
+  if (value === SINCE_START) {
+    if (startSeconds === undefined) {
+      return TIME_RANGES[0].seconds;
+    }
+    return Math.max(300, Math.ceil((endSeconds - startSeconds + 60) / 300) * 300);
+  }
+  return TIME_RANGES.find(r => r.value === value)?.seconds ?? TIME_RANGES[0].seconds;
+}
+
+/** earliestBurnStart is when the earliest of the given tests' Burn
+ * Deployments started, optionally only those driving one deployment - in
+ * unix seconds, or undefined if none is burning. */
+export function earliestBurnStart(
+  testCases: { status?: { deployments?: { name: string; burningSince?: string }[] } }[],
+  deployment?: string
+): number | undefined {
+  const starts = testCases.flatMap(tc =>
+    (tc.status?.deployments ?? [])
+      .filter(d => d.burningSince && (deployment === undefined || d.name === deployment))
+      .map(d => Date.parse(d.burningSince!) / 1000)
+  );
+  return starts.length ? Math.min(...starts) : undefined;
+}

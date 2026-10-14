@@ -8,9 +8,9 @@ import { ActivityLog } from '../components/ActivityLog';
 import { Badge, ConditionList, StatusBadge } from '../components/Status';
 import { buildTargetRows, burningFor, TargetTable } from '../components/Targets';
 import { TraceBreakdownSection } from '../components/TraceBreakdown';
-import { Alert, confirmAndRun, Empty, errorMessage, Field, formatTimestamp, Page, Segmented, Table } from '../components/ui';
+import { Alert, confirmAndRun, Empty, errorMessage, Field, formatTimestamp, Page, Table, TimeRangeSelect } from '../components/ui';
 import { toast } from '../components/Toast';
-import { metricsAnchorFromRuns, shortTag } from '../format';
+import { earliestBurnStart, metricsAnchorFromRuns, parseTimeRange, shortTag, timeRangeSeconds } from '../format';
 import { shellLinkForCluster } from '../shell/links';
 import { TestCase, TestCaseSpec, TestProfile, testCaseDeployments, testRunDeployment } from '../types';
 import { useResource } from '../useResource';
@@ -368,13 +368,7 @@ export function TestCaseEditPage() {
   return existing.data ? <TestCaseForm key={name} existing={existing.data} /> : null;
 }
 
-const TIMELINE_RANGES = [
-  { value: 3600, label: '1 h' },
-  { value: 21600, label: '6 h' },
-  { value: 86400, label: '24 h' },
-  { value: 604800, label: '7 d' },
-];
-const DEFAULT_TIMELINE_RANGE = 21600;
+const DEFAULT_TIMELINE_RANGE = '6h';
 
 export function TestCaseViewPage() {
   const { name = '' } = useParams();
@@ -398,8 +392,9 @@ export function TestCaseViewPage() {
     }
     setParams(next, { replace: true });
   }
-  const rangeParam = Number(params.get('range'));
-  const timelineRange = TIMELINE_RANGES.some(r => r.value === rangeParam) ? rangeParam : DEFAULT_TIMELINE_RANGE;
+  const burnStart = tc ? earliestBurnStart([tc]) : undefined;
+  const timelineRangeValue = parseTimeRange(params.get('range'), DEFAULT_TIMELINE_RANGE, burnStart);
+  const timelineRange = timeRangeSeconds(timelineRangeValue, burnStart);
 
   const sortedRuns = [...(runs.data ?? [])].sort((a, b) =>
     (b.metadata.creationTimestamp ?? '').localeCompare(a.metadata.creationTimestamp ?? '')
@@ -493,11 +488,10 @@ export function TestCaseViewPage() {
           </div>
         </div>
         {profile === 'Burn' && (
-          <Segmented
-            label="Time range"
-            options={TIMELINE_RANGES}
-            value={timelineRange}
-            onChange={v => updateParams({ range: v === DEFAULT_TIMELINE_RANGE ? undefined : String(v) })}
+          <TimeRangeSelect
+            value={timelineRangeValue}
+            sinceStartLabel={burnStart !== undefined ? 'Since burn start' : undefined}
+            onChange={v => updateParams({ range: v === DEFAULT_TIMELINE_RANGE ? undefined : v })}
           />
         )}
       </div>
