@@ -15,7 +15,7 @@ set -m
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-BENCH_API_TOKEN="${BENCH_API_TOKEN:-dev-token}"
+BENCH_API_TOKEN="${BENCH_API_TOKEN:-dev-token-for-local-development-only}"
 export BENCH_API_TOKEN
 
 pids=()
@@ -79,7 +79,7 @@ wait_for "https://127.0.0.1:8443/healthz" "web API"
 cat <<EOF
 
 authentik-bench dev environment is up:
-  API backend + UI  https://localhost:8443  (self-signed; token: ${BENCH_API_TOKEN:-dev-token})
+  API backend + UI  https://localhost:8443  (self-signed; token: ${BENCH_API_TOKEN:-dev-token-for-local-development-only})
   operator manager  health probe on :8081
 
 The UI is served from web/ui/dist (run \`make ui\` to build it); for

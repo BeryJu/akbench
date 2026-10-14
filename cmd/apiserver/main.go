@@ -217,7 +217,7 @@ func run() error {
 // hands out cluster-admin shells.
 func resolveToken(ctx context.Context, c client.Client, namespace, secretName string, oidcEnabled bool) (string, error) {
 	if token := os.Getenv("BENCH_API_TOKEN"); token != "" {
-		return token, nil
+		return checkTokenLength(token, "BENCH_API_TOKEN")
 	}
 	if secretName == "" {
 		if oidcEnabled {
@@ -232,6 +232,16 @@ func resolveToken(ctx context.Context, c client.Client, namespace, secretName st
 	token := strings.TrimSpace(string(secret.Data["token"]))
 	if token == "" {
 		return "", fmt.Errorf("secret %s/%s has no non-empty \"token\" key", namespace, secretName)
+	}
+	return checkTokenLength(token, fmt.Sprintf("secret %s/%s", namespace, secretName))
+}
+
+// checkTokenLength refuses a static token short enough to guess: nothing
+// rate-limits failed logins, so length is the only protection it has.
+func checkTokenLength(token, source string) (string, error) {
+	if len(token) < api.MinStaticTokenLength {
+		return "", fmt.Errorf("%s: the API token must be at least %d characters (e.g. `openssl rand -hex 32`)",
+			source, api.MinStaticTokenLength)
 	}
 	return token, nil
 }

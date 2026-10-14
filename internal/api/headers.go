@@ -50,15 +50,16 @@ func dropUpstreamSecurityHeaders(res *http.Response) error {
 
 // spaCSP is the web UI's Content-Security-Policy. Beyond its own origin, the
 // SPA needs:
-//   - 'wasm-unsafe-eval': ghostty-web (the shell's terminal) compiles its
-//     WebAssembly module at runtime;
+//   - 'wasm-unsafe-eval' and data: fetches: ghostty-web (the shell's
+//     terminal) fetches its inlined WebAssembly module from a data: URL and
+//     compiles it at runtime;
 //   - inline styles: React style props and Monaco's injected <style> tags;
 //   - blob: workers: Monaco's language workers spawn from blob URLs;
 //   - api.github.com: the pull-request comparison page (web/ui/src/github.ts);
 //   - the OIDC issuer: discovery and token requests (connect-src) and
 //     oidc-client-ts' silent renew iframe (frame-src).
 func spaCSP(oidcIssuer string) string {
-	connect := []string{"'self'", "https://api.github.com"}
+	connect := []string{"'self'", "data:", "https://api.github.com"}
 	frame := []string{"'self'"}
 	if origin := urlOrigin(oidcIssuer); origin != "" {
 		connect = append(connect, origin)

@@ -42,7 +42,7 @@ type: Opaque
 stringData:
   # Dev-only fixed token - matches BENCH_API_TOKEN below. Real deployments
   # should generate this instead of using a literal.
-  token: dev-token
+  token: dev-token-for-local-development-only
 ---
 apiVersion: apps/v1
 kind: Deployment
