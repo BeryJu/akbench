@@ -11,7 +11,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
-	"github.com/goauthentik/authentik-bench/internal/fixtures"
+	"github.com/authentik-labs/akbench/internal/fixtures"
 )
 
 // fixturesUsersKey is the users.json key in the fixtures Secret, the file

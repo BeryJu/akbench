@@ -18,7 +18,7 @@ import (
 	controlplanev1 "sigs.k8s.io/cluster-api/api/controlplane/kubeadm/v1beta2"
 	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 
-	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
+	benchv1alpha1 "github.com/authentik-labs/akbench/api/v1alpha1"
 )
 
 // The Incus/LXC infrastructure provider (github.com/lxc/cluster-api-provider-incus)

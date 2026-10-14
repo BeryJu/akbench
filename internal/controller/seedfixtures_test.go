@@ -12,7 +12,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	"github.com/goauthentik/authentik-bench/internal/fixtures"
+	"github.com/authentik-labs/akbench/internal/fixtures"
 )
 
 func seedClient(t *testing.T, objects ...client.Object) client.Client {

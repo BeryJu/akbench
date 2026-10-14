@@ -14,7 +14,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/intstr"
 
-	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
+	benchv1alpha1 "github.com/authentik-labs/akbench/api/v1alpha1"
 )
 
 // ObservabilityNamespace is where every per-workload-cluster

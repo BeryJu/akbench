@@ -8,7 +8,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 
-	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
+	benchv1alpha1 "github.com/authentik-labs/akbench/api/v1alpha1"
 )
 
 // OIDCTestClientImage/OIDCTestClientPort match github.com/BeryJu/oidc-test-client's

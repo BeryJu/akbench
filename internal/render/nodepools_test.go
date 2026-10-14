@@ -5,7 +5,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 
-	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
+	benchv1alpha1 "github.com/authentik-labs/akbench/api/v1alpha1"
 )
 
 // TestPoolPlacementRequiresMatchingPool is the backward-compatibility

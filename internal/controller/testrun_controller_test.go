@@ -11,7 +11,7 @@ import (
 	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
+	benchv1alpha1 "github.com/authentik-labs/akbench/api/v1alpha1"
 )
 
 var _ = Describe("TestRun Controller", func() {

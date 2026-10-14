@@ -17,8 +17,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
-	"github.com/goauthentik/authentik-bench/internal/render"
+	benchv1alpha1 "github.com/authentik-labs/akbench/api/v1alpha1"
+	"github.com/authentik-labs/akbench/internal/render"
 )
 
 var _ = Describe("AuthentikDeployment reset", func() {

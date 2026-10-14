@@ -9,7 +9,7 @@ import (
 	"golang.org/x/sync/singleflight"
 	"k8s.io/apimachinery/pkg/types"
 
-	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
+	benchv1alpha1 "github.com/authentik-labs/akbench/api/v1alpha1"
 )
 
 // The trace (traces.go) and profile (profiles.go) breakdowns both summarize

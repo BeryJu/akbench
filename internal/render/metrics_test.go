@@ -8,7 +8,7 @@ import (
 	helmv2 "github.com/fluxcd/helm-controller/api/v2"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
-	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
+	benchv1alpha1 "github.com/authentik-labs/akbench/api/v1alpha1"
 )
 
 // TestKubePrometheusStackHelmValuesTargetsMonitoringPool confirms Prometheus/

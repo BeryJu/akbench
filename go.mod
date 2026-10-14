@@ -1,4 +1,4 @@
-module github.com/goauthentik/authentik-bench
+module github.com/authentik-labs/akbench
 
 go 1.27.0
 

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
+	benchv1alpha1 "github.com/authentik-labs/akbench/api/v1alpha1"
 )
 
 // TestBlueprintJobTargetsAuthentikPool guards a real live-cluster bug: this

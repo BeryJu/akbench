@@ -37,8 +37,8 @@ import (
 	utilexec "k8s.io/client-go/util/exec"
 	"k8s.io/streaming/pkg/httpstream"
 
-	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
-	"github.com/goauthentik/authentik-bench/internal/render"
+	benchv1alpha1 "github.com/authentik-labs/akbench/api/v1alpha1"
+	"github.com/authentik-labs/akbench/internal/render"
 )
 
 const (

@@ -13,9 +13,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
-	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
-	"github.com/goauthentik/authentik-bench/internal/incus"
-	"github.com/goauthentik/authentik-bench/internal/render"
+	benchv1alpha1 "github.com/authentik-labs/akbench/api/v1alpha1"
+	"github.com/authentik-labs/akbench/internal/incus"
+	"github.com/authentik-labs/akbench/internal/render"
 )
 
 // ipv4EndpointGracePeriod is how long preferIPv4Endpoint waits for the load

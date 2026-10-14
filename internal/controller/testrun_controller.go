@@ -19,10 +19,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
-	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
-	"github.com/goauthentik/authentik-bench/internal/grafana"
-	"github.com/goauthentik/authentik-bench/internal/multicluster"
-	"github.com/goauthentik/authentik-bench/internal/render"
+	benchv1alpha1 "github.com/authentik-labs/akbench/api/v1alpha1"
+	"github.com/authentik-labs/akbench/internal/grafana"
+	"github.com/authentik-labs/akbench/internal/multicluster"
+	"github.com/authentik-labs/akbench/internal/render"
 )
 
 const testRunFinalizer = "bench.goauthentik.io/remote-cleanup"

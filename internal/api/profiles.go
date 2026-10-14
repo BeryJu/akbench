@@ -16,8 +16,8 @@ import (
 	"github.com/google/pprof/profile"
 	"google.golang.org/protobuf/encoding/protowire"
 
-	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
-	"github.com/goauthentik/authentik-bench/internal/render"
+	benchv1alpha1 "github.com/authentik-labs/akbench/api/v1alpha1"
+	"github.com/authentik-labs/akbench/internal/render"
 )
 
 // The profile breakdown answers "what is authentik's CPU busy with, per

@@ -6,7 +6,7 @@ import (
 
 	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 
-	"github.com/goauthentik/authentik-bench/internal/render"
+	"github.com/authentik-labs/akbench/internal/render"
 )
 
 func TestSyncAutoscalerAnnotations(t *testing.T) {

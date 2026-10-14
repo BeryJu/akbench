@@ -16,7 +16,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/goauthentik/authentik-bench/internal/appliance"
+	"github.com/authentik-labs/akbench/internal/appliance"
 )
 
 func main() {

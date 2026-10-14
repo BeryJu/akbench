@@ -6,7 +6,7 @@ import (
 
 	helmv2 "github.com/fluxcd/helm-controller/api/v2"
 
-	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
+	benchv1alpha1 "github.com/authentik-labs/akbench/api/v1alpha1"
 )
 
 // Grafana is installed per workload cluster (same as Prometheus/Pyroscope/

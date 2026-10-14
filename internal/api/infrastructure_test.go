@@ -11,7 +11,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	"github.com/goauthentik/authentik-bench/internal/appliance"
+	"github.com/authentik-labs/akbench/internal/appliance"
 )
 
 func applianceStatus(shipped string) *corev1.ConfigMap {

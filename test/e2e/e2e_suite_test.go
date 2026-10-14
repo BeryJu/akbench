@@ -12,7 +12,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	"github.com/goauthentik/authentik-bench/test/utils"
+	"github.com/authentik-labs/akbench/test/utils"
 )
 
 var (

@@ -48,7 +48,7 @@ COPY go.sum go.sum
 RUN go mod download
 COPY . .
 RUN --mount=type=cache,target=/root/.cache/go-build \
-    pkg=github.com/goauthentik/authentik-bench/internal/appliance; \
+    pkg=github.com/authentik-labs/akbench/internal/appliance; \
     CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build \
     -ldflags "-X ${pkg}.Version=${VERSION} \
               -X ${pkg}.OperatorImage=${IMAGE_REPO} \

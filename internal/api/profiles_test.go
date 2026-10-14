@@ -11,7 +11,7 @@ import (
 	"github.com/google/pprof/profile"
 	"google.golang.org/protobuf/encoding/protowire"
 
-	"github.com/goauthentik/authentik-bench/internal/render"
+	"github.com/authentik-labs/akbench/internal/render"
 )
 
 // fakeCPUProfile is shaped like authentik's: a view calling into Django's

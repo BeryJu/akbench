@@ -32,8 +32,8 @@ ARG VERSION=dev
 ARG COMMIT=
 RUN --mount=type=cache,target=/root/.cache/go-build \
     CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build \
-    -ldflags "-X github.com/goauthentik/authentik-bench/internal/api.Version=${VERSION} \
-              -X github.com/goauthentik/authentik-bench/internal/api.Commit=${COMMIT}" \
+    -ldflags "-X github.com/authentik-labs/akbench/internal/api.Version=${VERSION} \
+              -X github.com/authentik-labs/akbench/internal/api.Commit=${COMMIT}" \
     -o apiserver ./cmd/apiserver
 
 # kubectl from the official release, checksum-verified. Kept within one

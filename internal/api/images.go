@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"regexp"
 
-	"github.com/goauthentik/authentik-bench/internal/registry"
+	"github.com/authentik-labs/akbench/internal/registry"
 )
 
 // imageRegistryHost is the only registry checkImage will query: the one

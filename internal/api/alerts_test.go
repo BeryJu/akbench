@@ -6,7 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
+	benchv1alpha1 "github.com/authentik-labs/akbench/api/v1alpha1"
 )
 
 // fakeAlertmanager serves GET /api/v2/alerts with a fixed, literal response -

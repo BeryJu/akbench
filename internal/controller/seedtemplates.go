@@ -7,8 +7,8 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
-	k6scripts "github.com/goauthentik/authentik-bench/k6/scripts"
+	benchv1alpha1 "github.com/authentik-labs/akbench/api/v1alpha1"
+	k6scripts "github.com/authentik-labs/akbench/k6/scripts"
 )
 
 // DefaultTemplateName is the built-in template TestCaseSpec.Template's own

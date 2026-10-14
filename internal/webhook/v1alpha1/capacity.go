@@ -12,10 +12,10 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
-	"github.com/goauthentik/authentik-bench/internal/capacity"
-	"github.com/goauthentik/authentik-bench/internal/multicluster"
-	"github.com/goauthentik/authentik-bench/internal/render"
+	benchv1alpha1 "github.com/authentik-labs/akbench/api/v1alpha1"
+	"github.com/authentik-labs/akbench/internal/capacity"
+	"github.com/authentik-labs/akbench/internal/multicluster"
+	"github.com/authentik-labs/akbench/internal/render"
 )
 
 // capacityTimeout bounds reading a workload cluster's nodes and pods, well

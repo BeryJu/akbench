@@ -13,9 +13,9 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
-	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
-	"github.com/goauthentik/authentik-bench/internal/capacity"
-	"github.com/goauthentik/authentik-bench/internal/multicluster"
+	benchv1alpha1 "github.com/authentik-labs/akbench/api/v1alpha1"
+	"github.com/authentik-labs/akbench/internal/capacity"
+	"github.com/authentik-labs/akbench/internal/multicluster"
 )
 
 // SetupTestCaseWebhookWithManager registers the webhook for TestCase in the manager.

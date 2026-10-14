@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
+	benchv1alpha1 "github.com/authentik-labs/akbench/api/v1alpha1"
 )
 
 func TestDeschedulerHelmValues(t *testing.T) {

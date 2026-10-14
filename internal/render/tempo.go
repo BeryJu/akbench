@@ -3,7 +3,7 @@ package render
 import (
 	helmv2 "github.com/fluxcd/helm-controller/api/v2"
 
-	benchv1alpha1 "github.com/goauthentik/authentik-bench/api/v1alpha1"
+	benchv1alpha1 "github.com/authentik-labs/akbench/api/v1alpha1"
 )
 
 // TempoServiceName/TempoOTLPHTTPPort must match defaultTracingEndpoint
