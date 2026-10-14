@@ -606,7 +606,7 @@ export function TestCaseViewPage() {
 
     return (
         <Page
-            title={<span className="mono">{name}</span>}
+            title={name}
             subtitle={
                 tc && (
                     <>
