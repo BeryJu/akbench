@@ -1,4 +1,5 @@
-import { sanitizePrefill, shellLink, shellLinkForCluster } from "./links";
+import type { AuthentikDeploymentSpec } from "../types";
+import { psqlCommand, sanitizePrefill, shellLink, shellLinkForCluster } from "./links";
 
 import { describe, expect, it } from "vitest";
 
@@ -30,5 +31,39 @@ describe("shell links", () => {
     it("falls back to the management context without a cluster", () => {
         expect(shellLinkForCluster(undefined)).toBe("/shell?context=management");
         expect(shellLinkForCluster("wc1")).toBe("/shell?cluster=wc1");
+    });
+});
+
+describe("psqlCommand", () => {
+    const spec = (postgres: AuthentikDeploymentSpec["postgres"]) =>
+        ({ postgres }) as AuthentikDeploymentSpec;
+
+    it("execs into the embedded StatefulSet", () => {
+        expect(psqlCommand("ak", "ak-1", spec({ mode: "Embedded" }))).toBe(
+            'kubectl exec -it -n ak-1 statefulset/ak-postgresql -c postgresql -- sh -c \'PGPASSWORD="$(cat "$POSTGRES_PASSWORD_FILE")" exec psql -h 127.0.0.1 -U "$POSTGRES_USER" "${POSTGRES_DATABASE:-authentik}"\'',
+        );
+    });
+
+    it("execs into the CNPG primary", () => {
+        expect(psqlCommand("ak", "ak-1", spec({ mode: "CNPG" }))).toBe(
+            "kubectl exec -it -n ak-1 svc/ak-postgres-rw -c postgres -- psql authentik",
+        );
+    });
+
+    it("wires an external database's Secret into a throwaway pod", () => {
+        const cmd = psqlCommand(
+            "ak",
+            "ak-1",
+            spec({ mode: "External", external: { secretRef: { name: "pg" } } }),
+        );
+        expect(cmd).toMatch(/^kubectl run psql-ak -n ak-1 --rm -it --restart=Never /);
+        const overrides = JSON.parse(cmd.slice(cmd.indexOf("'") + 1, -1));
+        const env = overrides.spec.containers[0].env;
+        expect(env).toContainEqual({
+            name: "PGPASSWORD",
+            valueFrom: { secretKeyRef: { name: "pg", key: "password" } },
+        });
+        expect(env).toContainEqual({ name: "PGSSLMODE", value: "require" });
+        expect(sanitizePrefill(cmd)).toBe(cmd);
     });
 });

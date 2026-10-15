@@ -17,7 +17,7 @@ import {
     TimeRangeSelect,
 } from "../components/ui";
 import { earliestBurnStart, parseTimeRange, targetNameOf, timeRangeSeconds } from "../format";
-import { shellLinkForCluster } from "../shell/links";
+import { psqlCommand, shellLinkForCluster } from "../shell/links";
 import {
     AuthentikDeployment,
     AuthentikDeploymentSpec,
@@ -906,6 +906,13 @@ export function DeploymentViewPage() {
                                 Postgres
                             </Link>
                         )}
+                        <Link
+                            className="button"
+                            title="Open the shell with a psql session on this deployment's database ready to run."
+                            to={shellLinkForCluster(cluster, psqlCommand(name, ns ?? "", d.spec))}
+                        >
+                            psql
+                        </Link>
                     </div>
 
                     <h2>Node placement</h2>
