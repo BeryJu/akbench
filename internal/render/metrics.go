@@ -266,6 +266,11 @@ func KubePrometheusStackHelmValues(wc *benchv1alpha1.WorkloadCluster) (*apiexten
 			defaultAlertRulesKey: map[string]any{"groups": DefaultAlertRuleGroups()},
 		},
 		"kube-state-metrics": kubeStateMetrics,
+		// host is the label the reference harness's dashboards select nodes
+		// by (its prometheus.yml.j2 sets it on every job).
+		"prometheus-node-exporter": map[string]any{
+			"prometheus": map[string]any{"monitor": map[string]any{valuesKeyRelabelings: []map[string]any{hostRelabeling}}},
+		},
 		// kubeScheduler/kubeControllerManager/kubeProxy disabled: confirmed
 		// live (Alertmanager's own KubeSchedulerInstanceUnreachable/
 		// KubeControllerManagerInstanceUnreachable/KubeProxyInstanceUnreachable/
@@ -375,5 +380,24 @@ func prometheusResources(wc *benchv1alpha1.WorkloadCluster) map[string]any {
 	return map[string]any{
 		"requests": map[string]any{"cpu": "250m", "memory": fmt.Sprintf("%dMi", limitMi/2)},
 		"limits":   map[string]any{"memory": fmt.Sprintf("%dMi", limitMi)},
+	}
+}
+
+const relabelTargetLabel = "targetLabel"
+
+// hostRelabeling sets host to the scraped pod's node, the closest thing to
+// the reference harness's per-machine host label.
+var hostRelabeling = map[string]any{
+	"sourceLabels": []string{"__meta_kubernetes_pod_node_name"}, relabelTargetLabel: "host",
+}
+
+// scrapeRelabelings gives a ServiceMonitor the job/target/host labels the
+// reference harness's prometheus.yml.j2 puts on its authentik and postgres
+// jobs, which its dashboards select on (target matches k6's own target tag).
+func scrapeRelabelings(job, target string) []map[string]any {
+	return []map[string]any{
+		{relabelTargetLabel: "job", "replacement": job},
+		{relabelTargetLabel: "target", "replacement": target},
+		hostRelabeling,
 	}
 }

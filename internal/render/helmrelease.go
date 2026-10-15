@@ -32,6 +32,8 @@ const (
 	valuesKeyReplicas = "replicas"
 	valuesKeyPassword = "password"
 	valuesKeyName     = "name"
+
+	valuesKeyRelabelings = "relabelings"
 )
 
 const defaultChartRepo = "https://charts.goauthentik.io"
@@ -129,9 +131,16 @@ func HelmValues(t *benchv1alpha1.AuthentikDeployment, wc *benchv1alpha1.Workload
 	// rather than this project hand-building a competing ServiceMonitor:
 	// the chart already owns the metrics Service's labels/selector, so its
 	// own ServiceMonitor is guaranteed to match them.
+	targetName := t.Spec.TargetName
+	if targetName == "" {
+		targetName = t.Name
+	}
 	authentikMetrics := map[string]any{
-		"enabled":        true,
-		"serviceMonitor": map[string]any{"enabled": hasServiceMonitorCRD},
+		"enabled": true,
+		"serviceMonitor": map[string]any{
+			"enabled":            hasServiceMonitorCRD,
+			valuesKeyRelabelings: scrapeRelabelings("authentik", targetName),
+		},
 	}
 	values := AuthentikDeploymentHelmValues{
 		Server: map[string]any{
@@ -198,8 +207,20 @@ func HelmValues(t *benchv1alpha1.AuthentikDeployment, wc *benchv1alpha1.Workload
 		// "let the chart own its own monitoring object" approach as
 		// authentikMetrics above, and the same hasServiceMonitorCRD gate.
 		values.Postgres["metrics"] = map[string]any{
-			"enabled":        true,
-			"serviceMonitor": map[string]any{"enabled": hasServiceMonitorCRD},
+			"enabled": true,
+			"serviceMonitor": map[string]any{
+				"enabled":            hasServiceMonitorCRD,
+				valuesKeyRelabelings: scrapeRelabelings("postgres", targetName),
+			},
+			// The off-by-default collectors the reference harness's own
+			// postgres-exporter turns on (roles/authentik/files/compose.yml),
+			// for the table, vacuum and transaction detail its dashboards use.
+			"collectors": map[string]bool{
+				"long_running_transactions": true, "postmaster": true, "process_idle": true,
+				"stat_activity": true, "stat_activity_autovacuum": true, "stat_checkpointer": true,
+				"stat_progress_vacuum": true, "stat_user_tables": true, "stat_wal_receiver": true,
+				"statio_user_indexes": true, "statio_user_tables": true,
+			},
 		}
 	}
 
@@ -227,10 +248,6 @@ func HelmValues(t *benchv1alpha1.AuthentikDeployment, wc *benchv1alpha1.Workload
 		values.Authentik["log_level"] = t.Spec.Authentik.LogLevel
 	}
 
-	targetName := t.Spec.TargetName
-	if targetName == "" {
-		targetName = t.Name
-	}
 	// Consumed by the Pyroscope SDK as its server address - always set,
 	// unmarked by any enabled flag, matching the reference Ansible harness
 	// (env.j2's AUTHENTIK_PYROSCOPE_HOST): profiling is best-effort and

@@ -1,8 +1,12 @@
 package render
 
 import (
-	_ "embed"
+	"bytes"
+	"embed"
+	"encoding/json"
 	"fmt"
+	"path"
+	"strings"
 
 	helmv2 "github.com/fluxcd/helm-controller/api/v2"
 
@@ -122,27 +126,34 @@ func grafanaDashboardProviders() map[string]any {
 	}
 }
 
-// The 5 dashboards are this project's own, already adapted to what this
-// project actually collects - see manifests/grafana-dashboards/README.md for
-// why they're hand-authored rather than ported from the reference harness's
-// newer dashboard.grafana.app/v2-schema ones. The chart writes each into its
-// dashboards ConfigMap verbatim (no Helm templating), so their own
-// {{...}} legend formats are safe.
+// Every dashboard in manifests/grafana-dashboards, mostly copied verbatim from
+// the reference harness (see its README). The chart writes each into its
+// dashboards ConfigMap verbatim (no Helm templating), so their own {{...}}
+// legend formats are safe. They're compacted because the pretty-printed set
+// alone exceeds a ConfigMap's 1MiB limit.
 //
-//go:embed manifests/grafana-dashboards/compare-tests.json
-var grafanaDashboardCompareTests []byte
+//go:embed manifests/grafana-dashboards/*.json
+var grafanaDashboardFS embed.FS
 
-//go:embed manifests/grafana-dashboards/k6.json
-var grafanaDashboardK6 []byte
-
-//go:embed manifests/grafana-dashboards/authentik.json
-var grafanaDashboardAuthentik []byte
-
-//go:embed manifests/grafana-dashboards/postgres.json
-var grafanaDashboardPostgres []byte
-
-//go:embed manifests/grafana-dashboards/nodes.json
-var grafanaDashboardNodes []byte
+var grafanaDashboards = func() map[string]any {
+	entries, err := grafanaDashboardFS.ReadDir("manifests/grafana-dashboards")
+	if err != nil {
+		panic(err)
+	}
+	out := map[string]any{}
+	for _, e := range entries {
+		raw, err := grafanaDashboardFS.ReadFile(path.Join("manifests/grafana-dashboards", e.Name()))
+		if err != nil {
+			panic(err)
+		}
+		var buf bytes.Buffer
+		if err := json.Compact(&buf, raw); err != nil {
+			panic(fmt.Sprintf("dashboard %s: %v", e.Name(), err))
+		}
+		out[strings.TrimSuffix(e.Name(), ".json")] = map[string]any{"json": buf.String()}
+	}
+	return out
+}()
 
 // GrafanaHelmRelease installs the single-replica Grafana every workload
 // cluster gets, from its upstream chart. Its Service is a NodePort
@@ -179,15 +190,7 @@ func GrafanaHelmRelease(wc *benchv1alpha1.WorkloadCluster) (*helmv2.HelmRelease,
 		},
 		"datasources":        map[string]any{"datasources.yaml": grafanaDatasources()},
 		"dashboardProviders": map[string]any{"dashboardproviders.yaml": grafanaDashboardProviders()},
-		"dashboards": map[string]any{
-			"benchmarks": map[string]any{
-				"compare-tests": map[string]any{"json": string(grafanaDashboardCompareTests)},
-				"k6":            map[string]any{"json": string(grafanaDashboardK6)},
-				"authentik":     map[string]any{"json": string(grafanaDashboardAuthentik)},
-				"postgres":      map[string]any{"json": string(grafanaDashboardPostgres)},
-				"nodes":         map[string]any{"json": string(grafanaDashboardNodes)},
-			},
-		},
+		"dashboards":         map[string]any{"benchmarks": grafanaDashboards},
 	}
 	monitoringPlacement(wc, values)
 	hr, err := observabilityHelmRelease(wc, GrafanaHelmReleaseName, "grafana", grafanaChartVersion, GrafanaCommunityHelmRepositoryName, values)

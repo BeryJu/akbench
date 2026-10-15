@@ -127,7 +127,7 @@ func TestGrafanaHelmReleaseWiring(t *testing.T) {
 		}
 	}
 	dashboards := v["dashboards"].(map[string]any)["benchmarks"].(map[string]any)
-	for _, d := range []string{"compare-tests", "k6", "authentik", "postgres", "nodes"} {
+	for _, d := range []string{"compare-tests", "k6", "authentik", "postgres", "nodes", "node_exporter", "summary"} {
 		entry, ok := dashboards[d].(map[string]any)
 		if !ok || !json.Valid([]byte(entry["json"].(string))) {
 			t.Errorf("dashboard %s missing or not valid JSON", d)

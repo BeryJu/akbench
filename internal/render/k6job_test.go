@@ -29,6 +29,27 @@ func TestPodTemplateAppliesK6PoolPlacement(t *testing.T) {
 	}
 }
 
+// TestPodTemplateMountsLibNextToBYOScript guards that a BYO script
+// ConfigMap still gets the shared library mounted next to it.
+func TestPodTemplateMountsLibNextToBYOScript(t *testing.T) {
+	p := K6WorkloadParams{
+		TestCase:                &benchv1alpha1.TestCase{Name: "login-a"},
+		ScriptConfigMapName:     "k6-script-login-a",
+		UserScriptConfigMapName: "my-script",
+	}
+	var sources []corev1.VolumeProjection
+	for _, v := range p.PodTemplate().Spec.Volumes {
+		if v.Name == "scripts" && v.Projected != nil {
+			sources = v.Projected.Sources
+		}
+	}
+	if len(sources) != 2 ||
+		sources[0].ConfigMap.Name != "k6-script-login-a" || len(sources[0].ConfigMap.Items) != 1 || sources[0].ConfigMap.Items[0].Key != LibFileName ||
+		sources[1].ConfigMap.Name != "my-script" || sources[1].ConfigMap.Items != nil {
+		t.Errorf("scripts volume sources = %+v, want only %s from the generated ConfigMap, then all of my-script", sources, LibFileName)
+	}
+}
+
 // TestPodTemplateNeverSharesNodeWithItsDeployment guards the k6 runner's own
 // required anti-affinity: it must never land on the same node as the
 // deployment it's driving (DeploymentName, not TargetName, which is only a

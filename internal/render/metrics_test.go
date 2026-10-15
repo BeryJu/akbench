@@ -47,8 +47,11 @@ func TestKubePrometheusStackHelmValuesTargetsMonitoringPool(t *testing.T) {
 	// at all, blocking the whole HelmRelease upgrade.
 	assertPoolSelector("prometheusOperator", "admissionWebhooks", "patch")
 
-	if _, ok := values["prometheus-node-exporter"]; ok {
-		t.Error(`"prometheus-node-exporter" values were set - it must stay untouched (chart defaults), since it has to report every node's metrics regardless of pool`)
+	nodeExporter, _ := values["prometheus-node-exporter"].(map[string]any)
+	for _, key := range []string{"nodeSelector", "tolerations", "affinity"} {
+		if _, ok := nodeExporter[key]; ok {
+			t.Errorf(`"prometheus-node-exporter".%s was set - its placement must stay at chart defaults, since it has to report every node's metrics regardless of pool`, key)
+		}
 	}
 }
 

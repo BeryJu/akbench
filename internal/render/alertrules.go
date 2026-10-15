@@ -63,10 +63,10 @@ func (ar alertRule) toMap() map[string]any {
 // actually existed (see manifests/grafana-dashboards/README.md's own "Caveats"
 // section).
 //
-//   - AuthentikBenchServiceScrapeDown: up{job=~".+-metrics"} == 0 catches an
+//   - AuthentikBenchServiceScrapeDown: up{job=~"authentik|postgres"} == 0 catches an
 //     authentik-server/-worker/postgresql ServiceMonitor target going
-//     unreachable (confirmed live this metric and label pattern are real:
-//     job names follow "<release>-authentik-server-metrics" etc., and
+//     unreachable (job is set by scrapeRelabelings, matching the reference
+//     harness's job names; it used to be "<release>-authentik-server-metrics" etc., and
 //     several were actually down when this was written, including from the
 //     postgres-PVC-full incident this project hit earlier).
 //   - AuthentikBenchPostgresDown: pg_up == 0 is a stricter signal than the
@@ -100,7 +100,7 @@ func DefaultAlertRuleGroups() []any {
 	ruleDefs := []alertRule{
 		{
 			name:        "AuthentikBenchServiceScrapeDown",
-			expr:        `up{job=~".+-metrics"} == 0`,
+			expr:        `up{job=~"authentik|postgres"} == 0`,
 			forDuration: "10m",
 			severity:    severityWarning,
 			summary:     "{{ $labels.job }} on {{ $labels.instance }} has been unreachable for 10m",

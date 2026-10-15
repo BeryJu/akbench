@@ -206,18 +206,18 @@ func (p K6WorkloadParams) Args() []string {
 
 func (p K6WorkloadParams) volumes() ([]corev1.Volume, []corev1.VolumeMount) {
 	sources := []corev1.VolumeProjection{{
-		ConfigMap: &corev1.ConfigMapProjection{LocalObjectReference: corev1.LocalObjectReference{Name: p.ScriptConfigMapName}},
+		ConfigMap: &corev1.ConfigMapProjection{Name: p.ScriptConfigMapName},
 	}}
 	if p.UserScriptConfigMapName != "" {
 		sources[0].ConfigMap.Items = []corev1.KeyToPath{{Key: LibFileName, Path: LibFileName}}
 		sources = append(sources, corev1.VolumeProjection{
-			ConfigMap: &corev1.ConfigMapProjection{LocalObjectReference: corev1.LocalObjectReference{Name: p.UserScriptConfigMapName}},
+			ConfigMap: &corev1.ConfigMapProjection{Name: p.UserScriptConfigMapName},
 		})
 	}
 	volumes := []corev1.Volume{
 		{
-			Name:         "scripts",
-			VolumeSource: corev1.VolumeSource{Projected: &corev1.ProjectedVolumeSource{Sources: sources}},
+			Name:      "scripts",
+			Projected: &corev1.ProjectedVolumeSource{Sources: sources},
 		},
 		{
 			Name:   "fixtures",
