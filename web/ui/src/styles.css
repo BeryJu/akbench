@@ -198,6 +198,52 @@ a.build-badge:hover {
     flex-direction: column;
     height: 100vh;
 }
+/* Below 720px the sidebar becomes a drawer, opened from a top bar. */
+.mobile-bar,
+.nav-backdrop {
+    display: none;
+}
+@media (max-width: 720px) {
+    .mobile-bar {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        position: sticky;
+        top: 0;
+        z-index: 10;
+        height: 48px;
+        padding: 0 12px;
+        background: var(--panel);
+        border-bottom: 1px solid var(--border);
+        font-weight: 700;
+    }
+    .mobile-bar img {
+        width: 22px;
+        height: 22px;
+    }
+    .sidebar {
+        z-index: 30;
+        transform: translateX(-100%);
+        transition: transform 0.2s ease;
+    }
+    .sidebar.open {
+        transform: none;
+    }
+    .nav-backdrop {
+        display: block;
+        position: fixed;
+        inset: 0;
+        z-index: 20;
+        background: rgb(0 0 0 / 40%);
+    }
+    .main {
+        margin-left: 0;
+        padding: 16px 16px 48px;
+    }
+    .main.full {
+        height: calc(100dvh - 48px);
+    }
+}
 .page-head {
     display: flex;
     align-items: center;

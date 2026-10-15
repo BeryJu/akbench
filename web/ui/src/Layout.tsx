@@ -83,12 +83,18 @@ function BuildBadge() {
     );
 }
 
-function NavSectionLinks({ section }: { section: NavSection }) {
+function NavSectionLinks({ section, onNavigate }: { section: NavSection; onNavigate: () => void }) {
     return (
         <div>
             {section.label && <div className="nav-section-label">{section.label}</div>}
             {section.items.map((item) => (
-                <NavLink key={item.to} to={item.to} end={item.end} className="nav-link">
+                <NavLink
+                    key={item.to}
+                    to={item.to}
+                    end={item.end}
+                    className="nav-link"
+                    onClick={onNavigate}
+                >
                     {item.label}
                 </NavLink>
             ))}
@@ -104,19 +110,39 @@ export function Layout() {
     // The shell workspace mounts on first visit and then stays mounted (just
     // hidden), so its sessions survive navigating elsewhere in the app.
     const [shellMounted, setShellMounted] = useState(onShell);
+    // Only matters on narrow screens, where the sidebar is an off-canvas drawer.
+    const [navOpen, setNavOpen] = useState(false);
+    const closeNav = () => setNavOpen(false);
     if (onShell && !shellMounted) {
         setShellMounted(true);
     }
 
     return (
         <div className="app">
-            <nav className="sidebar">
+            <header className="mobile-bar">
+                <button
+                    className="small"
+                    aria-label="Toggle navigation"
+                    aria-expanded={navOpen}
+                    onClick={() => setNavOpen(!navOpen)}
+                >
+                    ☰
+                </button>
+                <img src="/favicon.svg" alt="" />
+                {APP_TITLE}
+            </header>
+            {navOpen && <div className="nav-backdrop" onClick={closeNav} />}
+            <nav className={navOpen ? "sidebar open" : "sidebar"}>
                 <div className="brand">
                     <img src="/favicon.svg" alt="" />
                     {APP_TITLE}
                 </div>
                 {navSections.map((section, i) => (
-                    <NavSectionLinks key={section.label ?? i} section={section} />
+                    <NavSectionLinks
+                        key={section.label ?? i}
+                        section={section}
+                        onNavigate={closeNav}
+                    />
                 ))}
                 <div className="sidebar-foot">
                     <BuildBadge />
