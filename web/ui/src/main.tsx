@@ -192,7 +192,7 @@ const router = createBrowserRouter([
             },
             { path: "grafana", handle: t("Grafana"), element: page(grafana, "GrafanaPage") },
             {
-                path: "grafana/:cluster",
+                path: "grafana/:cluster/*",
                 handle: t((p) => `Grafana · ${p.cluster}`),
                 element: page(grafana, "GrafanaPage"),
             },

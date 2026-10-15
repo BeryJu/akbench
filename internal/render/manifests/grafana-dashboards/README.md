@@ -47,9 +47,14 @@ in `internal/render/metrics.go`):
 
 - CNPG-mode deployments expose CNPG's own `cnpg_*` metrics, not
   `postgres_exporter`'s `pg_*`, so the postgres panels stay empty for them.
-- `postgres.json` is written for pgsty's `pg_exporter` (`pg_exporter_*`,
-  `pg_stat_io_*`, ...), which the harness doesn't run either; only panels that
-  overlap with `postgres_exporter` show data.
+- `postgres.json` is written for [nbari/pg_exporter](https://github.com/nbari/pg_exporter)
+  (`pg_exporter_*`, `pg_system_*`, `pg_stat_io_*`, ...), not the
+  `postgres_exporter` the harness and this project run: only 43 of the 180
+  metrics it queries exist in `postgres_exporter`'s output.
+- `summary.json`'s checkpoint panels query `pg_stat_bgwriter_checkpoints_*`
+  and `buffers_{backend,checkpoint}`, which PostgreSQL 17 moved out of
+  `pg_stat_bgwriter`, so no exporter emits them against the embedded
+  postgres (17).
 - `k6.json`'s latency panels query k6's trend-stat series
   (`k6_http_req_duration_p95`, ...), but k6 here (and in the harness) writes
   trends as native histograms (`k6_http_req_duration_seconds`). `summary.json`
