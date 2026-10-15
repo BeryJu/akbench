@@ -1,4 +1,5 @@
 import { AuthProvider, CALLBACK_PATH, SILENT_PATH } from "./auth";
+import { ConfirmHost } from "./components/Confirm";
 import { ToastHost } from "./components/Toast";
 import { EventsProvider } from "./events";
 import { Layout } from "./Layout";
@@ -210,5 +211,6 @@ createRoot(document.getElementById("root")!).render(
             </EventsProvider>
         </AuthProvider>
         <ToastHost />
+        <ConfirmHost />
     </StrictMode>,
 );

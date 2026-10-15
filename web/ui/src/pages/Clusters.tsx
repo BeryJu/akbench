@@ -89,7 +89,12 @@ export function ClustersPage() {
                                             className="small danger"
                                             onClick={() =>
                                                 void confirmAndRun(
-                                                    `Deprovision cluster "${c.name}"? This tears down every machine Cluster API created for it.`,
+                                                    {
+                                                        title: "Deprovision cluster",
+                                                        message: `Deprovision cluster "${c.name}"? This tears down every machine Cluster API created for it.`,
+                                                        confirmLabel: "Deprovision",
+                                                        danger: true,
+                                                    },
                                                     () => api.deprovisionCluster(c.name),
                                                     clusters.reload,
                                                     `Deprovisioning ${c.name}`,

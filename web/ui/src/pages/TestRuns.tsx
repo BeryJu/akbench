@@ -67,7 +67,12 @@ export function TestRunsPage() {
                                 className="small danger"
                                 onClick={() =>
                                     void confirmAndRun(
-                                        `Delete test run "${r.metadata.name}"?`,
+                                        {
+                                            title: "Delete test run",
+                                            message: `Delete test run "${r.metadata.name}"?`,
+                                            confirmLabel: "Delete",
+                                            danger: true,
+                                        },
                                         () => api.deleteTestRun(r.metadata.name),
                                         runs.reload,
                                         `Deleted ${r.metadata.name}`,

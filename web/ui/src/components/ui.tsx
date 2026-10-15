@@ -1,4 +1,5 @@
 import { SINCE_START, TIME_RANGES } from "../format";
+import { confirm, type ConfirmOptions } from "./Confirm";
 import { toast } from "./Toast";
 
 // The handful of layout/feedback primitives every page shares.
@@ -244,19 +245,19 @@ export function errorMessage(err: unknown): string {
 }
 
 /**
- * confirmAndRun asks first, then runs action, toasting the outcome: a
+ * confirmAndRun asks first (in a modal, see Confirm.tsx), then runs action, toasting the outcome: a
  * success message if given (most actions here are a delete/kick with
  * nothing more interesting to say than "done", which the row vanishing or
  * refreshing already shows - pass one only when it adds information), and
  * always the error on failure.
  */
 export async function confirmAndRun(
-    question: string,
+    question: ConfirmOptions | string,
     action: () => Promise<unknown>,
     after?: () => void,
     successMessage?: string,
 ) {
-    if (!window.confirm(question)) {
+    if (!(await confirm(question))) {
         return;
     }
     try {

@@ -182,7 +182,12 @@ export function InfrastructurePage() {
                                     }
                                     onClick={() =>
                                         void confirmAndRun(
-                                            `Delete the Incus connection "${c.name}"?`,
+                                            {
+                                                title: "Delete Incus connection",
+                                                message: `Delete the Incus connection "${c.name}"?`,
+                                                confirmLabel: "Delete",
+                                                danger: true,
+                                            },
                                             () => api.deleteIncusCredential(c.name),
                                             incus.reload,
                                             `Deleted ${c.name}`,

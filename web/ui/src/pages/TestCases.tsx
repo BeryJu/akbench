@@ -145,7 +145,12 @@ export function TestCasesPage() {
                                     className="small danger"
                                     onClick={() =>
                                         void confirmAndRun(
-                                            `Delete test case "${tc.metadata.name}"?`,
+                                            {
+                                                title: "Delete test case",
+                                                message: `Delete test case "${tc.metadata.name}"?`,
+                                                confirmLabel: "Delete",
+                                                danger: true,
+                                            },
                                             () => api.deleteTestCase(tc.metadata.name),
                                             testCases.reload,
                                             `Deleted ${tc.metadata.name}`,
@@ -597,7 +602,11 @@ export function TestCaseViewPage() {
             return;
         }
         void confirmAndRun(
-            `Stop the burn on all ${rows.length} target(s) by switching "${name}" to Quick?`,
+            {
+                title: "Switch to Quick",
+                message: `Stop the burn on all ${rows.length} target(s) by switching "${name}" to Quick?`,
+                confirmLabel: "Switch",
+            },
             () => api.updateTestCase(name, { spec: { ...tc.spec, profile: "Quick" } }),
             testCase.reload,
             `Switched ${name} to Quick`,

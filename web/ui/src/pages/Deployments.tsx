@@ -106,7 +106,12 @@ export function DeploymentsPage() {
                                     className="small danger"
                                     onClick={() =>
                                         void confirmAndRun(
-                                            `Delete deployment "${d.metadata.name}"? This tears down its Helm release.`,
+                                            {
+                                                title: "Delete deployment",
+                                                message: `Delete deployment "${d.metadata.name}"? This tears down its Helm release.`,
+                                                confirmLabel: "Delete",
+                                                danger: true,
+                                            },
                                             () => api.deleteDeployment(d.metadata.name),
                                             deployments.reload,
                                             `Deleted ${d.metadata.name}`,
@@ -809,7 +814,12 @@ export function DeploymentViewPage() {
                             title="Uninstall authentik, delete its database volumes and reinstall from an empty database, re-applying the fixtures and test-client blueprints."
                             onClick={() =>
                                 void confirmAndRun(
-                                    `Reset deployment "${name}"? This uninstalls authentik, permanently deletes its database and reinstalls it from scratch with the seed blueprints.`,
+                                    {
+                                        title: "Reset deployment",
+                                        message: `Reset deployment "${name}"? This uninstalls authentik, permanently deletes its database and reinstalls it from scratch with the seed blueprints.`,
+                                        confirmLabel: "Reset",
+                                        danger: true,
+                                    },
                                     () => api.resetDeployment(name),
                                     deployment.reload,
                                     `Resetting ${name}`,

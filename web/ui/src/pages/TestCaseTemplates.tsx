@@ -78,7 +78,12 @@ export function TestCaseTemplatesPage() {
                                     className="small danger"
                                     onClick={() =>
                                         void confirmAndRun(
-                                            `Delete template "${t.metadata.name}"? Any test case still using it stops reconciling.`,
+                                            {
+                                                title: "Delete template",
+                                                message: `Delete template "${t.metadata.name}"? Any test case still using it stops reconciling.`,
+                                                confirmLabel: "Delete",
+                                                danger: true,
+                                            },
                                             () => api.deleteTestCaseTemplate(t.metadata.name),
                                             templates.reload,
                                             `Deleted ${t.metadata.name}`,
