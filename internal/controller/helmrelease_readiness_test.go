@@ -3,6 +3,7 @@ package controller
 import (
 	"testing"
 
+	benchv1alpha1 "github.com/authentik-labs/akbench/api/v1alpha1"
 	helmv2 "github.com/fluxcd/helm-controller/api/v2"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -54,5 +55,28 @@ func TestHelmReleaseReadiness(t *testing.T) {
 		if err != nil || status != tc.status || message != tc.message {
 			t.Errorf("%s: got %s %q %v, want %s %q", name, status, message, err, tc.status, tc.message)
 		}
+	}
+}
+
+func TestRecordChartVersion(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := helmv2.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	topo := &benchv1alpha1.AuthentikDeployment{Name: "authentik", Namespace: "default"}
+
+	r := &AuthentikDeploymentReconciler{Client: fake.NewClientBuilder().WithScheme(scheme).Build()}
+	if r.recordChartVersion(t.Context(), topo); topo.Status.ChartVersion != "" {
+		t.Fatalf("no HelmRelease yet: got %q, want empty", topo.Status.ChartVersion)
+	}
+
+	hr := &helmv2.HelmRelease{Name: "authentik", Namespace: "default"}
+	hr.Status.History = helmv2.Snapshots{
+		{Version: 1, ChartVersion: "2026.8.3", Status: "superseded"},
+		{Version: 2, ChartVersion: "2026.8.4", Status: "deployed"},
+	}
+	r = &AuthentikDeploymentReconciler{Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(hr).Build()}
+	if r.recordChartVersion(t.Context(), topo); topo.Status.ChartVersion != "2026.8.4" {
+		t.Fatalf("got %q, want 2026.8.4", topo.Status.ChartVersion)
 	}
 }

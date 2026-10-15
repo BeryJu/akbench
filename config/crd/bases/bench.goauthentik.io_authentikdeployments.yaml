@@ -438,6 +438,13 @@ spec:
           status:
             description: AuthentikDeploymentStatus defines the observed state of AuthentikDeployment.
             properties:
+              chartVersion:
+                description: |-
+                  chartVersion is the authentik chart version helm-controller installed.
+                  With spec.chart.version unset, the HelmRelease stays on this version
+                  rather than following new upstream chart releases (which would restart
+                  authentik mid-benchmark).
+                type: string
               cnpgClusterRef:
                 description: |-
                   LocalObjectReference contains enough information to let you locate the

@@ -366,16 +366,28 @@ func BlueprintPVC(t *benchv1alpha1.AuthentikDeployment) *corev1.PersistentVolume
 	}
 }
 
+// ChartVersion is the authentik chart version the HelmRelease requests: the
+// pinned spec.chart.version, else the version first installed
+// (status.chartVersion), else "*" for the latest chart on first install.
+// Without the middle step every unpinned deployment would upgrade - and
+// restart - whenever upstream publishes a new chart.
+func ChartVersion(t *benchv1alpha1.AuthentikDeployment) string {
+	if t.Spec.Chart.Version != "" {
+		return t.Spec.Chart.Version
+	}
+	if t.Status.ChartVersion != "" {
+		return t.Status.ChartVersion
+	}
+	return "*"
+}
+
 // HelmRelease builds the Flux HelmRelease that installs the authentik chart
 // for this deployment. kubeConfigSecretName is empty for a deployment on the
 // management cluster itself (M1-M3); from M4 on it names the
 // "<clusterRef>-kubeconfig" Secret CAPI produces, so Flux's helm-controller
 // installs remotely.
 func HelmRelease(t *benchv1alpha1.AuthentikDeployment, kubeConfigSecretName string, values *apiextensionsv1.JSON) *helmv2.HelmRelease {
-	version := t.Spec.Chart.Version
-	if version == "" {
-		version = "*"
-	}
+	version := ChartVersion(t)
 	hr := &helmv2.HelmRelease{
 		Name:      HelmReleaseName(t),
 		Namespace: t.Namespace,

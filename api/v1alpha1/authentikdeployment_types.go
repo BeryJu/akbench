@@ -226,6 +226,12 @@ type AuthentikDeploymentStatus struct {
 	// <release>-server.<namespace>.svc.cluster.local:80.
 	// +optional
 	ServiceEndpoint string `json:"serviceEndpoint,omitempty"`
+	// chartVersion is the authentik chart version helm-controller installed.
+	// With spec.chart.version unset, the HelmRelease stays on this version
+	// rather than following new upstream chart releases (which would restart
+	// authentik mid-benchmark).
+	// +optional
+	ChartVersion string `json:"chartVersion,omitempty"`
 	// +optional
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 }

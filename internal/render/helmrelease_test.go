@@ -369,6 +369,23 @@ func TestHelmReleaseUsesExplicitReleaseName(t *testing.T) {
 	}
 }
 
+func TestHelmReleaseChartVersion(t *testing.T) {
+	for name, tc := range map[string]struct {
+		spec, status, want string
+	}{
+		"first install follows the latest chart": {"", "", "*"},
+		"unpinned stays on the installed chart":  {"", "2026.8.3", "2026.8.3"},
+		"pinned version wins":                    {"2026.8.4", "2026.8.3", "2026.8.4"},
+	} {
+		topo := exampleDeployment()
+		topo.Spec.Chart.Version = tc.spec
+		topo.Status.ChartVersion = tc.status
+		if got := HelmRelease(topo, "", nil).Spec.Chart.Spec.Version; got != tc.want {
+			t.Errorf("%s: chart version = %q, want %q", name, got, tc.want)
+		}
+	}
+}
+
 func envValue(t *testing.T, w map[string]any, name string) (string, bool) {
 	t.Helper()
 	raw, err := json.Marshal(w["env"])

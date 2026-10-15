@@ -222,6 +222,24 @@ func (r *AuthentikDeploymentReconciler) helmReleaseReadiness(ctx context.Context
 	return metav1.ConditionFalse, cond.Message, nil
 }
 
+// recordChartVersion stores the chart version helm-controller last installed
+// in status.chartVersion, which render.ChartVersion keeps an unpinned
+// deployment on. Recorded before rendering, so the HelmRelease switches from
+// "*" to the concrete version in the same reconcile that first sees it. A
+// failed lookup keeps the previously recorded version.
+func (r *AuthentikDeploymentReconciler) recordChartVersion(ctx context.Context, topo *benchv1alpha1.AuthentikDeployment) {
+	var existing helmv2.HelmRelease
+	if err := r.Get(ctx, types.NamespacedName{Name: render.HelmReleaseName(topo), Namespace: topo.Namespace}, &existing); err != nil {
+		if !apierrors.IsNotFound(err) {
+			logf.FromContext(ctx).Error(err, "Failed to get HelmRelease", "name", render.HelmReleaseName(topo))
+		}
+		return
+	}
+	if latest := existing.Status.History.Latest(); latest != nil && latest.ChartVersion != "" {
+		topo.Status.ChartVersion = latest.ChartVersion
+	}
+}
+
 // reconcileBlueprint applies the fixtures blueprint (if any is configured)
 // once the HelmRelease itself is Ready (a server pod actually exists to
 // exec into), returning the BlueprintApplied condition to set and whether
@@ -426,6 +444,7 @@ func (r *AuthentikDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.
 	if topo.Spec.ClusterRef.Name != "" {
 		kubeConfigSecretName = kubeconfigSecretName(topo.Spec.ClusterRef.Name)
 	}
+	r.recordChartVersion(ctx, &topo)
 	hr := render.HelmRelease(&topo, kubeConfigSecretName, values)
 	if err := applyOwned(ctx, r.Client, r.Scheme, &topo, hr); err != nil {
 		return ctrl.Result{}, fmt.Errorf("apply HelmRelease: %w", err)
