@@ -63,9 +63,13 @@ type K6WorkloadParams struct {
 	// RemoteWriteURL is the runner cluster's Prometheus remote-write
 	// endpoint. Local in M1-M3; the mTLS central receiver from M4 on.
 	RemoteWriteURL string
-	// ScriptConfigMapName holds the k6 script under the fixed key
-	// "script.ts" (see scriptFileName).
+	// ScriptConfigMapName holds the shared library under LibFileName and,
+	// unless UserScriptConfigMapName is set, the k6 script under the fixed
+	// key "script.ts" (see scriptFileName).
 	ScriptConfigMapName string
+	// UserScriptConfigMapName is a TestCase's spec.scriptConfigMapRef: its
+	// keys are mounted next to the library, so a BYO script can import it too.
+	UserScriptConfigMapName string
 	// FixturesSecretName holds the generated users.json fixture.
 	FixturesSecretName string
 	// Dependencies locates the resolved template's
@@ -169,6 +173,10 @@ func k6ProfileValue(p benchv1alpha1.TestProfile) string {
 // where the content actually came from.
 const scriptFileName = "script.ts"
 
+// LibFileName is the shared k6 library (k6/scripts/bench.ts) mounted next to
+// every script, which imports it as "./bench.ts".
+const LibFileName = "bench.ts"
+
 // Args builds the k6 command line, matching the --tag scheme every Grafana
 // dashboard splits on: testid, target, profile, plus any extraTags.
 func (p K6WorkloadParams) Args() []string {
@@ -197,12 +205,19 @@ func (p K6WorkloadParams) Args() []string {
 }
 
 func (p K6WorkloadParams) volumes() ([]corev1.Volume, []corev1.VolumeMount) {
+	sources := []corev1.VolumeProjection{{
+		ConfigMap: &corev1.ConfigMapProjection{LocalObjectReference: corev1.LocalObjectReference{Name: p.ScriptConfigMapName}},
+	}}
+	if p.UserScriptConfigMapName != "" {
+		sources[0].ConfigMap.Items = []corev1.KeyToPath{{Key: LibFileName, Path: LibFileName}}
+		sources = append(sources, corev1.VolumeProjection{
+			ConfigMap: &corev1.ConfigMapProjection{LocalObjectReference: corev1.LocalObjectReference{Name: p.UserScriptConfigMapName}},
+		})
+	}
 	volumes := []corev1.Volume{
 		{
-			Name: "scripts",
-			ConfigMap: &corev1.ConfigMapVolumeSource{
-				Name: p.ScriptConfigMapName,
-			},
+			Name:         "scripts",
+			VolumeSource: corev1.VolumeSource{Projected: &corev1.ProjectedVolumeSource{Sources: sources}},
 		},
 		{
 			Name:   "fixtures",

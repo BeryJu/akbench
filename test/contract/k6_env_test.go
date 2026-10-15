@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strings"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -135,6 +136,41 @@ func TestBuiltinScriptsReadOnlyRenderedEnv(t *testing.T) {
 			if _, ok := rendered[m[1]]; !ok {
 				t.Errorf("%s reads __ENV.%s, which the k6 Job never sets", filepath.Base(script), m[1])
 			}
+		}
+	}
+}
+
+// TestBuiltinScriptsHaveIterationVerdict guards the quick-run verdict: a
+// quick TestRun fails only when k6 exits non-zero, and fail() aborts never
+// reach the built-in checks rate. bench.ts records iteration_failed and puts
+// a threshold on it, so every built-in script must take its options and its
+// default function from there.
+func TestBuiltinScriptsHaveIterationVerdict(t *testing.T) {
+	lib, err := os.ReadFile("../../k6/scripts/" + render.LibFileName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`new Rate("iteration_failed")`, "iterationFailed.add(", `iteration_failed: ["rate<`} {
+		if !strings.Contains(string(lib), want) {
+			t.Errorf("%s lost the iteration_failed verdict (missing %q)", render.LibFileName, want)
+		}
+	}
+
+	scripts, err := filepath.Glob("../../k6/scripts/*.ts")
+	if err != nil || len(scripts) == 0 {
+		t.Fatalf("no built-in k6 scripts found: %v", err)
+	}
+	for _, script := range scripts {
+		if filepath.Base(script) == render.LibFileName {
+			continue
+		}
+		content, err := os.ReadFile(script)
+		if err != nil {
+			t.Fatal(err)
+		}
+		s := string(content)
+		if !strings.Contains(s, "export const options = benchOptions(") || !strings.Contains(s, "export default iteration(") {
+			t.Errorf("%s must take its options and default function from bench.ts", filepath.Base(script))
 		}
 	}
 }

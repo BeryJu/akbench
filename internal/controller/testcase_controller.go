@@ -27,6 +27,7 @@ import (
 	benchv1alpha1 "github.com/authentik-labs/akbench/api/v1alpha1"
 	"github.com/authentik-labs/akbench/internal/multicluster"
 	"github.com/authentik-labs/akbench/internal/render"
+	k6scripts "github.com/authentik-labs/akbench/k6/scripts"
 )
 
 const testCaseFinalizer = "bench.goauthentik.io/remote-cleanup"
@@ -331,17 +332,18 @@ func (r *TestCaseReconciler) reconcileTarget(ctx context.Context, tc *benchv1alp
 	runnerWC := resolveWorkloadCluster(ctx, r.Client, tc.Namespace, result.runnerCluster)
 	nodeSelector, tolerations := render.K6PoolPlacement(runnerWC)
 	params := render.K6WorkloadParams{
-		TestCase:            tc,
-		DeploymentName:      ref.Name,
-		TargetName:          targetName,
-		BenchHost:           host,
-		BenchPort:           port,
-		RemoteWriteURL:      defaultRemoteWriteURL,
-		ScriptConfigMapName: scriptCM,
-		FixturesSecretName:  fixturesSecretName,
-		Dependencies:        deps,
-		NodeSelector:        nodeSelector,
-		Tolerations:         tolerations,
+		TestCase:                tc,
+		DeploymentName:          ref.Name,
+		TargetName:              targetName,
+		BenchHost:               host,
+		BenchPort:               port,
+		RemoteWriteURL:          defaultRemoteWriteURL,
+		ScriptConfigMapName:     scriptCM,
+		UserScriptConfigMapName: userScriptConfigMapName(tc),
+		FixturesSecretName:      fixturesSecretName,
+		Dependencies:            deps,
+		NodeSelector:            nodeSelector,
+		Tolerations:             tolerations,
 	}
 
 	if tc.Spec.Profile == benchv1alpha1.ProfileBurn {
@@ -565,34 +567,33 @@ func (r *TestCaseReconciler) reconcileBurn(ctx context.Context, rc client.Client
 	return existing, nil
 }
 
-// ensureScriptConfigMap mirrors the resolved script content - a
-// user-supplied scriptConfigMapRef (BYO, used directly), inline content
-// stored on the TestCase itself, or the resolved TestCaseTemplate's own
-// script, in that precedence order (matching render.scriptFileName's own) -
-// into the ConfigMap the k6 pod mounts on rc, returning its name. tmpl is
-// nil when scriptConfigMapRef or inline already won upstream (see Reconcile's
+// ensureScriptConfigMap mirrors the shared k6 library and the resolved
+// script - inline content stored on the TestCase itself, else the resolved
+// TestCaseTemplate's own script - into the ConfigMap the k6 pod mounts on
+// rc, returning its name. A user-supplied scriptConfigMapRef (BYO) is
+// mounted as is next to it, so only the library goes here then. tmpl is nil
+// when scriptConfigMapRef or inline already won upstream (see Reconcile's
 // usingTemplate).
 func (r *TestCaseReconciler) ensureScriptConfigMap(ctx context.Context, rc client.Client, remote bool, tc *benchv1alpha1.TestCase, tmpl *benchv1alpha1.TestCaseTemplate) (string, error) {
-	if tc.Spec.ScriptConfigMapRef != nil {
-		// BYO script: used directly, nothing to mirror.
-		return tc.Spec.ScriptConfigMapRef.Name, nil
+	lib, ok := k6scripts.Get(render.LibFileName)
+	if !ok {
+		return "", fmt.Errorf("embedded k6 library %q is missing", render.LibFileName)
 	}
-
-	var content string
-	if tc.Spec.Inline != "" {
-		content = tc.Spec.Inline
-	} else {
-		if tmpl.Spec.Script == "" {
-			return "", fmt.Errorf("TestCaseTemplate %q has an empty script", tmpl.Name)
-		}
-		content = tmpl.Spec.Script
+	data := map[string]string{render.LibFileName: lib}
+	switch {
+	case tc.Spec.ScriptConfigMapRef != nil:
+	case tc.Spec.Inline != "":
+		data["script.ts"] = tc.Spec.Inline
+	case tmpl.Spec.Script == "":
+		return "", fmt.Errorf("TestCaseTemplate %q has an empty script", tmpl.Name)
+	default:
+		data["script.ts"] = tmpl.Spec.Script
 	}
-	const key = "script.ts"
 
 	name := "k6-script-" + tc.Name
 	cm := &corev1.ConfigMap{
 		Name: name, Namespace: tc.Namespace,
-		Data: map[string]string{key: content},
+		Data: data,
 	}
 	if !remote {
 		if err := controllerutil.SetControllerReference(tc, cm, r.Scheme); err != nil {
@@ -615,6 +616,14 @@ func (r *TestCaseReconciler) ensureScriptConfigMap(ctx context.Context, rc clien
 		}
 	}
 	return name, nil
+}
+
+// userScriptConfigMapName is the TestCase's BYO script ConfigMap, if any.
+func userScriptConfigMapName(tc *benchv1alpha1.TestCase) string {
+	if tc.Spec.ScriptConfigMapRef == nil {
+		return ""
+	}
+	return tc.Spec.ScriptConfigMapRef.Name
 }
 
 func findCondition(conditions []metav1.Condition, condType string) *metav1.Condition {

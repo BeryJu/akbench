@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	benchv1alpha1 "github.com/authentik-labs/akbench/api/v1alpha1"
 	k6scripts "github.com/authentik-labs/akbench/k6/scripts"
@@ -29,9 +29,8 @@ func mustEmbeddedScript(name string) string {
 
 // defaultTestCaseTemplates seeds the operator's own built-in k6 test
 // templates from the exact same embedded scripts (k6/scripts/*.ts) this
-// binary already carries, so a fresh install has working, immediately
-// editable TestCaseTemplate objects without anyone hand-authoring
-// them first.
+// binary already carries, so every install runs the scripts this operator
+// version shipped with (see SeedDefaultTestCaseTemplates).
 func defaultTestCaseTemplates(namespace string) []benchv1alpha1.TestCaseTemplate {
 	return []benchv1alpha1.TestCaseTemplate{
 		{
@@ -94,18 +93,22 @@ func defaultTestCaseTemplates(namespace string) []benchv1alpha1.TestCaseTemplate
 	}
 }
 
-// SeedDefaultTestCaseTemplates creates the operator's built-in templates if
-// they don't already exist yet - create-only, never overwritten, so editing
-// one via the web UI (or plain kubectl) is never clobbered by a later operator
-// restart/upgrade picking up a newer embedded script. Called once at manager
-// startup, before the manager's own cache starts, with a plain uncached
-// client - so any failure here (e.g. the CRD not installed yet) surfaces
-// immediately as a clear startup error instead of racing the manager's own
-// lifecycle.
+// SeedDefaultTestCaseTemplates creates or updates the operator's built-in
+// templates, resetting their spec to the embedded one on every start - an
+// operator upgrade always ships its own scripts, and local edits to a
+// built-in template are discarded (copy it under another name to keep
+// changes). Called once at manager startup, before the manager's own cache
+// starts, with a plain uncached client - so any failure here (e.g. the CRD
+// not installed yet) surfaces immediately as a clear startup error instead of
+// racing the manager's own lifecycle.
 func SeedDefaultTestCaseTemplates(ctx context.Context, c client.Client, namespace string) error {
-	for _, tmpl := range defaultTestCaseTemplates(namespace) {
-		if err := c.Create(ctx, &tmpl); err != nil && !apierrors.IsAlreadyExists(err) {
-			return fmt.Errorf("seed TestCaseTemplate %q: %w", tmpl.Name, err)
+	for _, want := range defaultTestCaseTemplates(namespace) {
+		tmpl := &benchv1alpha1.TestCaseTemplate{ObjectMeta: want.ObjectMeta}
+		if _, err := controllerutil.CreateOrUpdate(ctx, c, tmpl, func() error {
+			tmpl.Spec = want.Spec
+			return nil
+		}); err != nil {
+			return fmt.Errorf("seed TestCaseTemplate %q: %w", want.Name, err)
 		}
 	}
 	return nil

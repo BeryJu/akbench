@@ -167,9 +167,6 @@ func (r *TestRunReconciler) start(ctx context.Context, run *benchv1alpha1.TestRu
 	}
 
 	scriptCMName := "k6-script-" + tc.Name
-	if tc.Spec.ScriptConfigMapRef != nil {
-		scriptCMName = tc.Spec.ScriptConfigMapRef.Name
-	}
 
 	if err := ensureFixturesSecret(ctx, r.Client, rc, run.Namespace); err != nil {
 		// See TestCaseReconciler.reconcileTarget: a setup step still to do.
@@ -196,17 +193,18 @@ func (r *TestRunReconciler) start(ctx context.Context, run *benchv1alpha1.TestRu
 	runnerWC := resolveWorkloadCluster(ctx, r.Client, run.Namespace, runnerClusterName(&tc, topo))
 	nodeSelector, tolerations := render.K6PoolPlacement(runnerWC)
 	params := render.K6WorkloadParams{
-		TestCase:            resolvedTC,
-		DeploymentName:      deploymentRef.Name,
-		TargetName:          targetName,
-		BenchHost:           host,
-		BenchPort:           port,
-		RemoteWriteURL:      defaultRemoteWriteURL,
-		ScriptConfigMapName: scriptCMName,
-		FixturesSecretName:  fixturesSecretName,
-		Dependencies:        deps,
-		NodeSelector:        nodeSelector,
-		Tolerations:         tolerations,
+		TestCase:                resolvedTC,
+		DeploymentName:          deploymentRef.Name,
+		TargetName:              targetName,
+		BenchHost:               host,
+		BenchPort:               port,
+		RemoteWriteURL:          defaultRemoteWriteURL,
+		ScriptConfigMapName:     scriptCMName,
+		UserScriptConfigMapName: userScriptConfigMapName(&tc),
+		FixturesSecretName:      fixturesSecretName,
+		Dependencies:            deps,
+		NodeSelector:            nodeSelector,
+		Tolerations:             tolerations,
 	}
 	jobName := "testrun-" + run.Name
 	job := render.QuickJob(jobName, run.Namespace, params)

@@ -16,6 +16,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	benchv1alpha1 "github.com/authentik-labs/akbench/api/v1alpha1"
+	"github.com/authentik-labs/akbench/internal/render"
 )
 
 var _ = Describe("TestCase Controller", func() {
@@ -158,6 +159,7 @@ var _ = Describe("TestCase Controller", func() {
 			cmKey := types.NamespacedName{Name: "k6-script-" + resourceName, Namespace: "default"}
 			Expect(k8sClient.Get(context.Background(), cmKey, &cm)).To(Succeed())
 			Expect(cm.Data).To(HaveKeyWithValue("script.ts", inlineBody))
+			Expect(cm.Data).To(HaveKey(render.LibFileName), "the shared k6 library is mounted next to every script")
 		})
 	})
 
