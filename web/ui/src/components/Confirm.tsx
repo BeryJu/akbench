@@ -12,14 +12,24 @@ export interface ConfirmOptions {
     confirmLabel?: string;
     /** Styles the confirming button as destructive. */
     danger?: boolean;
+    /** An extra opt-in shown under the message, e.g. "Also delete X". */
+    checkbox?: { label: string; defaultChecked?: boolean };
+}
+
+/** ConfirmResult is the user's yes; null means they cancelled. */
+export interface ConfirmResult {
+    /** Whether the optional checkbox was ticked (false without one). */
+    checked: boolean;
 }
 
 interface Pending extends ConfirmOptions {
-    resolve: (ok: boolean) => void;
+    id: number;
+    resolve: (result: ConfirmResult | null) => void;
 }
 
 // One at a time: a second confirm() while one is open cancels the first,
 // rather than queueing a question the user never asked for.
+let nextId = 1;
 let pending: Pending | null = null;
 const listeners = new Set<() => void>();
 
@@ -38,19 +48,19 @@ function snapshot() {
     return pending;
 }
 
-function settle(ok: boolean) {
+function settle(result: ConfirmResult | null) {
     const current = pending;
     pending = null;
     emit();
-    current?.resolve(ok);
+    current?.resolve(result);
 }
 
 /** confirm asks the question in a modal and resolves to the user's answer. */
-export function confirm(options: ConfirmOptions | string): Promise<boolean> {
+export function confirm(options: ConfirmOptions | string): Promise<ConfirmResult | null> {
     const opts = typeof options === "string" ? { message: options } : options;
-    settle(false);
+    settle(null);
     return new Promise((resolve) => {
-        pending = { ...opts, resolve };
+        pending = { ...opts, id: nextId++, resolve };
         emit();
     });
 }
@@ -84,16 +94,34 @@ export function ConfirmHost() {
             // them apart (only the confirm button sets it).
             onClose={(e) => {
                 if (pending) {
-                    settle(e.currentTarget.returnValue === "confirm");
+                    const dialog = e.currentTarget;
+                    const checkbox = dialog.querySelector<HTMLInputElement>("input[name=option]");
+                    settle(
+                        dialog.returnValue === "confirm"
+                            ? { checked: checkbox?.checked ?? false }
+                            : null,
+                    );
                 }
             }}
             // A click on the backdrop targets the <dialog> itself.
-            onClick={(e) => e.target === e.currentTarget && settle(false)}
+            onClick={(e) => e.target === e.currentTarget && settle(null)}
         >
             {current && (
-                <form method="dialog">
+                // Keyed on the request so a replacing confirm() starts with a
+                // fresh, uncontrolled checkbox.
+                <form method="dialog" key={current.id}>
                     {current.title && <h2 id="confirm-title">{current.title}</h2>}
                     <p id="confirm-message">{current.message}</p>
+                    {current.checkbox && (
+                        <label className="check">
+                            <input
+                                type="checkbox"
+                                name="option"
+                                defaultChecked={current.checkbox.defaultChecked}
+                            />
+                            {current.checkbox.label}
+                        </label>
+                    )}
                     <div className="row confirm-actions">
                         <button type="submit" value="cancel" autoFocus>
                             Cancel

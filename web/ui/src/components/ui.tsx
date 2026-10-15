@@ -253,15 +253,17 @@ export function errorMessage(err: unknown): string {
  */
 export async function confirmAndRun(
     question: ConfirmOptions | string,
-    action: () => Promise<unknown>,
+    // checked is the answer to question.checkbox, if it has one.
+    action: (checked: boolean) => Promise<unknown>,
     after?: () => void,
     successMessage?: string,
 ) {
-    if (!(await confirm(question))) {
+    const answer = await confirm(question);
+    if (!answer) {
         return;
     }
     try {
-        await action();
+        await action(answer.checked);
         after?.();
         if (successMessage) {
             toast.success(successMessage);

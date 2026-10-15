@@ -46,6 +46,47 @@ import { Link, useNavigate, useParams, useSearchParams } from "react-router";
 export function TestCasesPage() {
     const testCases = useResource(() => api.testCases(), [], 5000, "TestCase");
 
+    function deleteTestCase(tc: TestCase) {
+        const name = tc.metadata.name;
+        // Only offer the deployments no other test case drives - deleting a
+        // shared one would pull it out from under that test case too.
+        const usedElsewhere = new Set(
+            (testCases.data ?? [])
+                .filter((other) => other.metadata.name !== name)
+                .flatMap((other) => testCaseDeployments(other.spec).map((d) => d.name)),
+        );
+        const own = testCaseDeployments(tc.spec)
+            .map((d) => d.name)
+            .filter((d) => !usedElsewhere.has(d));
+        const shared = testCaseDeployments(tc.spec).length - own.length;
+        return confirmAndRun(
+            {
+                title: "Delete test case",
+                message: `Delete test case "${name}"?`,
+                confirmLabel: "Delete",
+                danger: true,
+                checkbox:
+                    own.length > 0
+                        ? {
+                              label:
+                                  `Also delete its ${own.length === 1 ? "deployment" : `${own.length} deployments`} (${own.join(", ")})` +
+                                  (shared > 0
+                                      ? ` - ${shared} shared with other test cases stay`
+                                      : ""),
+                          }
+                        : undefined,
+            },
+            async (withDeployments) => {
+                await api.deleteTestCase(name);
+                if (withDeployments) {
+                    await Promise.all(own.map((d) => api.deleteDeployment(d)));
+                }
+            },
+            testCases.reload,
+            `Deleted ${name}`,
+        );
+    }
+
     async function runNow(name: string) {
         try {
             const runs = await api.runTestCase(name);
@@ -143,19 +184,7 @@ export function TestCasesPage() {
                                 </Link>
                                 <button
                                     className="small danger"
-                                    onClick={() =>
-                                        void confirmAndRun(
-                                            {
-                                                title: "Delete test case",
-                                                message: `Delete test case "${tc.metadata.name}"?`,
-                                                confirmLabel: "Delete",
-                                                danger: true,
-                                            },
-                                            () => api.deleteTestCase(tc.metadata.name),
-                                            testCases.reload,
-                                            `Deleted ${tc.metadata.name}`,
-                                        )
-                                    }
+                                    onClick={() => void deleteTestCase(tc)}
                                 >
                                     Delete
                                 </button>
