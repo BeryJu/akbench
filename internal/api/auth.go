@@ -86,10 +86,12 @@ func bearerToken(r *http.Request) (string, bool) {
 // unauditedRoutes are POSTs that only mint a short-lived credential for
 // reading (the Grafana iframe, the live-events feed). The UI calls both on
 // every page load, so logging them would bury the entries that matter.
-// The shell's ticket mint is audited: it hands out a shell.
+// The shell's ticket mint is audited: it hands out a shell. MCP is
+// JSON-RPC over POST, but every tool it serves is read-only (mcp.go).
 var unauditedRoutes = map[string]bool{
 	"/api/v1/grafana/session": true,
 	"/api/v1/events/sessions": true,
+	"/api/v1/mcp":             true,
 }
 
 // auditWrites logs every request that can change something - anything but
