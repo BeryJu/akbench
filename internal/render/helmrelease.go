@@ -217,7 +217,7 @@ func HelmValues(t *benchv1alpha1.AuthentikDeployment, wc *benchv1alpha1.Workload
 			// for the table, vacuum and transaction detail its dashboards use.
 			"collectors": map[string]bool{
 				"long_running_transactions": true, "postmaster": true, "process_idle": true,
-				"stat_activity": true, "stat_activity_autovacuum": true, "stat_checkpointer": true,
+				"stat_activity_autovacuum": true, "stat_checkpointer": true,
 				"stat_progress_vacuum": true, "stat_user_tables": true, "stat_wal_receiver": true,
 				"statio_user_indexes": true, "statio_user_tables": true,
 			},
