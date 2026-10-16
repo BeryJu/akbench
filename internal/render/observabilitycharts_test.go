@@ -142,3 +142,20 @@ func TestObservabilityServiceContracts(t *testing.T) {
 		t.Error("observability Service names/ports changed - authentik's defaults point at them")
 	}
 }
+
+// TestTempoKeepsStatementsWhole: Tempo truncates attributes past 2048 bytes
+// unless told otherwise, and some of authentik's db.statement values are
+// far longer.
+func TestTempoKeepsStatementsWhole(t *testing.T) {
+	hr, err := TempoHelmRelease(observabilityCluster())
+	if err != nil {
+		t.Fatal(err)
+	}
+	tempo, _ := valuesOf(t, hr)["tempo"].(map[string]any)
+	overrides, _ := tempo["overrides"].(map[string]any)
+	defaults, _ := overrides["defaults"].(map[string]any)
+	ingestion, _ := defaults["ingestion"].(map[string]any)
+	if got, _ := ingestion["max_attribute_bytes"].(float64); got != tempoMaxAttributeBytes {
+		t.Errorf("tempo.overrides.defaults.ingestion.max_attribute_bytes = %v, want %d", ingestion["max_attribute_bytes"], tempoMaxAttributeBytes)
+	}
+}

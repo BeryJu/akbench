@@ -36,7 +36,12 @@ import (
 const (
 	traceBreakdownLimit = 15
 	traceTopQueries     = 8
-	maxStatementLength  = 400
+	// maxStatementLength bounds a statement's summary (summarizeStatement).
+	maxStatementLength = 1000
+	// queryFloorQuantile is the quantile of a sample's query durations taken
+	// as its round-trip floor: about what any query costs outside Postgres
+	// (the network, the driver, waiting for Python's GIL).
+	queryFloorQuantile = 0.1
 )
 
 // TraceStage is one flow stage's latency across the sampled requests.
@@ -47,15 +52,37 @@ type TraceStage struct {
 	P95   float64 `json:"p95"`
 }
 
-// TraceQuery is one (parameterized) SQL statement's share of the sample.
+// TraceQuery is one statement's share of the sample, its calls grouped by
+// normalizeStatement. Durations are seconds.
 type TraceQuery struct {
+	// ID names the statement stably across refreshes and targets.
+	ID string `json:"id"`
+	// Statement is the statement's summary (summarizeStatement).
 	Statement string `json:"statement"`
-	Count     int    `json:"count"`
-	// PerRequest is how many times one request runs it, on average.
-	PerRequest float64 `json:"perRequest"`
-	// Total is its summed duration across the sample, in seconds.
-	Total float64 `json:"total"`
-	Mean  float64 `json:"mean"`
+	// Count is how many times the sample runs it.
+	Count int `json:"count"`
+	// PerRequest is how many times one request runs it, on average, and
+	// MaxPerRequest the most times any one request did.
+	PerRequest    float64 `json:"perRequest"`
+	MaxPerRequest int     `json:"maxPerRequest"`
+	// Total is its summed duration across the sample. TimePerRequest spreads
+	// that over the sampled requests, and Share is its part of their summed
+	// duration: the most that removing the query could save.
+	Total          float64 `json:"total"`
+	TimePerRequest float64 `json:"timePerRequest"`
+	Share          float64 `json:"share"`
+	Mean           float64 `json:"mean"`
+	P50            float64 `json:"p50"`
+	P95            float64 `json:"p95"`
+	Max            float64 `json:"max"`
+	// OverFloor is how far P50 is above the target's QueryFloor. Near zero,
+	// the query costs a round trip rather than its execution.
+	OverFloor float64 `json:"overFloor"`
+	// Postgres is what pg_stat_statements recorded for the statement
+	// (pgstats.go), when it has a match.
+	Postgres *PostgresStatement `json:"postgres,omitempty"`
+
+	matchKey string
 }
 
 // TraceTarget is one target's breakdown. Durations are seconds.
@@ -66,14 +93,19 @@ type TraceTarget struct {
 	// RequestP50/P95 are per HTTP request to authentik, not per login - a
 	// login is several requests, and a sampled trace may be cut short by
 	// the search window.
-	RequestP50        float64      `json:"requestP50"`
-	RequestP95        float64      `json:"requestP95"`
-	QueriesPerRequest float64      `json:"queriesPerRequest"`
-	DBTimePerRequest  float64      `json:"dbTimePerRequest"`
-	DBShare           float64      `json:"dbShare"`
-	Stages            []TraceStage `json:"stages"`
-	TopQueries        []TraceQuery `json:"topQueries"`
-	Error             string       `json:"error,omitempty"`
+	RequestP50        float64 `json:"requestP50"`
+	RequestP95        float64 `json:"requestP95"`
+	QueriesPerRequest float64 `json:"queriesPerRequest"`
+	DBTimePerRequest  float64 `json:"dbTimePerRequest"`
+	DBShare           float64 `json:"dbShare"`
+	// QueryFloor is the queryFloorQuantile of the sample's query durations.
+	QueryFloor float64      `json:"queryFloor"`
+	Stages     []TraceStage `json:"stages"`
+	TopQueries []TraceQuery `json:"topQueries"`
+	// Postgres says where TopQueries' Postgres figures come from, or why
+	// there are none.
+	Postgres *PostgresStats `json:"postgres,omitempty"`
+	Error    string         `json:"error,omitempty"`
 }
 
 // TraceBreakdown is the response body.
@@ -96,6 +128,8 @@ type grafanaTarget struct {
 	GrafanaURL    string
 	AdminPassword string
 	Error         string
+
+	deployment *benchv1alpha1.AuthentikDeployment
 }
 
 // datasourceURL is the Grafana datasource proxy for the datasource uid.
@@ -111,7 +145,7 @@ func (s *Server) grafanaTargetsForTestID(ctx context.Context, tc *benchv1alpha1.
 			targets = append(targets, grafanaTarget{Target: ref.Name, Deployment: ref.Name, Error: "deployment not found"})
 			continue
 		}
-		target := grafanaTarget{Target: topo.Spec.TargetName, Deployment: topo.Name}
+		target := grafanaTarget{Target: topo.Spec.TargetName, Deployment: topo.Name, deployment: &topo}
 		if target.Target == "" {
 			target.Target = topo.Name
 		}
@@ -167,12 +201,15 @@ func (s *Server) traceBreakdown(w http.ResponseWriter, r *http.Request) {
 }
 
 // searchTraceBreakdown runs one Tempo search per target of tc over the
-// trailing span. complete is false when any search failed.
+// trailing span, and reads each target's pg_stat_statements alongside.
+// complete is false when any search failed.
 func (s *Server) searchTraceBreakdown(ctx context.Context, tc *benchv1alpha1.TestCase, window string, span time.Duration) (resp TraceBreakdown, complete bool) {
 	end := time.Now()
 	resp = TraceBreakdown{TestID: tc.Name, Window: window, GeneratedAt: end}
 	targets := s.grafanaTargetsForTestID(ctx, tc)
 	resp.Targets = make([]TraceTarget, len(targets))
+	pgStats := make([]*postgresStatements, len(targets))
+	pgErrs := make([]error, len(targets))
 	var failed atomic.Bool
 	var wg sync.WaitGroup
 	for i, target := range targets {
@@ -189,8 +226,14 @@ func (s *Server) searchTraceBreakdown(ctx context.Context, tc *benchv1alpha1.Tes
 			}
 			resp.Targets[i] = summarizeTraceSpans(target.Target, result)
 		})
+		wg.Go(func() {
+			pgStats[i], pgErrs[i] = s.postgresStatements(ctx, target.deployment)
+		})
 	}
 	wg.Wait()
+	for i := range resp.Targets {
+		applyPostgresStatements(&resp.Targets[i], pgStats[i], pgErrs[i])
+	}
 	return resp, !failed.Load()
 }
 
@@ -208,8 +251,9 @@ type tempoSpanSet struct {
 }
 
 type tempoSpan struct {
-	DurationNanos string `json:"durationNanos"`
-	Attributes    []struct {
+	StartTimeUnixNano string `json:"startTimeUnixNano"`
+	DurationNanos     string `json:"durationNanos"`
+	Attributes        []struct {
 		Key   string `json:"key"`
 		Value struct {
 			StringValue string `json:"stringValue"`
@@ -229,6 +273,27 @@ func (sp tempoSpan) attr(key string) string {
 func (sp tempoSpan) seconds() float64 {
 	nanos, _ := strconv.ParseFloat(sp.DurationNanos, 64)
 	return nanos / 1e9
+}
+
+// interval is the span's start and end, in Unix nanoseconds.
+func (sp tempoSpan) interval() (start, end int64) {
+	start, _ = strconv.ParseInt(sp.StartTimeUnixNano, 10, 64)
+	duration, _ := strconv.ParseInt(sp.DurationNanos, 10, 64)
+	return start, start + duration
+}
+
+// containingSpan is the index of the innermost of spans whose time range
+// holds sp's start, or -1.
+func containingSpan(spans []tempoSpan, sp tempoSpan) int {
+	at, _ := sp.interval()
+	found, foundStart := -1, int64(0)
+	for i, candidate := range spans {
+		start, end := candidate.interval()
+		if start <= at && at <= end && (found < 0 || start >= foundStart) {
+			found, foundStart = i, start
+		}
+	}
+	return found
 }
 
 // traceBreakdownQuery selects, per trace, the target's server spans (the
@@ -276,43 +341,69 @@ func stageName(path string) string {
 	return path[strings.LastIndex(path, ".")+1:]
 }
 
+// statementSample is one statement's calls across the sample.
+type statementSample struct {
+	query     TraceQuery
+	durations []float64
+	// calls counts them by request, keyed by the request's index in the
+	// sample.
+	calls map[int]int
+}
+
 func summarizeTraceSpans(target string, body *tempoSearchResponse) TraceTarget {
 	out := TraceTarget{Target: target, Traces: len(body.Traces), Stages: []TraceStage{}, TopQueries: []TraceQuery{}}
-	var requests []float64
+	var requests, queries []float64
 	var serverTotal, dbTotal float64
-	var queries int
 	stages := map[string][]float64{}
-	statements := map[string]*TraceQuery{}
+	statements := map[string]*statementSample{}
 	for _, trace := range body.Traces {
 		sets := trace.SpanSets
 		if len(sets) == 0 && trace.SpanSet != nil {
 			sets = []tempoSpanSet{*trace.SpanSet}
 		}
+		// A trace holds several requests (a login is several); servers are
+		// this trace's, and serverIndex their indexes in requests.
+		var servers, dbSpans []tempoSpan
+		var serverIndex []int
 		for _, set := range sets {
 			for _, sp := range set.Spans {
 				d := sp.seconds()
 				switch {
 				case sp.attr("kind") == "server":
+					servers = append(servers, sp)
+					serverIndex = append(serverIndex, len(requests))
 					requests = append(requests, d)
 					serverTotal += d
 				case sp.attr("db.statement") != "":
-					queries++
+					dbSpans = append(dbSpans, sp)
+					queries = append(queries, d)
 					dbTotal += d
-					statement := sp.attr("db.statement")
-					if len(statement) > maxStatementLength {
-						statement = statement[:maxStatementLength] + "…"
-					}
-					entry := statements[statement]
-					if entry == nil {
-						entry = &TraceQuery{Statement: statement}
-						statements[statement] = entry
-					}
-					entry.Count++
-					entry.Total += d
 				case sp.attr("name") != "":
 					name := stageName(sp.attr("name"))
 					stages[name] = append(stages[name], d)
 				}
+			}
+		}
+		for _, sp := range dbSpans {
+			d := sp.seconds()
+			statement := sp.attr("db.statement")
+			normalized := normalizeStatement(statement)
+			entry := statements[normalized]
+			if entry == nil {
+				entry = &statementSample{
+					query: TraceQuery{
+						ID:        statementID(normalized),
+						Statement: truncateStatement(summarizeStatement(normalized), maxStatementLength),
+						matchKey:  statementMatchKey(statement),
+					},
+					calls: map[int]int{},
+				}
+				statements[normalized] = entry
+			}
+			entry.durations = append(entry.durations, d)
+			entry.query.Total += d
+			if i := containingSpan(servers, sp); i >= 0 {
+				entry.calls[serverIndex[i]]++
 			}
 		}
 	}
@@ -322,21 +413,34 @@ func summarizeTraceSpans(target string, body *tempoSearchResponse) TraceTarget {
 	}
 	n := float64(out.Requests)
 	out.RequestP50, out.RequestP95 = quantile(requests, 0.5), quantile(requests, 0.95)
-	out.QueriesPerRequest = float64(queries) / n
+	out.QueriesPerRequest = float64(len(queries)) / n
 	out.DBTimePerRequest = dbTotal / n
 	if serverTotal > 0 {
 		out.DBShare = dbTotal / serverTotal
 	}
+	out.QueryFloor = quantile(queries, queryFloorQuantile)
 	for name, durations := range stages {
 		out.Stages = append(out.Stages, TraceStage{
 			Name: name, Count: len(durations), P50: quantile(durations, 0.5), P95: quantile(durations, 0.95),
 		})
 	}
 	slices.SortFunc(out.Stages, func(a, b TraceStage) int { return strings.Compare(a.Name, b.Name) })
-	for _, q := range statements {
+	for _, entry := range statements {
+		q := entry.query
+		q.Count = len(entry.durations)
 		q.PerRequest = float64(q.Count) / n
+		for _, calls := range entry.calls {
+			q.MaxPerRequest = max(q.MaxPerRequest, calls)
+		}
+		q.TimePerRequest = q.Total / n
+		if serverTotal > 0 {
+			q.Share = q.Total / serverTotal
+		}
 		q.Mean = q.Total / float64(q.Count)
-		out.TopQueries = append(out.TopQueries, *q)
+		q.Max = slices.Max(entry.durations)
+		q.P50, q.P95 = quantile(entry.durations, 0.5), quantile(entry.durations, 0.95)
+		q.OverFloor = max(0, q.P50-out.QueryFloor)
+		out.TopQueries = append(out.TopQueries, q)
 	}
 	slices.SortFunc(out.TopQueries, func(a, b TraceQuery) int {
 		switch {
@@ -345,7 +449,7 @@ func summarizeTraceSpans(target string, body *tempoSearchResponse) TraceTarget {
 		case a.Total < b.Total:
 			return 1
 		}
-		return strings.Compare(a.Statement, b.Statement)
+		return strings.Compare(a.ID, b.ID)
 	})
 	if len(out.TopQueries) > traceTopQueries {
 		out.TopQueries = out.TopQueries[:traceTopQueries]

@@ -22,6 +22,24 @@ export function formatMetricValue(value: number | undefined, unit: string): stri
     return value >= 100 ? value.toFixed(0) : value.toFixed(2);
 }
 
+/**
+ * formatQueryTime renders seconds as precisely as a query's time needs:
+ * "0.04 ms" for what Postgres spends executing it, up to "1.20 s".
+ */
+export function formatQueryTime(value: number | undefined): string {
+    if (value === undefined) {
+        return "-";
+    }
+    const ms = value * 1000;
+    if (ms < 1) {
+        return `${ms.toFixed(2)} ms`;
+    }
+    if (ms < 10) {
+        return `${ms.toFixed(1)} ms`;
+    }
+    return formatMetricValue(value, "s");
+}
+
 const BYTE_UNITS = ["B", "KiB", "MiB", "GiB", "TiB"];
 
 function formatBytes(value: number): string {

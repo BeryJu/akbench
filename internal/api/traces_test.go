@@ -2,13 +2,16 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"math"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 
@@ -219,5 +222,162 @@ func TestTraceBreakdownRejectsUnsafeTargetName(t *testing.T) {
 	}
 	if searched.Load() {
 		t.Error("Tempo was queried with an unvalidated target name")
+	}
+}
+
+// fakeSpan is one span of a Tempo search response, its attributes given as
+// key, value pairs.
+func fakeSpan(startMillis, durationMillis int64, attrs ...string) string {
+	var kv []string
+	for i := 0; i+1 < len(attrs); i += 2 {
+		kv = append(kv, fmt.Sprintf(`{"key":%q,"value":{"stringValue":%q}}`, attrs[i], attrs[i+1]))
+	}
+	return fmt.Sprintf(`{"startTimeUnixNano":"%d","durationNanos":"%d","attributes":[%s]}`,
+		startMillis*1_000_000, durationMillis*1_000_000, strings.Join(kv, ","))
+}
+
+func fakeQuery(startMillis, durationMillis int64, statement string) string {
+	return fakeSpan(startMillis, durationMillis, "kind", "client", "db.statement", statement)
+}
+
+// fakeLoginSearch is one trace of two requests, [0s, 1s] and [2s, 3s]. The
+// cache lookup runs three times in the first, under two different
+// sqlcommenter comments and traceparents, and once in the second; an IN list
+// runs once in each, at different lengths.
+var fakeLoginSearch = `{"traces":[{"spanSets":[{"spans":[` + strings.Join([]string{
+	fakeSpan(0, 1000, "kind", "server"),
+	fakeSpan(2000, 1000, "kind", "server"),
+	fakeQuery(50, 1, `SELECT set_config('TimeZone', %s, false)`),
+	fakeQuery(100, 30, cacheLookup+` /*app_name='authentik_api',controller='authentik_api%%3Aflow-executor',db_driver='psqlextra.backend',framework='django%%3A5.2.17',route='api/v3/flows/executor/%%3Cslug%%3Aflow_slug%%3E/',traceparent='00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01'*/`),
+	fakeQuery(200, 10, cacheLookup+` /*app_name='authentik_api',controller='authentik_api%%3Aflow-executor',db_driver='psqlextra.backend',framework='django%%3A5.2.17',route='api/v3/flows/executor/%%3Cslug%%3Aflow_slug%%3E/',traceparent='00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203331-01'*/`),
+	fakeQuery(300, 20, cacheLookup+` /*db_driver='psqlextra.backend',framework='django%%3A5.2.17',traceparent='00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01'*/`),
+	fakeQuery(400, 5, `SELECT "u"."id" FROM "u" WHERE "u"."id" IN (%s, %s)`),
+	fakeQuery(2100, 40, cacheLookup+` /*traceparent='00-4bf92f3577b34da6a3ce929d0e0e4736-0123456789abcdef-01'*/`),
+	fakeQuery(2200, 5, `SELECT "u"."id" FROM "u" WHERE "u"."id" IN (%s, %s, %s)`),
+}, ",") + `]}]}]}`
+
+func TestSummarizeTraceSpansPerStatement(t *testing.T) {
+	var body tempoSearchResponse
+	if err := json.Unmarshal([]byte(fakeLoginSearch), &body); err != nil {
+		t.Fatal(err)
+	}
+	got := summarizeTraceSpans("a", &body)
+	if got.Requests != 2 || len(got.TopQueries) != 3 {
+		t.Fatalf("requests = %d, top queries = %+v; want 2 requests and the cache lookup, the IN list and set_config", got.Requests, got.TopQueries)
+	}
+	approx(t, "queryFloor", got.QueryFloor, 0.001)
+
+	cache := got.TopQueries[0]
+	if !strings.HasPrefix(cache.Statement, `SELECT … FROM "django_postgres_cache_cacheentry" WHERE`) || strings.Contains(cache.Statement, "/*") {
+		t.Errorf("cache lookup summary = %q, want its column list and comment gone", cache.Statement)
+	}
+	if cache.ID == "" || cache.Count != 4 || cache.MaxPerRequest != 3 {
+		t.Errorf("cache lookup = %+v, want its 4 calls in one row, 3 of them in one request", cache)
+	}
+	approx(t, "perRequest", cache.PerRequest, 2)
+	approx(t, "total", cache.Total, 0.1)
+	approx(t, "timePerRequest", cache.TimePerRequest, 0.05)
+	approx(t, "share", cache.Share, 0.05)
+	approx(t, "mean", cache.Mean, 0.025)
+	approx(t, "p50", cache.P50, 0.02)
+	approx(t, "p95", cache.P95, 0.04)
+	approx(t, "max", cache.Max, 0.04)
+	approx(t, "overFloor", cache.OverFloor, 0.019)
+
+	in := got.TopQueries[1]
+	if in.Statement != `SELECT "u"."id" FROM "u" WHERE "u"."id" IN (%s, …)` || in.Count != 2 || in.MaxPerRequest != 1 {
+		t.Errorf("IN list = %+v, want both lengths in one row, once per request", in)
+	}
+}
+
+// postgresTraceFixture is TestCase "login" driving deployment ak-a on
+// workload cluster wc1, with Tempo answering fakeLoginSearch and pod exec
+// answering with exec.
+func postgresTraceFixture(t *testing.T, exec podExecFunc) *Server {
+	t.Helper()
+	grafana := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprint(w, fakeLoginSearch)
+	}))
+	t.Cleanup(grafana.Close)
+	wc := &benchv1alpha1.WorkloadCluster{Name: "wc1", Namespace: testNamespace}
+	wc.Status.GrafanaURL = grafana.URL
+	adminSecret := &corev1.Secret{
+		Name: render.GrafanaAdminSecretName(wc), Namespace: testNamespace,
+		Data: map[string][]byte{"password": []byte(grafanaTestAdminPassword)},
+	}
+	d := sqlDeployment("ak-a", benchv1alpha1.PostgresEmbedded, "wc1")
+	tc := &benchv1alpha1.TestCase{Name: "login", Namespace: testNamespace}
+	tc.Spec.DeploymentRefs = []corev1.LocalObjectReference{{Name: "ak-a"}}
+	s, _ := newServer(t, Config{Shell: &ShellConfig{
+		Kubeconfig: func(context.Context) ([]byte, error) { return []byte(testKubeconfig), nil },
+		Shell:      "/bin/sh",
+	}}, wc, adminSecret, d, tc)
+	s.podExec = exec
+	return s
+}
+
+func TestTraceBreakdownMatchesPostgresStatements(t *testing.T) {
+	recorded := strings.NewReplacer(`"`, `""`, "= %s", "= $1", ">= %s", ">= $2::timestamptz", "LIMIT 1", "LIMIT $3").Replace(cacheLookup)
+	csvOut := "query,calls,total_exec_time,rows,shared_blks_hit,shared_blks_read,?column?,plans,total_plan_time,extract\n" +
+		`"` + recorded + ` /*app_name='authentik_api',traceparent='00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01'*/",1000,50,1000,3000,0,0,1000,20,1792234567.500000` + "\n" +
+		`"SELECT ""u"".""id"" FROM ""u""` + "\n" + `WHERE ""u"".""id"" IN ($1, $2)",10,1,20,40,10,0,0,0,1792234567.500000` + "\n" +
+		`"SELECT ""u"".""id"" FROM ""u"" WHERE ""u"".""id"" IN ($1, $2, $3)",30,3,90,110,40,8,0,0,1792234567.500000` + "\n"
+	var got podExecRequest
+	var stdin string
+	s := postgresTraceFixture(t, func(_ context.Context, req podExecRequest) (podExecResult, error) {
+		got = req
+		raw, _ := io.ReadAll(req.Stdin)
+		stdin = string(raw)
+		return podExecResult{Pod: "ak-a-postgresql-0", Stdout: []byte(csvOut)}, nil
+	})
+
+	rec := do(t, s, http.MethodGet, "/api/v1/traces/breakdown?testid=login&window=1h", nil)
+	requireStatus(t, rec, http.StatusOK)
+	a := decodeBody[TraceBreakdown](t, rec).Targets[0]
+
+	if got.Context != "wc1-admin@wc1" || got.Pod != "ak-a-postgresql-0" || got.Command[len(got.Command)-1] != "--csv" ||
+		got.StdoutLimit != pgStatStatementsOutputLimit || stdin != pgStatStatementsQuery {
+		t.Errorf("exec = %+v with stdin %q, want pgStatStatementsQuery as CSV in the deployment's Postgres", got, stdin)
+	}
+	if a.Postgres == nil || a.Postgres.Error != "" || a.Postgres.Since == nil || !a.Postgres.Since.Equal(time.Unix(1792234567, 500_000_000)) {
+		t.Fatalf("postgres = %+v, want the stats reset time", a.Postgres)
+	}
+	cache, in, setConfig := a.TopQueries[0].Postgres, a.TopQueries[1].Postgres, a.TopQueries[2].Postgres
+	if cache == nil || cache.Calls != 1000 {
+		t.Fatalf("cache lookup's postgres = %+v, want its pg_stat_statements entry", cache)
+	}
+	approx(t, "cache meanExec", cache.MeanExec, 0.00005)
+	approx(t, "cache meanPlan", cache.MeanPlan, 0.00002)
+	if cache.Plans != 1000 {
+		t.Errorf("cache plans = %d, want 1000", cache.Plans)
+	}
+	approx(t, "cache rowsPerCall", cache.RowsPerCall, 1)
+	approx(t, "cache blocksPerCall", cache.BlocksPerCall, 3)
+	approx(t, "cache readShare", cache.ReadShare, 0)
+	if in == nil || in.Calls != 40 {
+		t.Fatalf("IN list's postgres = %+v, want both its entries summed", in)
+	}
+	approx(t, "IN meanExec", in.MeanExec, 0.0001)
+	approx(t, "IN rowsPerCall", in.RowsPerCall, 2.75)
+	approx(t, "IN blocksPerCall", in.BlocksPerCall, 5)
+	approx(t, "IN readShare", in.ReadShare, 0.25)
+	approx(t, "IN tempBlocksPerCall", in.TempBlocksPerCall, 0.2)
+	if setConfig != nil {
+		t.Errorf("set_config's postgres = %+v, want none: pg_stat_statements has no entry for it", setConfig)
+	}
+}
+
+func TestTraceBreakdownExplainsMissingPostgresStatements(t *testing.T) {
+	s := postgresTraceFixture(t, func(context.Context, podExecRequest) (podExecResult, error) {
+		return podExecResult{ExitCode: 3, Stderr: []byte(`psql:<stdin>:7: ERROR:  pg_stat_statements must be loaded via "shared_preload_libraries"`)}, nil
+	})
+	rec := do(t, s, http.MethodGet, "/api/v1/traces/breakdown?testid=login&window=1h", nil)
+	requireStatus(t, rec, http.StatusOK)
+	a := decodeBody[TraceBreakdown](t, rec).Targets[0]
+	if a.Error != "" || len(a.TopQueries) == 0 {
+		t.Fatalf("target = %+v, want its traces regardless", a)
+	}
+	if a.Postgres == nil || !strings.Contains(a.Postgres.Error, "shared_preload_libraries") || a.TopQueries[0].Postgres != nil {
+		t.Errorf("postgres = %+v, want why pg_stat_statements can't be read", a.Postgres)
 	}
 }

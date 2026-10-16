@@ -4,6 +4,7 @@ import {
     earliestBurnStart,
     formatDuration,
     formatMetricValue,
+    formatQueryTime,
     metricsAnchorFromRuns,
     onlyTargets,
     parseTimeRange,
@@ -17,6 +18,25 @@ import {
 } from "./format";
 
 import { describe, expect, it } from "vitest";
+
+describe("formatQueryTime", () => {
+    it("renders undefined as a dash", () => {
+        expect(formatQueryTime(undefined)).toBe("-");
+    });
+
+    it("keeps two decimals below a millisecond", () => {
+        expect(formatQueryTime(0.000042)).toBe("0.04 ms");
+    });
+
+    it("keeps one decimal below ten milliseconds", () => {
+        expect(formatQueryTime(0.0032)).toBe("3.2 ms");
+    });
+
+    it("renders longer times like formatMetricValue", () => {
+        expect(formatQueryTime(0.015)).toBe("15 ms");
+        expect(formatQueryTime(1.2)).toBe("1.20 s");
+    });
+});
 
 describe("formatMetricValue", () => {
     it("renders undefined as a dash", () => {

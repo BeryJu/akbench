@@ -25,13 +25,22 @@ const (
 	// is ~430 spans, ~110 of them queries. Tempo rejects anything above its
 	// own limit (default 100) with a 400.
 	TempoMaxSpansPerSpanSet = 500
+
+	// tempoMaxAttributeBytes is the longest attribute value Tempo stores
+	// whole; by default it truncates past 2048 bytes. Some of authentik's
+	// db.statement values are far longer (a login's select_subclasses()
+	// lookup of its stages joins every stage table, ~16KB), and the trace
+	// breakdown needs them whole to tell them apart and match them to
+	// Postgres' own statistics.
+	tempoMaxAttributeBytes = 65536
 )
 
 // TempoHelmRelease installs Tempo from its upstream chart: single binary,
 // local trace storage on a persistent volume. The chart's default receivers
 // include OTLP over HTTP on TempoOTLPHTTPPort, which is all authentik
-// exports. Usage reporting to Grafana Labs is off, and searches may return
-// up to TempoMaxSpansPerSpanSet spans per trace.
+// exports. Usage reporting to Grafana Labs is off, searches may return up
+// to TempoMaxSpansPerSpanSet spans per trace, and attributes are kept whole
+// up to tempoMaxAttributeBytes.
 func TempoHelmRelease(wc *benchv1alpha1.WorkloadCluster) (*helmv2.HelmRelease, error) {
 	values := map[string]any{
 		"fullnameOverride": TempoServiceName,
@@ -39,6 +48,13 @@ func TempoHelmRelease(wc *benchv1alpha1.WorkloadCluster) (*helmv2.HelmRelease, e
 			"reportingEnabled": false,
 			"queryFrontend": map[string]any{
 				"search": map[string]any{"max_spans_per_span_set": TempoMaxSpansPerSpanSet},
+			},
+			// A tenant override wins over the distributor's own
+			// max_attribute_bytes, which the chart doesn't expose.
+			"overrides": map[string]any{
+				"defaults": map[string]any{
+					"ingestion": map[string]any{"max_attribute_bytes": tempoMaxAttributeBytes},
+				},
 			},
 		},
 		"persistence":    chartPersistence(wc, TempoStorageSize),
