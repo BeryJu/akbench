@@ -131,6 +131,15 @@ func TestCreateRunRejectsBurnProfile(t *testing.T) {
 	}
 }
 
+func TestCreateRunRejectsArchivedTestCase(t *testing.T) {
+	tc := sampleTestCase("login-quick", "single-node", benchv1alpha1.ProfileQuick)
+	tc.Spec.Archived = true
+	s, _ := newServer(t, Config{}, sampleDeployment("single-node"), tc)
+
+	rec := do(t, s, http.MethodPost, "/api/v1/testcases/login-quick/runs", nil)
+	requireStatus(t, rec, http.StatusBadRequest)
+}
+
 func TestCreateRunForUnknownTestCase(t *testing.T) {
 	s, _ := newServer(t, Config{})
 	rec := do(t, s, http.MethodPost, "/api/v1/testcases/ghost/runs", nil)

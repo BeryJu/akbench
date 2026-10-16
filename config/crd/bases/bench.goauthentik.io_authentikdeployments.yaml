@@ -549,6 +549,7 @@ spec:
                 - Reconciling
                 - Ready
                 - Failed
+                - Archived
                 type: string
               serviceEndpoint:
                 description: |-

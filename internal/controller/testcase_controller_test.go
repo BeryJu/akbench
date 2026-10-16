@@ -85,6 +85,27 @@ var _ = Describe("TestCase Controller", func() {
 			Expect(ready).NotTo(BeNil())
 			Expect(ready.Status).To(Equal(metav1.ConditionTrue))
 		})
+
+		It("stops its burn Deployment when archived but keeps the TestCase", func() {
+			r := &TestCaseReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Recorder: record.NewFakeRecorder(100), Tracker: testTracker}
+			_, err := r.Reconcile(context.Background(), reconcile.Request{NamespacedName: typeNamespacedName})
+			Expect(err).NotTo(HaveOccurred())
+
+			var tc benchv1alpha1.TestCase
+			Expect(k8sClient.Get(context.Background(), typeNamespacedName, &tc)).To(Succeed())
+			tc.Spec.Archived = true
+			Expect(k8sClient.Update(context.Background(), &tc)).To(Succeed())
+			_, err = r.Reconcile(context.Background(), reconcile.Request{NamespacedName: typeNamespacedName})
+			Expect(err).NotTo(HaveOccurred())
+
+			var deps appsv1.DeploymentList
+			Expect(k8sClient.List(context.Background(), &deps, client.InNamespace("default"),
+				client.MatchingLabels{benchv1alpha1.LabelTestCase: resourceName})).To(Succeed())
+			Expect(deps.Items).To(BeEmpty())
+			Expect(k8sClient.Get(context.Background(), typeNamespacedName, &tc)).To(Succeed())
+			Expect(tc.Status.Phase).To(Equal(benchv1alpha1.PhaseArchived))
+			Expect(findDeploymentStatus(tc.Status.Deployments, topo.Name).BurnWorkloadRef).To(BeNil())
+		})
 	})
 
 	Context("Quick profile", func() {

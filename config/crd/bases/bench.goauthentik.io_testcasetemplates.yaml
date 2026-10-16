@@ -175,6 +175,7 @@ spec:
                 - Reconciling
                 - Ready
                 - Failed
+                - Archived
                 type: string
             type: object
         required:

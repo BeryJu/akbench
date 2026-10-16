@@ -38,3 +38,12 @@ func TestPhaseForReconciling(t *testing.T) {
 		t.Errorf("PhaseFor(Ready=False, DependencyNotReady) = %q, want %q", got, PhaseReconciling)
 	}
 }
+
+func TestPhaseForArchived(t *testing.T) {
+	conditions := []metav1.Condition{
+		{Type: ConditionReady, Status: metav1.ConditionFalse, Reason: ReasonArchived},
+	}
+	if got := PhaseFor(conditions); got != PhaseArchived {
+		t.Errorf("PhaseFor(Ready=False, Archived) = %q, want %q", got, PhaseArchived)
+	}
+}

@@ -132,6 +132,12 @@ type TestCaseSpec struct {
 	// +kubebuilder:validation:Maximum=4294967295
 	// +optional
 	Seed *int64 `json:"seed,omitempty"`
+
+	// archived stops the test case without deleting it: a Burn test case's
+	// k6 Deployments are removed and no new TestRuns are started, while the
+	// object (and its past TestRuns) stays around for comparison.
+	// +optional
+	Archived bool `json:"archived,omitempty"`
 }
 
 // TestCaseDeploymentStatus is one targeted deployment's own status within a
@@ -190,6 +196,7 @@ type TestCaseStatus struct {
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="Deployment",type=string,JSONPath=`.spec.deploymentRefs[*].name`
 // +kubebuilder:printcolumn:name="Profile",type=string,JSONPath=`.spec.profile`
+// +kubebuilder:printcolumn:name="Archived",type=boolean,JSONPath=`.spec.archived`
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
 // +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=="Ready")].status`
 

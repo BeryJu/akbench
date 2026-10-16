@@ -203,6 +203,12 @@ spec:
                   used, with overrides merged in, independent of later edits/deletes of
                   the TestCase itself.
                 properties:
+                  archived:
+                    description: |-
+                      archived stops the test case without deleting it: a Burn test case's
+                      k6 Deployments are removed and no new TestRuns are started, while the
+                      object (and its past TestRuns) stays around for comparison.
+                    type: boolean
                   baselineRef:
                     description: |-
                       baselineRef names the deployment, among this test's deployments, that

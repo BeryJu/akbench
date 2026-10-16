@@ -88,15 +88,12 @@ func (r *TestCaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		}
 	}
 
-	// One-time migration of the deprecated singular spec.deploymentRef into
-	// spec.deploymentRefs, so every object converges on the one field the UI,
-	// printcolumns and samples use. Lossless: Deployments() already treated
-	// the two identically, this only makes that explicit in the stored spec.
-	if tc.Spec.MigrateDeploymentRef() {
-		if err := r.Update(ctx, &tc); err != nil {
-			return ctrl.Result{}, err
-		}
-		log.Info("Migrated TestCase deploymentRef to deploymentRefs", "deployment", tc.Spec.DeploymentRefs[0].Name)
+	if err := r.migrateDeploymentRef(ctx, &tc); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	if tc.Spec.Archived {
+		return r.reconcileArchived(ctx, &tc)
 	}
 
 	refs := tc.Deployments()
@@ -229,6 +226,22 @@ func (r *TestCaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	}
 	log.Info("reconciled TestCase", "profile", tc.Spec.Profile, "deployments", len(refs))
 	return ctrl.Result{}, nil
+}
+
+// migrateDeploymentRef is a one-time migration of the deprecated singular
+// spec.deploymentRef into spec.deploymentRefs, so every object converges on
+// the one field the UI, printcolumns and samples use. Lossless:
+// Deployments() already treated the two identically, this only makes that
+// explicit in the stored spec.
+func (r *TestCaseReconciler) migrateDeploymentRef(ctx context.Context, tc *benchv1alpha1.TestCase) error {
+	if !tc.Spec.MigrateDeploymentRef() {
+		return nil
+	}
+	if err := r.Update(ctx, tc); err != nil {
+		return err
+	}
+	logf.FromContext(ctx).Info("Migrated TestCase deploymentRef to deploymentRefs", "deployment", tc.Spec.DeploymentRefs[0].Name)
+	return nil
 }
 
 // errClusterWarmingUp aborts a reconcile without touching status because a
@@ -365,14 +378,58 @@ func (r *TestCaseReconciler) reconcileTarget(ctx context.Context, tc *benchv1alp
 }
 
 func (r *TestCaseReconciler) reconcileDelete(ctx context.Context, tc *benchv1alpha1.TestCase) (ctrl.Result, error) {
-	log := logf.FromContext(ctx)
 	if !controllerutil.ContainsFinalizer(tc, testCaseFinalizer) {
 		return ctrl.Result{}, nil
 	}
 
-	clusters, err := r.deleteCandidateClusters(ctx, tc)
+	pending, err := r.stopAllBurnDeployments(ctx, tc, time.Since(tc.DeletionTimestamp.Time) >= deleteCleanupGracePeriod)
 	if err != nil {
 		return ctrl.Result{}, err
+	}
+	if pending {
+		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
+	}
+	controllerutil.RemoveFinalizer(tc, testCaseFinalizer)
+	return ctrl.Result{}, r.Update(ctx, tc)
+}
+
+// reconcileArchived stops every k6 Burn Deployment of an archived TestCase
+// and reports it as Archived. An archived TestCase never gives up on a
+// cluster it is known to have run on, since nothing else would stop that load.
+func (r *TestCaseReconciler) reconcileArchived(ctx context.Context, tc *benchv1alpha1.TestCase) (ctrl.Result, error) {
+	pending, err := r.stopAllBurnDeployments(ctx, tc, false)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	for i := range tc.Status.Deployments {
+		st := &tc.Status.Deployments[i]
+		st.Ready = false
+		if !pending {
+			st.BurnWorkloadRef = nil
+			st.BurningSince = nil
+		}
+	}
+	setCondition(r.Recorder, tc, &tc.Status.Conditions, tc.Generation, benchv1alpha1.ConditionReady, metav1.ConditionFalse,
+		benchv1alpha1.ReasonArchived, "test case is archived")
+	tc.Status.Phase = benchv1alpha1.PhaseFor(tc.Status.Conditions)
+	tc.Status.ObservedGeneration = tc.Generation
+	if err := r.Status().Update(ctx, tc); err != nil {
+		return ctrl.Result{}, err
+	}
+	if pending {
+		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
+	}
+	return ctrl.Result{}, nil
+}
+
+// stopAllBurnDeployments deletes this TestCase's Burn Deployments on every
+// cluster it may have left one on, returning pending when a cluster it is
+// known to have used couldn't be reached and giveUp is false.
+func (r *TestCaseReconciler) stopAllBurnDeployments(ctx context.Context, tc *benchv1alpha1.TestCase, giveUp bool) (bool, error) {
+	log := logf.FromContext(ctx)
+	clusters, err := r.deleteCandidateClusters(ctx, tc)
+	if err != nil {
+		return false, err
 	}
 	pending := false
 	for _, cluster := range clusters {
@@ -387,7 +444,7 @@ func (r *TestCaseReconciler) reconcileDelete(ctx context.Context, tc *benchv1alp
 		// period to come back, so a brief outage doesn't leave a load
 		// generator running forever. Any other cluster is only swept on a
 		// best-effort basis.
-		if cluster.recorded && time.Since(tc.DeletionTimestamp.Time) < deleteCleanupGracePeriod {
+		if cluster.recorded && !giveUp {
 			log.Info("Failed to clean up burn Deployments, retrying", "cluster", cluster.name, "error", err.Error())
 			pending = true
 			continue
@@ -398,11 +455,7 @@ func (r *TestCaseReconciler) reconcileDelete(ctx context.Context, tc *benchv1alp
 				"Gave up deleting k6 burn Deployments on cluster %q: %v", cluster.name, err)
 		}
 	}
-	if pending {
-		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
-	}
-	controllerutil.RemoveFinalizer(tc, testCaseFinalizer)
-	return ctrl.Result{}, r.Update(ctx, tc)
+	return pending, nil
 }
 
 // deleteCleanupGracePeriod bounds how long a deleting TestCase waits for an

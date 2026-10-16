@@ -10,7 +10,7 @@ import (
 // TestRunPhase (a one-shot job's terminal outcome) and WorkloadCluster's
 // own Phase field (a verbatim mirror of CAPI's external vocabulary), which
 // each already have their own field and aren't affected by this type.
-// +kubebuilder:validation:Enum=Pending;Reconciling;Ready;Failed
+// +kubebuilder:validation:Enum=Pending;Reconciling;Ready;Failed;Archived
 type ReconcilePhase string
 
 const (
@@ -25,6 +25,9 @@ const (
 	PhaseReady ReconcilePhase = "Ready"
 	// PhaseFailed means Ready=False with reason ReasonReconcileError.
 	PhaseFailed ReconcilePhase = "Failed"
+	// PhaseArchived means Ready=False with reason ReasonArchived: the
+	// resource is intentionally stopped (TestCase spec.archived).
+	PhaseArchived ReconcilePhase = "Archived"
 )
 
 // PhaseFor derives a ReconcilePhase from a resource's own Ready condition -
@@ -38,8 +41,11 @@ func PhaseFor(conditions []metav1.Condition) ReconcilePhase {
 	if cond.Status == metav1.ConditionTrue {
 		return PhaseReady
 	}
-	if cond.Reason == ReasonReconcileError {
+	switch cond.Reason {
+	case ReasonReconcileError:
 		return PhaseFailed
+	case ReasonArchived:
+		return PhaseArchived
 	}
 	return PhaseReconciling
 }

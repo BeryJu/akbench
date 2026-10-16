@@ -32,6 +32,10 @@ func (s *Server) createRun(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, r, err)
 		return
 	}
+	if tc.Spec.Archived {
+		writeError(w, r, http.StatusBadRequest, "TestCase is archived; unarchive it to start new TestRuns")
+		return
+	}
 	// Burn TestCases run continuously via their own Deployment; a TestRun
 	// against one would only be rejected by the reconciler, so say so here
 	// where the message can reach the user who pressed the button.

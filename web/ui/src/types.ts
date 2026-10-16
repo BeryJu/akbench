@@ -139,6 +139,8 @@ export interface TestCaseSpec {
     traceSampleRate?: string;
     seed?: number;
     extraTags?: Record<string, string>;
+    // Stopped but kept: no burn workload, no new runs.
+    archived?: boolean;
 }
 
 export interface TestCaseDeploymentStatus {

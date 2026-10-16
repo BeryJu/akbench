@@ -124,6 +124,12 @@ func (r *TestRunReconciler) start(ctx context.Context, run *benchv1alpha1.TestRu
 		}
 		return ctrl.Result{}, err
 	}
+	if tc.Spec.Archived {
+		setCondition(r.Recorder, run, &run.Status.Conditions, run.Generation, benchv1alpha1.ConditionReady, metav1.ConditionFalse,
+			benchv1alpha1.ReasonReconcileError, fmt.Sprintf("TestCase %q is archived", tc.Name))
+		run.Status.Phase = benchv1alpha1.TestRunFailed
+		return ctrl.Result{}, r.Status().Update(ctx, run)
+	}
 	if tc.Spec.Profile != benchv1alpha1.ProfileQuick {
 		setCondition(r.Recorder, run, &run.Status.Conditions, run.Generation, benchv1alpha1.ConditionReady, metav1.ConditionFalse,
 			benchv1alpha1.ReasonReconcileError, "TestRuns only execute Quick TestCases; Burn TestCases run continuously via their own Deployment")

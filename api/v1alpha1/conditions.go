@@ -31,4 +31,5 @@ const (
 	ReasonNotImplemented     = "NotImplemented"
 	ReasonDependencyNotReady = "DependencyNotReady"
 	ReasonResetting          = "Resetting"
+	ReasonArchived           = "Archived"
 )

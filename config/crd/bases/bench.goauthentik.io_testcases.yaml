@@ -21,6 +21,9 @@ spec:
     - jsonPath: .spec.profile
       name: Profile
       type: string
+    - jsonPath: .spec.archived
+      name: Archived
+      type: boolean
     - jsonPath: .status.phase
       name: Phase
       type: string
@@ -55,6 +58,12 @@ spec:
               which script/profile/load shape it uses, and which flow it walks. The
               object's name is the k6 `testid` tag every dashboard splits on.
             properties:
+              archived:
+                description: |-
+                  archived stops the test case without deleting it: a Burn test case's
+                  k6 Deployments are removed and no new TestRuns are started, while the
+                  object (and its past TestRuns) stays around for comparison.
+                type: boolean
               baselineRef:
                 description: |-
                   baselineRef names the deployment, among this test's deployments, that
@@ -418,6 +427,7 @@ spec:
                 - Reconciling
                 - Ready
                 - Failed
+                - Archived
                 type: string
             type: object
         required:

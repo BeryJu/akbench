@@ -43,6 +43,22 @@ import { useResource } from "../useResource";
 import { FormEvent, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router";
 
+function setArchived(tc: TestCase, archived: boolean, reload: () => void) {
+    const name = tc.metadata.name;
+    return confirmAndRun(
+        {
+            title: archived ? "Archive test case" : "Unarchive test case",
+            message: archived
+                ? `Archive test case "${name}"? It stops running but stays listed with its past runs.`
+                : `Unarchive test case "${name}"?${tc.spec.profile === "Burn" ? " Its burn starts again." : ""}`,
+            confirmLabel: archived ? "Archive" : "Unarchive",
+        },
+        () => api.updateTestCase(name, { spec: { ...tc.spec, archived } }),
+        reload,
+        archived ? `Archived ${name}` : `Unarchived ${name}`,
+    );
+}
+
 export function TestCasesPage() {
     const testCases = useResource(() => api.testCases(), [], 5000, "TestCase");
 
@@ -117,7 +133,9 @@ export function TestCasesPage() {
         >
             <Alert>{testCases.error}</Alert>
             <Table
-                rows={testCases.data}
+                rows={testCases.data?.toSorted(
+                    (a, b) => Number(!!a.spec.archived) - Number(!!b.spec.archived),
+                )}
                 rowKey={(tc) => tc.metadata.name}
                 empty="No test cases yet."
                 columns={[
@@ -168,7 +186,7 @@ export function TestCasesPage() {
                         className: "actions",
                         render: (tc) => (
                             <span className="row" style={{ justifyContent: "flex-end" }}>
-                                {tc.spec.profile === "Quick" && (
+                                {tc.spec.profile === "Quick" && !tc.spec.archived && (
                                     <button
                                         className="small"
                                         onClick={() => void runNow(tc.metadata.name)}
@@ -183,11 +201,21 @@ export function TestCasesPage() {
                                     Edit
                                 </Link>
                                 <button
-                                    className="small danger"
-                                    onClick={() => void deleteTestCase(tc)}
+                                    className="small"
+                                    onClick={() =>
+                                        void setArchived(tc, !tc.spec.archived, testCases.reload)
+                                    }
                                 >
-                                    Delete
+                                    {tc.spec.archived ? "Unarchive" : "Archive"}
                                 </button>
+                                {tc.spec.archived && (
+                                    <button
+                                        className="small danger"
+                                        onClick={() => void deleteTestCase(tc)}
+                                    >
+                                        Delete
+                                    </button>
+                                )}
                             </span>
                         ),
                     },
@@ -669,7 +697,7 @@ export function TestCaseViewPage() {
                             conditions={tc.status?.conditions}
                         />
                     )}
-                    {profile === "Quick" && (
+                    {profile === "Quick" && !tc?.spec.archived && (
                         <button className="primary" disabled={busy} onClick={() => void runNow()}>
                             {busy ? "Starting…" : "Run now"}
                         </button>
@@ -677,9 +705,16 @@ export function TestCaseViewPage() {
                     <Link className="button" to={`/testcases/${name}/edit`}>
                         {profile === "Burn" ? "Change load or targets" : "Edit"}
                     </Link>
-                    {profile === "Burn" && (
+                    {profile === "Burn" && !tc?.spec.archived && (
                         <button className="danger" onClick={switchToQuick}>
                             Stop burn
+                        </button>
+                    )}
+                    {tc && (
+                        <button
+                            onClick={() => void setArchived(tc, !tc.spec.archived, testCase.reload)}
+                        >
+                            {tc.spec.archived ? "Unarchive" : "Archive"}
                         </button>
                     )}
                 </>
