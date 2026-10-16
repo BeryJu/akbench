@@ -222,6 +222,51 @@ func (r *AuthentikDeploymentReconciler) helmReleaseReadiness(ctx context.Context
 	return metav1.ConditionFalse, cond.Message, nil
 }
 
+// applyHelmRelease applies hr - with the worker scaled to zero while a
+// Dedicated-placement upgrade rolls out (see render.WorkerUpgrade) - and
+// returns its readiness, which stays False until the worker is back up.
+func (r *AuthentikDeploymentReconciler) applyHelmRelease(ctx context.Context, topo *benchv1alpha1.AuthentikDeployment, hr *helmv2.HelmRelease) (metav1.ConditionStatus, string, error) {
+	step, err := r.workerUpgradeStep(ctx, topo, hr)
+	if err != nil {
+		return metav1.ConditionFalse, "", err
+	}
+	if step == render.WorkerUpgradeHold {
+		if hr.Spec.Values, err = render.WithWorkerReplicas(hr.Spec.Values, 0); err != nil {
+			return metav1.ConditionFalse, "", err
+		}
+	}
+	if err := applyOwned(ctx, r.Client, r.Scheme, topo, hr); err != nil {
+		return metav1.ConditionFalse, "", fmt.Errorf("apply HelmRelease: %w", err)
+	}
+	ready, message, err := r.helmReleaseReadiness(ctx, hr)
+	switch step {
+	case render.WorkerUpgradeHold:
+		return metav1.ConditionFalse, "upgrading with the worker scaled down until the new server pods are running: " + message, err
+	case render.WorkerUpgradeRelease:
+		return metav1.ConditionFalse, "scaling the worker back up after the upgrade", err
+	}
+	return ready, message, err
+}
+
+// workerUpgradeStep compares hr against the live HelmRelease to decide
+// whether an upgrade needs the worker scaled down first (see
+// render.WorkerUpgrade).
+func (r *AuthentikDeploymentReconciler) workerUpgradeStep(ctx context.Context, topo *benchv1alpha1.AuthentikDeployment, hr *helmv2.HelmRelease) (render.WorkerUpgradeStep, error) {
+	if topo.Spec.Placement.Mode != benchv1alpha1.PlacementDedicated {
+		return render.WorkerUpgradeNone, nil
+	}
+	var existing helmv2.HelmRelease
+	if err := r.Get(ctx, types.NamespacedName{Name: hr.Name, Namespace: hr.Namespace}, &existing); err != nil {
+		if apierrors.IsNotFound(err) {
+			return render.WorkerUpgradeNone, nil
+		}
+		return render.WorkerUpgradeNone, fmt.Errorf("get HelmRelease: %w", err)
+	}
+	ready := existing.Status.ObservedGeneration == existing.Generation &&
+		meta.IsStatusConditionTrue(existing.Status.Conditions, "Ready")
+	return render.WorkerUpgrade(topo, &existing, hr, ready)
+}
+
 // recordChartVersion stores the chart version helm-controller last installed
 // in status.chartVersion, which render.ChartVersion keeps an unpinned
 // deployment on. Recorded before rendering, so the HelmRelease switches from
@@ -446,11 +491,7 @@ func (r *AuthentikDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.
 	}
 	r.recordChartVersion(ctx, &topo)
 	hr := render.HelmRelease(&topo, kubeConfigSecretName, values)
-	if err := applyOwned(ctx, r.Client, r.Scheme, &topo, hr); err != nil {
-		return ctrl.Result{}, fmt.Errorf("apply HelmRelease: %w", err)
-	}
-
-	helmReleaseReady, helmReleaseMessage, err := r.helmReleaseReadiness(ctx, hr)
+	helmReleaseReady, helmReleaseMessage, err := r.applyHelmRelease(ctx, &topo, hr)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
