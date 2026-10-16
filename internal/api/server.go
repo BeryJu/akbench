@@ -2,7 +2,8 @@
 // layer over the management cluster's bench.goauthentik.io CRDs, plus a
 // read-only PromQL proxy, a per-workload-cluster Grafana reverse proxy
 // (grafana_proxy.go), an in-browser kubectl shell (shell.go) and the web UI's
-// own static assets (static.go).
+// own static assets (static.go) and a read-only MCP server exposing the
+// performance analytics to LLMs (mcp.go).
 //
 // The REST API deliberately talks to nothing but the management cluster -
 // all multi-cluster logic lives in the operator. The shell is the one
@@ -37,6 +38,10 @@ type Config struct {
 	// login. OIDCConfig is what the SPA is told to log in with.
 	OIDC       TokenVerifier
 	OIDCConfig OIDCConfig
+
+	// MCPAuth puts the MCP endpoint behind Enterprise-Managed Authorization
+	// (mcp_auth.go) instead of Token/OIDC; nil keeps it on those.
+	MCPAuth *MCPAuthConfig
 
 	// Shell enables the kubectl shell (shell.go); nil disables it.
 	Shell *ShellConfig
@@ -144,10 +149,23 @@ func (s *Server) Router() http.Handler {
 	// grafana_session.go.
 	r.HandleFunc("/grafana-proxy/{cluster}/*", s.grafanaProxy)
 
+	if s.cfg.MCPAuth != nil {
+		if _, path, err := s.cfg.MCPAuth.metadataURL(); err == nil {
+			r.Get(path, s.mcpResourceMetadata().ServeHTTP)
+			r.Options(path, s.mcpResourceMetadata().ServeHTTP)
+		}
+	}
+
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Get("/auth/config", s.authConfig)
 		r.Get("/shell/connect", s.connectShell)
 		r.Get("/events/connect", s.connectEvents)
+
+		// Read-only MCP server for LLM clients (mcp.go), authenticated by
+		// its own access tokens when MCPAuth is set (mcp_auth.go).
+		if s.cfg.MCPAuth != nil {
+			r.With(s.mcpAuthMiddleware()).Handle("/mcp", s.mcpHandler())
+		}
 
 		r.Group(func(r chi.Router) {
 			r.Use(s.requireToken)
@@ -204,6 +222,10 @@ func (s *Server) Router() http.Handler {
 			r.Post("/shell/sessions", s.createShellSession)
 
 			r.Post("/events/sessions", s.createEventsSession)
+
+			if s.cfg.MCPAuth == nil {
+				r.Handle("/mcp", s.mcpHandler())
+			}
 		})
 
 		// Without this, an unknown /api/v1 path would fall through to the

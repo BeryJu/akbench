@@ -144,6 +144,52 @@ directly (the reverse can't), making a shared central pipeline unnecessary.
 The Grafana dashboards live in
 [`internal/render/manifests/grafana-dashboards/`](internal/render/manifests/grafana-dashboards/README.md).
 
+### MCP server
+
+`cmd/apiserver` also serves a read-only [MCP](https://modelcontextprotocol.io)
+server at `/api/v1/mcp` (streamable HTTP, stateless) so an LLM can analyze
+benchmark results: deployments, test cases and runs (plus their events), the
+compare table, k6 metric and CPU/memory time series, trace and CPU profile
+breakdowns, firing alerts, and raw PromQL. Every tool goes through the same
+GET handlers (and input validation) the UI uses; none can create, change,
+delete or run anything.
+
+By default it requires the same bearer token (static or OIDC) as the rest of
+the API, e.g. for Claude Code:
+
+```sh
+claude mcp add --transport http akbench https://<host>/api/v1/mcp \
+  --header "Authorization: Bearer $AKBENCH_TOKEN"
+```
+
+With `--mcp-resource-url` set, it uses
+MCP Enterprise-Managed Authorization (SEP-990, ID-JAG) instead and accepts nothing else. The MCP client signs the
+user in at the enterprise IdP, exchanges the ID token there for an ID-JAG
+(RFC 8693), and trades the ID-JAG at the authorization server named by
+`--mcp-auth-issuer` for an access token (RFC 7523 JWT bearer grant).
+akbench is only the resource server in that flow. It serves RFC 9728
+metadata at `/.well-known/oauth-protected-resource/api/v1/mcp` pointing at
+that server. It accepts tokens signed by that issuer whose `aud` is the
+resource URL (`--mcp-audience` overrides this) and that carry
+`--mcp-scopes`. Such a token opens nothing else in the API.
+`--mcp-auth-issuer` defaults to `--oidc-issuer`, so one authentik provider can
+serve both the UI and MCP. That only works if it issues MCP tokens with the
+resource as `aud`. akbench refuses to start when MCP would accept the UI's
+issuer *and* client ID as audience, because UI and MCP tokens would then be
+interchangeable. Use a separate provider in that case.
+
+[`hack/mcp-ema-client`](hack/mcp-ema-client/main.go) runs that whole flow
+from the client side. It prints every token, checks the ID-JAG against the
+draft's required header and claims, then lists (and optionally calls) the
+tools. It's meant for testing an IdP's or authorization server's ID-JAG
+implementation, such as authentik's:
+
+```sh
+go run ./hack/mcp-ema-client -insecure -mcp-url https://localhost:8443/api/v1/mcp \
+  -idp-issuer https://idp.example.com/application/o/enterprise/ -idp-client-id <id> \
+  -mcp-client-id <id> [-id-token <jwt>] [-call list_test_cases]
+```
+
 ### Running the tests
 
 ```sh

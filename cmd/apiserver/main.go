@@ -59,6 +59,8 @@ func run() error {
 		uiDir           string
 		oidcCfg         api.OIDCConfig
 		oidcScopes      string
+		mcpAuth         api.MCPAuthConfig
+		mcpScopes       string
 		shellBinary     string
 		shellKubeconfig string
 		shellSecret     string
@@ -89,6 +91,16 @@ func run() error {
 		"Comma-separated scopes the web UI requests. Defaults to openid,profile,email.")
 	flag.StringVar(&oidcCfg.RequiredGroup, "oidc-required-group", os.Getenv("BENCH_OIDC_REQUIRED_GROUP"),
 		"If set, OIDC tokens must list this group in their groups claim.")
+	flag.StringVar(&mcpAuth.Issuer, "mcp-auth-issuer", os.Getenv("BENCH_MCP_AUTH_ISSUER"),
+		"Issuer of the OAuth authorization server that mints MCP access tokens from ID-JAG grants "+
+			"(Enterprise-Managed Authorization). Defaults to --oidc-issuer.")
+	flag.StringVar(&mcpAuth.Resource, "mcp-resource-url", os.Getenv("BENCH_MCP_RESOURCE_URL"),
+		"Public URL of the MCP endpoint (e.g. https://bench.example.com/api/v1/mcp), its OAuth resource "+
+			"identifier. Setting it makes /api/v1/mcp accept only Enterprise-Managed Authorization tokens.")
+	flag.StringVar(&mcpAuth.Audience, "mcp-audience", os.Getenv("BENCH_MCP_AUDIENCE"),
+		"Audience MCP access tokens must carry. Defaults to --mcp-resource-url.")
+	flag.StringVar(&mcpScopes, "mcp-scopes", os.Getenv("BENCH_MCP_SCOPES"),
+		"Comma-separated scopes MCP access tokens must carry. Optional.")
 	flag.StringVar(&shellBinary, "shell", envOr("BENCH_SHELL", "/bin/bash"),
 		"Shell the in-browser kubectl shell runs.")
 	flag.StringVar(&shellKubeconfig, "shell-kubeconfig", os.Getenv("BENCH_SHELL_KUBECONFIG"),
@@ -138,6 +150,21 @@ func run() error {
 		}
 	}
 
+	var mcpAuthCfg *api.MCPAuthConfig
+	if mcpAuth.Issuer != "" || mcpAuth.Resource != "" {
+		if mcpAuth.Issuer == "" {
+			mcpAuth.Issuer = oidcCfg.Issuer
+		}
+		if mcpScopes != "" {
+			mcpAuth.Scopes = strings.Split(mcpScopes, ",")
+		}
+		if err := mcpAuth.Validate(oidcCfg); err != nil {
+			return err
+		}
+		mcpAuthCfg = &mcpAuth
+		log.Info("MCP Enterprise-Managed Authorization enabled", "issuer", mcpAuth.Issuer, "resource", mcpAuth.Resource)
+	}
+
 	wsOrigins := wsOriginPatterns(corsOrigin)
 	shell, err := shellConfig(c, shellBinary, shellKubeconfig, shellSecret, wsOrigins)
 	if err != nil {
@@ -168,6 +195,7 @@ func run() error {
 		Appliance:        os.Getenv("BENCH_APPLIANCE") == "true",
 		OIDC:             verifier,
 		OIDCConfig:       oidcCfg,
+		MCPAuth:          mcpAuthCfg,
 		Shell:            shell,
 		UI:               ui,
 		WSOriginPatterns: wsOrigins,
