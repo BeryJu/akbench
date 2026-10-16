@@ -26,7 +26,24 @@ const (
 	// user looks the same regardless of which Postgres mode a deployment uses.
 	cnpgDatabase = "authentik"
 	cnpgOwner    = "authentik"
+
+	// pgStatStatementsMax is how many statements pg_stat_statements tracks,
+	// in either postgres mode: twice its default, since every IN list
+	// length is a statement of its own before Postgres 18.
+	pgStatStatementsMax = "10000"
 )
+
+// pgStatStatementsParameters configure pg_stat_statements in either postgres
+// mode. track_planning records planning time, off by default: authentik
+// sends every query as a one-off, so Postgres plans each call, and planning
+// its widest joins (the brand lookup, select_subclasses()) takes far longer
+// than executing them. Its cost is contention on a statement's entry when
+// many connections run the same one, on top of what pg_stat_statements
+// itself costs; both are the same for every target a test compares.
+var pgStatStatementsParameters = map[string]string{
+	"pg_stat_statements.max":            pgStatStatementsMax,
+	"pg_stat_statements.track_planning": "on",
+}
 
 // CNPGClusterName is deterministic from the deployment name.
 func CNPGClusterName(t *benchv1alpha1.AuthentikDeployment) string {
@@ -68,6 +85,11 @@ func CNPGCluster(t *benchv1alpha1.AuthentikDeployment, wc *benchv1alpha1.Workloa
 	_ = unstructured.SetNestedMap(u.Object, storage, "spec", "storage")
 	_ = unstructured.SetNestedField(u.Object, cnpgDatabase, "spec", "bootstrap", "initdb", "database")
 	_ = unstructured.SetNestedField(u.Object, cnpgOwner, "spec", "bootstrap", "initdb", "owner")
+	// Any pg_stat_statements.* parameter makes CNPG preload the library and
+	// create the extension in every database (CNPG's docs, "Enabling
+	// pg_stat_statements"), for the trace breakdown's costliest queries
+	// (internal/api/pgstats.go).
+	_ = unstructured.SetNestedStringMap(u.Object, pgStatStatementsParameters, "spec", "postgresql", "parameters")
 	// enablePodMonitor makes CNPG's own operator create a PodMonitor for
 	// this Cluster (confirmed against the live CRD: `kubectl explain
 	// clusters.postgresql.cnpg.io.spec.monitoring` - a real boolean field,

@@ -394,15 +394,45 @@ export interface TraceTarget {
     queriesPerRequest: number;
     dbTimePerRequest: number;
     dbShare: number;
+    /** The 10th percentile of the sample's query durations. */
+    queryFloor: number;
     stages: { name: string; count: number; p50: number; p95: number }[];
-    topQueries: {
-        statement: string;
-        count: number;
-        perRequest: number;
-        total: number;
-        mean: number;
-    }[];
+    topQueries: TraceQuery[];
+    /** Where topQueries' Postgres figures come from, or why there are none. */
+    postgres?: { since?: string; error?: string };
     error?: string;
+}
+
+// TraceQuery is one statement's share of a target's sample, its calls
+// grouped by shape. Durations are seconds.
+export interface TraceQuery {
+    id: string;
+    statement: string;
+    count: number;
+    perRequest: number;
+    maxPerRequest: number;
+    total: number;
+    timePerRequest: number;
+    share: number;
+    mean: number;
+    p50: number;
+    p95: number;
+    max: number;
+    overFloor: number;
+    /** What pg_stat_statements recorded for it, when it has a match. */
+    postgres?: PostgresStatement;
+}
+
+export interface PostgresStatement {
+    calls: number;
+    meanExec: number;
+    meanPlan: number;
+    /** How often Postgres planned it: 0 when it doesn't track planning. */
+    plans: number;
+    rowsPerCall: number;
+    blocksPerCall: number;
+    readShare: number;
+    tempBlocksPerCall: number;
 }
 
 // ProfileBreakdown mirrors internal/api/profiles.go: each target's merged CPU

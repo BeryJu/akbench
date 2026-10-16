@@ -86,6 +86,13 @@ func PostgresRoleFixJobName(t *benchv1alpha1.AuthentikDeployment) string {
 // comment) and self-waiting (`until pg_isready`) rather than relying
 // purely on BackoffLimit retries, since this typically races the
 // postgresql pod's own first startup.
+//
+// It also creates the pg_stat_statements extension in authentik's database,
+// for the trace breakdown's costliest queries (internal/api/pgstats.go).
+// The image's initdb scripts only run on a fresh volume, and CREATE
+// EXTENSION needs the superuser this Job already connects as. HelmValues
+// preloads the library (embeddedPostgresExtendedConfiguration); the
+// extension can be created before Postgres restarts with it.
 func PostgresRoleFixJob(t *benchv1alpha1.AuthentikDeployment, wc *benchv1alpha1.WorkloadCluster) *batchv1.Job {
 	host := embeddedPostgresServiceName(t)
 	psql := fmt.Sprintf(`psql -h %s -U authentik -d authentik`, host)
@@ -107,7 +114,8 @@ if [ "$exists" = "1" ]; then
 else
   printf '%%s' "CREATE ROLE postgres WITH SUPERUSER LOGIN PASSWORD :'newpass'" | %s -v ON_ERROR_STOP=1 -v newpass="$POSTGRES_PASSWORD"
 fi
-`, host, psql, psql, psql)
+printf '%%s' "CREATE EXTENSION IF NOT EXISTS pg_stat_statements" | %s -v ON_ERROR_STOP=1
+`, host, psql, psql, psql, psql)
 
 	nodeSelector, tolerations := AuthentikPoolPlacement(wc)
 	return &batchv1.Job{

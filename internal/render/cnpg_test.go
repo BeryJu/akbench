@@ -67,6 +67,12 @@ func TestCNPGClusterDefaults(t *testing.T) {
 	if got, want := CNPGAppSecretName(topo), "authentik-1-postgres-app"; got != want {
 		t.Errorf("app secret name = %q, want %q", got, want)
 	}
+	// Any pg_stat_statements.* parameter makes CNPG preload the library and
+	// create the extension, which the trace breakdown reads.
+	params, _, _ := unstructured.NestedStringMap(u.Object, "spec", "postgresql", "parameters")
+	if params["pg_stat_statements.max"] == "" || params["pg_stat_statements.track_planning"] != "on" {
+		t.Errorf("spec.postgresql.parameters = %v, want pg_stat_statements.max and track_planning", params)
+	}
 
 	// enablePodMonitor makes CNPG's own operator create a PodMonitor -
 	// closes the gap manifests/grafana-dashboards/README.md documents ("postgres.json

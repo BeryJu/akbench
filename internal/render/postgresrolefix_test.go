@@ -87,4 +87,7 @@ func TestPostgresRoleFixJob(t *testing.T) {
 	if strings.Contains(script, "$POSTGRES_PASSWORD'") || strings.Contains(script, "'$POSTGRES_PASSWORD") {
 		t.Errorf("script appears to interpolate POSTGRES_PASSWORD directly into a quoted SQL literal: %s", script)
 	}
+	if !strings.Contains(script, `"CREATE EXTENSION IF NOT EXISTS pg_stat_statements" | psql -h authentik-1-postgresql -U authentik -d authentik`) {
+		t.Errorf("script does not create the pg_stat_statements extension in authentik's database: %s", script)
+	}
 }

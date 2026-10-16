@@ -286,7 +286,8 @@ func (r *AuthentikDeploymentReconciler) reconcileBlueprint(ctx context.Context, 
 // function's own doc comment for the real, permanent gap this works around
 // (the authentik chart's own bundled postgresql subchart uses the plain,
 // official postgres image, whose entrypoint never creates the "postgres"
-// role postgres_exporter is hardcoded to authenticate as).
+// role postgres_exporter is hardcoded to authenticate as), and that also
+// creates the pg_stat_statements extension the trace breakdown reads.
 //
 // Deliberately checks the postgres StatefulSet directly rather than the
 // overall helmReleaseReady condition this file's other reconcile steps use:
@@ -302,9 +303,9 @@ func (r *AuthentikDeploymentReconciler) reconcileBlueprint(ctx context.Context, 
 //
 // Best-effort and non-blocking, unlike reconcileBlueprint: this only affects
 // observability (empty postgres.json Grafana panels, a permanently-firing
-// AuthentikBenchPostgresDown alert), never the deployment's own actual
-// readiness, so a failure here is logged/eventer'd but never holds up the
-// overall Ready condition.
+// AuthentikBenchPostgresDown alert, no Postgres figures in the trace
+// breakdown), never the deployment's own actual readiness, so a failure
+// here is logged/eventer'd but never holds up the overall Ready condition.
 func (r *AuthentikDeploymentReconciler) reconcilePostgresRoleFix(ctx context.Context, rc client.Client, topo *benchv1alpha1.AuthentikDeployment, wc *benchv1alpha1.WorkloadCluster) {
 	if topo.Spec.Postgres.Mode != benchv1alpha1.PostgresEmbedded {
 		return

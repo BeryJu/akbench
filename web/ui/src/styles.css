@@ -669,10 +669,16 @@ legend {
     background: var(--info);
 }
 .table td.statement {
-    max-width: 640px;
-    white-space: nowrap;
+    min-width: 280px;
+    max-width: 480px;
+}
+.table td.statement > div {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 3;
+    line-clamp: 3;
     overflow: hidden;
-    text-overflow: ellipsis;
+    overflow-wrap: anywhere;
 }
 .seg {
     display: inline-flex;

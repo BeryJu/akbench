@@ -178,6 +178,7 @@ func HelmValues(t *benchv1alpha1.AuthentikDeployment, wc *benchv1alpha1.Workload
 		// for Dedicated/Packed.
 		values.Postgres["commonLabels"] = DeploymentLabels(t.Name)
 		primary := map[string]any{
+			"extendedConfiguration": embeddedPostgresExtendedConfiguration,
 			"affinity": &corev1.Affinity{
 				PodAntiAffinity: &corev1.PodAntiAffinity{
 					RequiredDuringSchedulingIgnoredDuringExecution: []corev1.PodAffinityTerm{
@@ -327,6 +328,20 @@ func HelmValues(t *benchv1alpha1.AuthentikDeployment, wc *benchv1alpha1.Workload
 	}
 	return &apiextensionsv1.JSON{Raw: raw}, nil
 }
+
+// embeddedPostgresExtendedConfiguration is the bundled subchart's
+// primary.extendedConfiguration, its conf.d override file: the authentik
+// chart's own default for it (max_connections = 500), which setting it
+// replaces, plus pg_stat_statements for the trace breakdown's costliest
+// queries (internal/api/pgstats.go), planning time included (see
+// pgStatStatementsParameters). Postgres only loads the library at start; the
+// subchart's checksum/extended-configuration annotation restarts it when
+// this changes. PostgresRoleFixJob creates the extension.
+const embeddedPostgresExtendedConfiguration = `max_connections = 500
+shared_preload_libraries = 'pg_stat_statements'
+pg_stat_statements.max = ` + pgStatStatementsMax + `
+pg_stat_statements.track_planning = on
+`
 
 // PostgresConnection is the resolved connection info passed to HelmValues.
 // For Embedded mode only Password is meaningful (see above); for CNPG/

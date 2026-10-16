@@ -2,6 +2,7 @@ package render
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	helmv2 "github.com/fluxcd/helm-controller/api/v2"
@@ -492,5 +493,24 @@ func TestHelmReleasesRetryOnFailure(t *testing.T) {
 	kps := KubePrometheusStackHelmRelease(wc, nil)
 	if !kps.Spec.Install.CreateNamespace || kps.Spec.Install.CRDs != helmv2.CreateReplace || kps.Spec.Upgrade.CRDs != helmv2.CreateReplace {
 		t.Errorf("kube-prometheus-stack lost its install/upgrade settings: %+v %+v", kps.Spec.Install, kps.Spec.Upgrade)
+	}
+}
+
+// TestHelmValuesEmbeddedPostgresLoadsPGStatStatements: setting the
+// subchart's extendedConfiguration replaces the authentik chart's own
+// (max_connections = 500), so it has to repeat that next to
+// pg_stat_statements, which the trace breakdown reads.
+func TestHelmValuesEmbeddedPostgresLoadsPGStatStatements(t *testing.T) {
+	raw, err := HelmValues(exampleDeployment(), nil, "secret", &PostgresConnection{Password: "pw"}, "http://pyroscope.example:4040", "http://tempo.example:4318")
+	if err != nil {
+		t.Fatalf("HelmValues: %v", err)
+	}
+	values := decodeValues(t, raw.Raw)
+	primary, _ := values.Postgres["primary"].(map[string]any)
+	conf, _ := primary["extendedConfiguration"].(string)
+	for _, line := range []string{"max_connections = 500", "shared_preload_libraries = 'pg_stat_statements'", "pg_stat_statements.track_planning = on"} {
+		if !strings.Contains(conf, line+"\n") {
+			t.Errorf("postgresql.primary.extendedConfiguration = %q, want a line %q", conf, line)
+		}
 	}
 }

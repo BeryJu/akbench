@@ -17,6 +17,7 @@ package api
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -111,6 +112,8 @@ type podExecRequest struct {
 	Container  string
 	Command    []string
 	Stdin      io.Reader
+	// StdoutLimit caps the stdout kept, sqlMaxOutputBytes when zero.
+	StdoutLimit int
 }
 
 type podExecResult struct {
@@ -152,32 +155,11 @@ func (s *Server) runSQL(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, r, err)
 		return
 	}
-	req, err := sqlExecTarget(&topo)
+	req, status, err := s.postgresExecRequest(r.Context(), &topo)
 	if err != nil {
-		writeError(w, r, http.StatusBadRequest, err.Error())
+		writeError(w, r, status, err.Error())
 		return
 	}
-
-	contexts, raw, err := s.loadShellContexts(r.Context())
-	if err != nil {
-		writeError(w, r, http.StatusServiceUnavailable, err.Error())
-		return
-	}
-	clusterName := topo.Spec.ClusterRef.Name
-	if clusterName == "" {
-		clusterName = ManagementClusterName
-	}
-	for _, c := range contexts {
-		if c.Cluster == clusterName {
-			req.Context = c.Name
-			break
-		}
-	}
-	if req.Context == "" {
-		writeError(w, r, http.StatusConflict, fmt.Sprintf("no kubeconfig context for cluster %q (is the WorkloadCluster Ready?)", clusterName))
-		return
-	}
-	req.Kubeconfig = raw
 	req.Command = append([]string{"sh", "-c", sqlPsqlScript, "psql"}, formatArgs...)
 	req.Stdin = strings.NewReader(body.Query)
 
@@ -194,6 +176,35 @@ func (s *Server) runSQL(w http.ResponseWriter, r *http.Request) {
 		Stderr:   string(res.Stderr),
 		ExitCode: res.ExitCode,
 	})
+}
+
+// postgresExecRequest resolves where topo's Postgres runs: its pod and
+// container (sqlExecTarget), and the shell kubeconfig's context for its
+// cluster. status is the HTTP status that err maps to.
+func (s *Server) postgresExecRequest(ctx context.Context, topo *benchv1alpha1.AuthentikDeployment) (req podExecRequest, status int, err error) {
+	req, err = sqlExecTarget(topo)
+	if err != nil {
+		return req, http.StatusBadRequest, err
+	}
+	contexts, raw, err := s.loadShellContexts(ctx)
+	if err != nil {
+		return req, http.StatusServiceUnavailable, err
+	}
+	clusterName := topo.Spec.ClusterRef.Name
+	if clusterName == "" {
+		clusterName = ManagementClusterName
+	}
+	for _, c := range contexts {
+		if c.Cluster == clusterName {
+			req.Context = c.Name
+			break
+		}
+	}
+	if req.Context == "" {
+		return req, http.StatusConflict, fmt.Errorf("no kubeconfig context for cluster %q (is the WorkloadCluster Ready?)", clusterName)
+	}
+	req.Kubeconfig = raw
+	return req, http.StatusOK, nil
 }
 
 // sqlExecTarget locates the Postgres container for each mode the operator
@@ -274,7 +285,7 @@ func execInPod(ctx context.Context, req podExecRequest) (podExecResult, error) {
 		return podExecResult{}, err
 	}
 
-	stdout := &cappedBuffer{limit: sqlMaxOutputBytes}
+	stdout := &cappedBuffer{limit: cmp.Or(req.StdoutLimit, sqlMaxOutputBytes)}
 	stderr := &cappedBuffer{limit: sqlMaxOutputBytes}
 	res := podExecResult{Pod: pod}
 	err = executor.StreamWithContext(ctx, remotecommand.StreamOptions{Stdin: req.Stdin, Stdout: stdout, Stderr: stderr})
