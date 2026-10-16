@@ -167,7 +167,14 @@ export function PullRequestComparisonPage() {
     const prName = effectivePrefix;
     const baselineName =
         effectivePrefix && baselineSuffix ? `${effectivePrefix}-${baselineSuffix}` : "";
-    const testCaseName = effectivePrefix ? `${effectivePrefix}-burn` : "";
+    // The PR title makes the test case recognisable in lists; capped so
+    // derived names like k6-<testcase>-<deployment> stay within 63 chars.
+    const titleSlug = k8sNameSegment(pr?.title ?? "")
+        .slice(0, 20)
+        .replace(/-+$/, "");
+    const testCaseName = effectivePrefix
+        ? [effectivePrefix, titleSlug, "burn"].filter(Boolean).join("-")
+        : "";
 
     async function submit(event: FormEvent) {
         event.preventDefault();
