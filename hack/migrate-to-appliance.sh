@@ -2,7 +2,7 @@
 # Migrates an existing akbench management cluster (a `main`-era setup:
 # Cluster API + the Incus provider + Flux + the operator, installed by hand)
 # onto the single-container appliance - without touching a single running
-# workload cluster. See appliance/MIGRATION.md for the full procedure,
+# workload cluster. See docs/appliance-migration.md for the full procedure,
 # rollback and the reasoning behind each step.
 #
 #   hack/migrate-to-appliance.sh --from-context OLD --to-context NEW [--namespace NS]... [--yes]

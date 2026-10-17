@@ -187,7 +187,7 @@ helm-chart: manifests generate kustomize helmify ## (Re)generate the operator He
 
 ##@ Appliance
 
-# Single-container appliance (Dockerfile.appliance, appliance/README.md).
+# Single-container appliance (Dockerfile.appliance, docs/appliance.md).
 APPLIANCE_IMG ?= akbench-appliance:dev
 # The operator chart/image and apiserver image version the appliance installs.
 APPLIANCE_VERSION ?= dev

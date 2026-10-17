@@ -160,7 +160,7 @@ same mechanism the migration uses.
 
 ## Migrating from an existing management cluster
 
-See [MIGRATION.md](MIGRATION.md).
+See [appliance-migration.md](appliance-migration.md).
 
 ## Development
 

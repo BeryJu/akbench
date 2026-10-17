@@ -1,7 +1,7 @@
 # authentik-bench - AI Agent Guide
 
 A Kubernetes operator plus web UI for running k6 load tests against authentik
-deployments on Cluster API-provisioned workload clusters. See `README.md` for
+deployments on Cluster API-provisioned workload clusters. See `docs/` for
 what each piece does; this file covers how to work in the repo.
 
 ## Project Structure
@@ -15,7 +15,7 @@ api/v1alpha1/zz_generated.*    Auto-generated (DO NOT EDIT)
 internal/controller/           Reconcilers; turn CRDs into objects via internal/render
 internal/render/               Pure functions building every object the operator applies
                                (HelmReleases, CAPI clusters, k6 Jobs, observability stack, ...)
-internal/render/manifests/     Embedded assets, incl. the Grafana dashboards (+ their README)
+internal/render/manifests/     Embedded assets, incl. the Grafana dashboards
 internal/multicluster/         clusterRef -> client for a workload cluster (wraps CAPI's ClusterCache)
 internal/api/                  HTTP handlers behind cmd/apiserver
 internal/appliance/            Appliance bootstrap logic and its embedded stack template
@@ -29,7 +29,8 @@ config/crd/third-party/        Vendored CAPI/Flux CRDs, loaded by envtest
 config/rbac/role.yaml          Generated RBAC (DO NOT EDIT)
 config/samples/*               Example CRs (edit these)
 charts/authentik-bench-operator/  Generated from config/default by `make helm-chart` (helmify)
-appliance/                     Appliance docs, entrypoint, pinned upstream assets
+appliance/                     Appliance entrypoint, pinned upstream assets
+docs/                          Architecture, appliance, MCP, dashboards, development
 hack/                          Dev scripts behind the `make` targets
 ```
 

@@ -1,7 +1,8 @@
 # Dashboards
 
-Grafana dashboards, embedded via `//go:embed` (every `*.json` here) and
-provisioned into every workload cluster's own Grafana by
+The Grafana dashboards in
+[`internal/render/manifests/grafana-dashboards/`](../internal/render/manifests/grafana-dashboards/)
+are embedded via `//go:embed` (every `*.json` there) and provisioned into every workload cluster's own Grafana by
 `internal/render/grafana.go`, compacted to fit a single ConfigMap. The web UI's
 Grafana page embeds them through `cmd/apiserver`'s `/grafana-proxy/{cluster}/...`
 reverse proxy (`internal/api/grafana_proxy.go`).

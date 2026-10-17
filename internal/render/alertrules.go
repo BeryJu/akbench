@@ -60,7 +60,7 @@ func (ar alertRule) toMap() map[string]any {
 // (http://<node-ip>:30909/api/v1/query) before being written down, not
 // guessed from documentation - this codebase has been burned twice already
 // by dashboard panels querying metric names that sounded right but never
-// actually existed (see manifests/grafana-dashboards/README.md's own "Caveats"
+// actually existed (see docs/grafana-dashboards.md's own "Caveats"
 // section).
 //
 //   - AuthentikBenchServiceScrapeDown: up{job=~"authentik|postgres"} == 0 catches an

@@ -1,6 +1,6 @@
 # Migrating to the appliance
 
-This moves an existing akbench management cluster onto the [appliance](README.md)
+This moves an existing akbench management cluster onto the [appliance](appliance.md)
 **without recreating any workload cluster**. The source is the setup that
 `main` documents: Cluster API, an infrastructure provider (Incus) and Flux installed by hand
 on some cluster (minikube, kind, …), with the operator deployed via

@@ -4,7 +4,7 @@
 # infrastructure providers (Incus today) ship in its clusterctl local
 # repository and are installed when enabled in the web UI, against
 # infrastructure that always lives outside the container. See
-# appliance/README.md.
+# docs/appliance.md.
 #
 # K3S_IMAGE is kept in sync with appliance/assets.lock by
 # hack/update-appliance-assets.sh; every provider version is read from the
