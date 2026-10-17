@@ -93,10 +93,13 @@ func run() error {
 		"If set, OIDC tokens must list this group in their groups claim.")
 	flag.StringVar(&mcpAuth.Resource, "mcp-resource-url", os.Getenv("BENCH_MCP_RESOURCE_URL"),
 		"Public URL of the MCP endpoint (e.g. https://bench.example.com/api/v1/mcp), its OAuth resource "+
-			"identifier. Setting it makes /api/v1/mcp accept only Enterprise-Managed Authorization tokens, "+
-			"granted by akbench itself as the authorization server at this URL's origin.")
+			"identifier. Required with --mcp-idp-issuer; otherwise optional, and derived from each request "+
+			"when unset.")
 	flag.StringVar(&mcpAuth.IdPIssuer, "mcp-idp-issuer", os.Getenv("BENCH_MCP_IDP_ISSUER"),
-		"Issuer of the enterprise IdP whose ID-JAGs akbench trusts for MCP access tokens.")
+		"Issuer of the enterprise IdP whose ID-JAGs akbench trusts for MCP access tokens. Setting it makes "+
+			"/api/v1/mcp accept only Enterprise-Managed Authorization tokens, granted by akbench itself as the "+
+			"authorization server at --mcp-resource-url's origin. Unset, MCP takes the same tokens as the API, "+
+			"and with --oidc-issuer advertises that issuer for OAuth.")
 	flag.StringVar(&mcpAuth.ClientID, "mcp-client-id", os.Getenv("BENCH_MCP_CLIENT_ID"),
 		"Client ID of the MCP client at akbench's token endpoint; its secret is read from BENCH_MCP_CLIENT_SECRET.")
 	flag.StringVar(&mcpScopes, "mcp-scopes", os.Getenv("BENCH_MCP_SCOPES"),
@@ -151,7 +154,7 @@ func run() error {
 	}
 
 	var mcpAuthCfg *api.MCPAuthConfig
-	if mcpAuth.Resource != "" {
+	if mcpAuth.IdPIssuer != "" {
 		mcpAuth.ClientSecret = os.Getenv("BENCH_MCP_CLIENT_SECRET")
 		if mcpScopes != "" {
 			mcpAuth.Scopes = strings.Split(mcpScopes, ",")
@@ -161,6 +164,8 @@ func run() error {
 		}
 		mcpAuthCfg = &mcpAuth
 		log.Info("MCP Enterprise-Managed Authorization enabled", "idpIssuer", mcpAuth.IdPIssuer, "resource", mcpAuth.Resource)
+	} else if oidcCfg.Issuer != "" {
+		log.Info("MCP OAuth through the OIDC provider enabled", "issuer", oidcCfg.Issuer, "resource", mcpAuth.Resource)
 	}
 
 	wsOrigins := wsOriginPatterns(corsOrigin)
@@ -194,6 +199,7 @@ func run() error {
 		OIDC:             verifier,
 		OIDCConfig:       oidcCfg,
 		MCPAuth:          mcpAuthCfg,
+		MCPResource:      mcpAuth.Resource,
 		Shell:            shell,
 		UI:               ui,
 		WSOriginPatterns: wsOrigins,

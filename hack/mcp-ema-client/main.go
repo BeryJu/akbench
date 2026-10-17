@@ -248,7 +248,7 @@ func discover(ctx context.Context, o *options, httpClient *http.Client) (resourc
 		}
 	}
 	check(resp.StatusCode == http.StatusUnauthorized && metadataURL != "",
-		"401 with a resource_metadata challenge (is akbench running with --mcp-resource-url?)")
+		"401 with a resource_metadata challenge (is akbench running with --mcp-idp-issuer?)")
 	if metadataURL == "" {
 		if resource == "" || authServer == "" {
 			return "", "", errors.New("no resource metadata to discover from; pass -resource and -mcp-auth-server")

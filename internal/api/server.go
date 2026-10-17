@@ -43,6 +43,11 @@ type Config struct {
 	// (mcp_auth.go) instead of Token/OIDC; nil keeps it on those.
 	MCPAuth *MCPAuthConfig
 
+	// MCPResource is the MCP endpoint's public URL, advertised for OAuth
+	// through the OIDC provider when OIDC is on and MCPAuth isn't
+	// (mcp_oauth.go). Empty derives it from each request.
+	MCPResource string
+
 	// Shell enables the kubectl shell (shell.go); nil disables it.
 	Shell *ShellConfig
 
@@ -163,6 +168,10 @@ func (s *Server) Router() http.Handler {
 		r.Get(wellKnownAuthServer, s.mcpAuth.serverMetadata)
 		r.Post(mcpTokenPath, s.mcpAuth.token)
 	}
+	if s.mcpOAuthEnabled() {
+		r.Get(s.mcpOAuthMetadataPath(), s.mcpOAuthMetadata)
+		r.Options(s.mcpOAuthMetadataPath(), s.mcpOAuthMetadata)
+	}
 
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Get("/auth/config", s.authConfig)
@@ -170,9 +179,14 @@ func (s *Server) Router() http.Handler {
 		r.Get("/events/connect", s.connectEvents)
 
 		// Read-only MCP server for LLM clients (mcp.go), authenticated by
-		// its own access tokens when MCPAuth is set (mcp_auth.go).
-		if s.mcpAuth != nil {
+		// its own access tokens when MCPAuth is set (mcp_auth.go), else like
+		// the rest of the API, challenging with OAuth discovery for the OIDC
+		// provider when OIDC is on (mcp_oauth.go).
+		switch {
+		case s.mcpAuth != nil:
 			r.With(s.mcpAuth.middleware()).Handle("/mcp", s.mcpHandler())
+		case s.mcpOAuthEnabled():
+			r.With(s.requireTokenWithChallenge(s.mcpOAuthChallenge)).Handle("/mcp", s.mcpHandler())
 		}
 
 		r.Group(func(r chi.Router) {
@@ -231,7 +245,7 @@ func (s *Server) Router() http.Handler {
 
 			r.Post("/events/sessions", s.createEventsSession)
 
-			if s.mcpAuth == nil {
+			if s.mcpAuth == nil && !s.mcpOAuthEnabled() {
 				r.Handle("/mcp", s.mcpHandler())
 			}
 		})

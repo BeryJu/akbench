@@ -162,10 +162,32 @@ claude mcp add --transport http akbench https://<host>/api/v1/mcp \
   --header "Authorization: Bearer $AKBENCH_TOKEN"
 ```
 
-With `--mcp-resource-url` set, it uses MCP Enterprise-Managed Authorization
-(SEP-990, ID-JAG) instead and accepts nothing else. akbench is its own
-authorization server, with the origin of `--mcp-resource-url` as its issuer
-(e.g. `https://bench.example.com`, no trailing slash). The MCP client signs
+With `--oidc-issuer` set, MCP clients can also sign in with OAuth through
+that provider, as the web UI's own public client. There's no Dynamic Client
+Registration, so pass the client ID yourself:
+
+```sh
+claude mcp add --transport http akbench https://<host>/api/v1/mcp \
+  --client-id <--oidc-client-id> --callback-port 33418
+```
+
+An unauthenticated MCP request gets a 401 whose challenge names RFC 9728
+metadata at `/.well-known/oauth-protected-resource/api/v1/mcp`, which lists
+`--oidc-issuer` as the authorization server. The client runs authorization
+code + PKCE there and presents the access token, which akbench checks like
+any other web UI token (audience `--oidc-client-id`,
+`--oidc-required-group`). For this to work, the provider must also allow
+the MCP client's loopback redirect URI, e.g. `http://localhost:33418/callback`.
+In authentik, add it as a strict redirect URI, or as the regex
+`^http://(localhost|127\.0\.0\.1):\d+/callback$` to allow any port. The
+metadata's `resource` is the URL the request came in on (honoring
+`X-Forwarded-Proto`/`-Host`) unless `--mcp-resource-url` sets it.
+
+With `--mcp-idp-issuer` (and `--mcp-resource-url`) set, it uses MCP
+Enterprise-Managed Authorization (SEP-990, ID-JAG) instead and accepts
+nothing else. akbench is its own authorization server, with the origin of
+`--mcp-resource-url` as its issuer (e.g. `https://bench.example.com`, no
+trailing slash). The MCP client signs
 the user in at the enterprise IdP and exchanges the ID token there for an
 ID-JAG addressed to that issuer (RFC 8693). It then trades the ID-JAG at
 akbench's `/oauth/token` for a one-hour access token (RFC 7523 JWT bearer

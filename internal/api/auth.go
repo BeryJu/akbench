@@ -38,6 +38,16 @@ func principal(ctx context.Context) string {
 // Requests that change something are audit-logged with who made them (see
 // auditWrites); rejected ones are logged too, so repeated failures show up.
 func (s *Server) requireToken(next http.Handler) http.Handler {
+	return s.requireTokenWithChallenge(func(*http.Request) string { return `Bearer realm="authentik-bench"` })(next)
+}
+
+// requireTokenWithChallenge is requireToken answering a rejected request
+// with challenge's WWW-Authenticate header instead (mcp_oauth.go).
+func (s *Server) requireTokenWithChallenge(challenge func(*http.Request) string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler { return s.authenticated(next, challenge) }
+}
+
+func (s *Server) authenticated(next http.Handler, challenge func(*http.Request) string) http.Handler {
 	next = auditWrites(next)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if s.cfg.Token == "" && s.cfg.OIDC == nil {
@@ -53,7 +63,7 @@ func (s *Server) requireToken(next http.Handler) http.Handler {
 			}
 		}
 		auditLog(r).Info("Rejected unauthenticated request", requestKeysAndValues(r)...)
-		w.Header().Set("WWW-Authenticate", `Bearer realm="authentik-bench"`)
+		w.Header().Set("WWW-Authenticate", challenge(r))
 		writeError(w, r, http.StatusUnauthorized, "missing or invalid bearer token")
 	})
 }

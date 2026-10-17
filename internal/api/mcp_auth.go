@@ -358,7 +358,7 @@ func (a *mcpAuth) resourceMetadata() http.Handler {
 		AuthorizationServers:   []string{a.cfg.issuer()},
 		ScopesSupported:        a.cfg.Scopes,
 		BearerMethodsSupported: []string{"header"},
-		ResourceName:           "authentik-bench",
+		ResourceName:           mcpResourceName,
 	})
 }
 
