@@ -154,8 +154,9 @@ const promStatusSuccess = "success"
 // runnerClusterRef) remote-writes each target's samples to a different
 // Prometheus, so this returns every distinct URL, never empty.
 //
-// A target that can't be resolved (the TestCase/Deployment/WorkloadCluster
-// was deleted, or the WorkloadCluster hasn't reconciled a PrometheusURL yet)
+// A deleted Deployment falls back to the runnerCluster the TestCase's status
+// last recorded for it. A target that still can't be resolved (the
+// TestCase/WorkloadCluster was deleted, or the WorkloadCluster hasn't reconciled a PrometheusURL yet)
 // falls back to s.cfg.PrometheusURL rather than erroring outright -
 // historical data for a since-deleted test is still worth trying to show,
 // and an empty fallback surfaces the same "no Prometheus configured" 502 a
@@ -174,7 +175,9 @@ func (s *Server) prometheusURLsForTestID(ctx context.Context, testid string) []s
 			var topo benchv1alpha1.AuthentikDeployment
 			key := types.NamespacedName{Name: ref.Name, Namespace: s.cfg.Namespace}
 			if err := s.client.Get(ctx, key, &topo); err != nil {
-				clusterNames = append(clusterNames, "")
+				// A since-deleted deployment (common on an archived
+				// TestCase): status still records where its k6 ran.
+				clusterNames = append(clusterNames, recordedRunnerCluster(&tc, ref.Name))
 				continue
 			}
 			clusterNames = append(clusterNames, topo.Spec.ClusterRef.Name)
@@ -199,6 +202,17 @@ func (s *Server) prometheusURLsForTestID(ctx context.Context, testid string) []s
 		return []string{s.cfg.PrometheusURL}
 	}
 	return urls
+}
+
+// recordedRunnerCluster is the cluster tc's status last recorded the named
+// target's k6 workload on, "" (the management cluster) if none.
+func recordedRunnerCluster(tc *benchv1alpha1.TestCase, deployment string) string {
+	for _, d := range tc.Status.Deployments {
+		if d.Name == deployment {
+			return d.RunnerCluster
+		}
+	}
+	return ""
 }
 
 // proxyQuery forwards a PromQL query to the management cluster's own

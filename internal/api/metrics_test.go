@@ -471,3 +471,30 @@ func TestMetricsToleratesOneUnreachablePrometheus(t *testing.T) {
 	rec = do(t, s, http.MethodGet, "/api/v1/metrics/compare?testids=login-wc", nil)
 	requireStatus(t, rec, http.StatusBadGateway)
 }
+
+// TestMetricsFallsBackToRecordedRunnerCluster: an archived TestCase whose
+// AuthentikDeployments have since been deleted still has its data in the
+// workload cluster's Prometheus its k6 ran on, which only its status
+// remembers.
+func TestMetricsFallsBackToRecordedRunnerCluster(t *testing.T) {
+	wcProm := fakePrometheus(t, func(string) (string, string, bool) {
+		return "7", "topo-gone", true
+	})
+	wc := &benchv1alpha1.WorkloadCluster{
+		Name: "wc1", Namespace: testNamespace,
+		Status: benchv1alpha1.WorkloadClusterStatus{PrometheusURL: wcProm.URL},
+	}
+	tc := sampleTestCase("login-archived", "topo-gone", benchv1alpha1.ProfileBurn)
+	tc.Spec.Archived = true
+	tc.Status.Deployments = []benchv1alpha1.TestCaseDeploymentStatus{{Name: "topo-gone", RunnerCluster: "wc1"}}
+
+	// No management-cluster Prometheus, as on a deployment that only has
+	// per-workload-cluster ones.
+	s, _ := newServer(t, Config{}, wc, tc)
+	rec := do(t, s, http.MethodGet, "/api/v1/metrics/compare?testids=login-archived", nil)
+	requireStatus(t, rec, http.StatusOK)
+	body := decodeBody[compareResponse](t, rec)
+	if len(body.Results) != 1 || body.Results[0].Values["http_reqs"] != 7 {
+		t.Fatalf("results = %+v, want topo-gone http_reqs=7 from wc1's Prometheus", body.Results)
+	}
+}
