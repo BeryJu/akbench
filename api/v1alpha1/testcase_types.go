@@ -164,8 +164,15 @@ type TestCaseDeploymentStatus struct {
 
 	// burningSince is the burn Deployment's creationTimestamp - when this
 	// target started burning, unaffected by operator restarts or Ready flaps.
+	// Kept once the TestCase is archived, alongside burnStoppedAt, so its
+	// metrics can still be shown for exactly the time it burned.
 	// +optional
 	BurningSince *metav1.Time `json:"burningSince,omitempty"`
+
+	// burnStoppedAt is when archiving the TestCase stopped this target's
+	// burn Deployment. Cleared again once it is unarchived.
+	// +optional
+	BurnStoppedAt *metav1.Time `json:"burnStoppedAt,omitempty"`
 }
 
 // TestCaseStatus defines the observed state of TestCase.

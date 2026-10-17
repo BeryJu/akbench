@@ -372,6 +372,12 @@ spec:
                     TestCaseDeploymentStatus is one targeted deployment's own status within a
                     (possibly multi-deployment) TestCase.
                   properties:
+                    burnStoppedAt:
+                      description: |-
+                        burnStoppedAt is when archiving the TestCase stopped this target's
+                        burn Deployment. Cleared again once it is unarchived.
+                      format: date-time
+                      type: string
                     burnWorkloadRef:
                       description: |-
                         burnWorkloadRef names the owned Deployment driving this target when
@@ -392,6 +398,8 @@ spec:
                       description: |-
                         burningSince is the burn Deployment's creationTimestamp - when this
                         target started burning, unaffected by operator restarts or Ready flaps.
+                        Kept once the TestCase is archived, alongside burnStoppedAt, so its
+                        metrics can still be shown for exactly the time it burned.
                       format: date-time
                       type: string
                     name:

@@ -22,7 +22,9 @@ import {
     TimeRangeSelect,
 } from "../components/ui";
 import {
+    archivedBurnWindow,
     earliestBurnStart,
+    formatDuration,
     metricsAnchorFromRuns,
     parseTimeRange,
     shortTag,
@@ -584,10 +586,21 @@ export function TestCaseViewPage() {
         }
         setParams(next, { replace: true });
     }
-    const burnStart = tc ? earliestBurnStart([tc]) : undefined;
+    // An archived burn's charts end when it stopped (plus a minute for k6's
+    // last remote-write push) and never reach back before it started.
+    const archivedWindow = tc && profile === "Burn" ? archivedBurnWindow(tc) : undefined;
+    const burnStart = archivedWindow
+        ? archivedWindow.start
+        : tc
+          ? earliestBurnStart([tc])
+          : undefined;
+    const burnEnd = archivedWindow ? Math.floor(archivedWindow.end) + 60 : undefined;
     const defaultTimelineRange = burnStart !== undefined ? SINCE_START : FALLBACK_TIMELINE_RANGE;
     const timelineRangeValue = parseTimeRange(params.get("range"), defaultTimelineRange, burnStart);
-    const timelineRange = timeRangeSeconds(timelineRangeValue, burnStart);
+    let timelineRange = timeRangeSeconds(timelineRangeValue, burnStart, burnEnd);
+    if (burnStart !== undefined && burnEnd !== undefined) {
+        timelineRange = Math.min(timelineRange, timeRangeSeconds(SINCE_START, burnStart, burnEnd));
+    }
 
     const sortedRuns = [...(runs.data ?? [])].sort((a, b) =>
         (b.metadata.creationTimestamp ?? "").localeCompare(a.metadata.creationTimestamp ?? ""),
@@ -595,13 +608,12 @@ export function TestCaseViewPage() {
     // Burn runs continuously, so "now" is right for it; a Quick test's data
     // ends with its latest completed run.
     const anchor = profile === "Quick" ? metricsAnchorFromRuns(runs.data ?? []) : undefined;
+    const metricsEnd = profile === "Quick" ? anchor?.endSeconds : burnEnd;
     const summaryWindow = profile === "Quick" ? "5m" : `${timelineRange}s`;
     const summary = useResource(
         () =>
-            profile
-                ? api.compare([name], summaryWindow, anchor?.endSeconds)
-                : Promise.resolve(undefined),
-        [name, profile, summaryWindow, anchor?.endSeconds],
+            profile ? api.compare([name], summaryWindow, metricsEnd) : Promise.resolve(undefined),
+        [name, profile, summaryWindow, metricsEnd],
         15000,
     );
     const rows = tc ? buildTargetRows(tc, summary.data?.results ?? [], deployments.data ?? []) : [];
@@ -632,6 +644,10 @@ export function TestCaseViewPage() {
         }
     }
     const since = tc && profile === "Burn" ? burningFor(tc) : undefined;
+    const burnedFor =
+        archivedWindow?.start !== undefined
+            ? formatDuration(archivedWindow.end - archivedWindow.start)
+            : undefined;
 
     const [busy, setBusy] = useState(false);
     const [actionError, setActionError] = useState<string>();
@@ -683,6 +699,7 @@ export function TestCaseViewPage() {
                             ? "inline script"
                             : `template ${tc.spec.template ?? "login"}`}
                         {since && ` · burning for ${since}`}
+                        {burnedFor && ` · burned for ${burnedFor}`}
                     </>
                 )
             }
@@ -835,7 +852,7 @@ export function TestCaseViewPage() {
                 )}
                 <MetricsGrid
                     testids={[name]}
-                    endSeconds={anchor?.endSeconds}
+                    endSeconds={metricsEnd}
                     rangeSeconds={profile === "Quick" ? anchor?.rangeSeconds : timelineRange}
                 />
             </Section>
@@ -850,7 +867,7 @@ export function TestCaseViewPage() {
             >
                 <ResourceCharts
                     testids={[name]}
-                    endSeconds={anchor?.endSeconds}
+                    endSeconds={metricsEnd}
                     rangeSeconds={profile === "Quick" ? anchor?.rangeSeconds : timelineRange}
                 />
             </Section>

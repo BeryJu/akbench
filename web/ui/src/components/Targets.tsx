@@ -74,7 +74,7 @@ export function buildTargetRows(
  */
 export function burningFor(tc: TestCase, now = Date.now()): string | undefined {
     const since = (tc.status?.deployments ?? []).flatMap((d) =>
-        d.burningSince ? [Date.parse(d.burningSince)] : [],
+        d.burningSince && !d.burnStoppedAt ? [Date.parse(d.burningSince)] : [],
     );
     if (since.length === 0) {
         return undefined;

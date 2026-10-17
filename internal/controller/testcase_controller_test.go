@@ -104,7 +104,20 @@ var _ = Describe("TestCase Controller", func() {
 			Expect(deps.Items).To(BeEmpty())
 			Expect(k8sClient.Get(context.Background(), typeNamespacedName, &tc)).To(Succeed())
 			Expect(tc.Status.Phase).To(Equal(benchv1alpha1.PhaseArchived))
-			Expect(findDeploymentStatus(tc.Status.Deployments, topo.Name).BurnWorkloadRef).To(BeNil())
+			archived := findDeploymentStatus(tc.Status.Deployments, topo.Name)
+			Expect(archived.BurnWorkloadRef).To(BeNil())
+			// The burn's window stays recorded, so its metrics can still be
+			// shown for the time it ran.
+			Expect(archived.BurningSince).NotTo(BeNil())
+			Expect(archived.BurnStoppedAt).NotTo(BeNil())
+			Expect(archived.BurnStoppedAt.Before(archived.BurningSince)).To(BeFalse())
+
+			// A later reconcile keeps the original stop time.
+			stoppedAt := *archived.BurnStoppedAt
+			_, err = r.Reconcile(context.Background(), reconcile.Request{NamespacedName: typeNamespacedName})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(k8sClient.Get(context.Background(), typeNamespacedName, &tc)).To(Succeed())
+			Expect(findDeploymentStatus(tc.Status.Deployments, topo.Name).BurnStoppedAt.Equal(&stoppedAt)).To(BeTrue())
 		})
 	})
 

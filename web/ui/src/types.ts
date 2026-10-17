@@ -148,6 +148,8 @@ export interface TestCaseDeploymentStatus {
     ready: boolean;
     burnWorkloadRef?: { name: string };
     burningSince?: string;
+    // Set once archiving stopped this target's burn; burningSince is then kept.
+    burnStoppedAt?: string;
 }
 
 export interface TestCase {

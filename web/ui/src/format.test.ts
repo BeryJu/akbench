@@ -1,4 +1,5 @@
 import {
+    archivedBurnWindow,
     buildLabel,
     colorFor,
     earliestBurnStart,
@@ -253,5 +254,55 @@ describe("earliestBurnStart", () => {
         expect(earliestBurnStart(testCases)).toBe(Date.parse("2026-10-14T10:00:00Z") / 1000);
         expect(earliestBurnStart(testCases, "b")).toBe(Date.parse("2026-10-14T12:00:00Z") / 1000);
         expect(earliestBurnStart(testCases, "c")).toBeUndefined();
+    });
+});
+
+describe("archivedBurnWindow", () => {
+    const s = (t: string) => Date.parse(t) / 1000;
+
+    it("spans from the earliest burn start to the latest burn stop", () => {
+        const tc = {
+            spec: { archived: true },
+            status: {
+                deployments: [
+                    { burningSince: "2026-10-14T10:00:00Z", burnStoppedAt: "2026-10-16T00:00:00Z" },
+                    { burningSince: "2026-10-14T12:00:00Z", burnStoppedAt: "2026-10-16T00:01:00Z" },
+                ],
+            },
+        };
+        expect(archivedBurnWindow(tc)).toEqual({
+            start: s("2026-10-14T10:00:00Z"),
+            end: s("2026-10-16T00:01:00Z"),
+        });
+        expect(earliestBurnStart([tc as never])).toBeUndefined();
+    });
+
+    it("falls back to when the test was archived for the end", () => {
+        const tc = {
+            spec: { archived: true },
+            status: {
+                conditions: [
+                    {
+                        type: "Ready",
+                        reason: "Archived",
+                        lastTransitionTime: "2026-10-16T00:37:20Z",
+                    },
+                ],
+                deployments: [{}],
+            },
+        };
+        expect(archivedBurnWindow(tc)).toEqual({
+            start: undefined,
+            end: s("2026-10-16T00:37:20Z"),
+        });
+    });
+
+    it("is undefined for an active test", () => {
+        expect(
+            archivedBurnWindow({
+                spec: {},
+                status: { deployments: [{ burningSince: "2026-10-14T10:00:00Z" }] },
+            }),
+        ).toBeUndefined();
     });
 });

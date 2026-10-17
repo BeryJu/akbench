@@ -271,16 +271,64 @@ export function timeRangeSeconds(
 /**
  * earliestBurnStart is when the earliest of the given tests' Burn
  * Deployments started, optionally only those driving one deployment - in
- * unix seconds, or undefined if none is burning.
+ * unix seconds, or undefined if none is burning. A burn archiving already
+ * stopped doesn't count.
  */
 export function earliestBurnStart(
-    testCases: { status?: { deployments?: { name: string; burningSince?: string }[] } }[],
+    testCases: {
+        status?: {
+            deployments?: { name: string; burningSince?: string; burnStoppedAt?: string }[];
+        };
+    }[],
     deployment?: string,
 ): number | undefined {
     const starts = testCases.flatMap((tc) =>
         (tc.status?.deployments ?? [])
-            .filter((d) => d.burningSince && (deployment === undefined || d.name === deployment))
+            .filter(
+                (d) =>
+                    d.burningSince &&
+                    !d.burnStoppedAt &&
+                    (deployment === undefined || d.name === deployment),
+            )
             .map((d) => Date.parse(d.burningSince!) / 1000),
     );
     return starts.length ? Math.min(...starts) : undefined;
+}
+
+/**
+ * archivedBurnWindow is when an archived test burned, in unix seconds: from
+ * its earliest target's burn start to its latest burn stop. Test cases
+ * archived before the operator kept burningSince only know the end, taken
+ * from when their Ready condition turned Archived. Undefined for a test
+ * that isn't archived, or whose end isn't known.
+ */
+export function archivedBurnWindow(tc: {
+    spec: { archived?: boolean };
+    status?: {
+        conditions?: { type: string; reason?: string; lastTransitionTime?: string }[];
+        deployments?: { burningSince?: string; burnStoppedAt?: string }[];
+    };
+}): { start?: number; end: number } | undefined {
+    if (!tc.spec.archived) {
+        return undefined;
+    }
+    const deployments = tc.status?.deployments ?? [];
+    const seconds = (t: string) => Date.parse(t) / 1000;
+    const starts = deployments.flatMap((d) => (d.burningSince ? [seconds(d.burningSince)] : []));
+    const stops = deployments.flatMap((d) => (d.burnStoppedAt ? [seconds(d.burnStoppedAt)] : []));
+    if (stops.length === 0) {
+        const archivedAt = tc.status?.conditions?.find(
+            (c) => c.type === "Ready" && c.reason === "Archived",
+        )?.lastTransitionTime;
+        if (archivedAt) {
+            stops.push(seconds(archivedAt));
+        }
+    }
+    if (stops.length === 0) {
+        return undefined;
+    }
+    return {
+        start: starts.length ? Math.min(...starts) : undefined,
+        end: Math.max(...stops),
+    };
 }

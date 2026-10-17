@@ -406,7 +406,10 @@ func (r *TestCaseReconciler) reconcileArchived(ctx context.Context, tc *benchv1a
 		st.Ready = false
 		if !pending {
 			st.BurnWorkloadRef = nil
-			st.BurningSince = nil
+			if st.BurningSince != nil && st.BurnStoppedAt == nil {
+				now := metav1.Now()
+				st.BurnStoppedAt = &now
+			}
 		}
 	}
 	setCondition(r.Recorder, tc, &tc.Status.Conditions, tc.Generation, benchv1alpha1.ConditionReady, metav1.ConditionFalse,
