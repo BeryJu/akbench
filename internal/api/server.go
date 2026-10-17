@@ -98,6 +98,8 @@ type Server struct {
 	podExec podExecFunc
 	// imageRegistry overrides the ghcr.io endpoint checkImage (images.go) queries, in tests.
 	imageRegistry string
+	// mcpAuth is the MCP authorization server (mcp_auth.go), set with cfg.MCPAuth.
+	mcpAuth *mcpAuth
 }
 
 // New builds a Server. The client must be backed by the management cluster
@@ -112,8 +114,8 @@ func New(c client.WithWatch, cfg Config) *Server {
 	if httpClient == nil {
 		httpClient = &http.Client{Timeout: 30 * time.Second}
 	}
-	return &Server{
-		client: c, cfg: cfg, http: httpClient, shell: newShellState(), grafanaKey: newGrafanaSessionKey(),
+	s := &Server{
+		client: c, cfg: cfg, http: httpClient, shell: newShellState(), grafanaKey: newSessionKey(),
 		grafanaAdminCache: map[string]string{},
 		traces:            newBreakdownCache[TraceBreakdown](),
 		profiles:          newBreakdownCache[ProfileBreakdown](),
@@ -121,6 +123,10 @@ func New(c client.WithWatch, cfg Config) *Server {
 		eventsTickets:     newEventsState(),
 		podExec:           execInPod,
 	}
+	if cfg.MCPAuth != nil {
+		s.mcpAuth = newMCPAuth(cfg.MCPAuth)
+	}
+	return s
 }
 
 // probeStatusField is the JSON key /healthz and /readyz answer under -
@@ -149,11 +155,13 @@ func (s *Server) Router() http.Handler {
 	// grafana_session.go.
 	r.HandleFunc("/grafana-proxy/{cluster}/*", s.grafanaProxy)
 
-	if s.cfg.MCPAuth != nil {
+	if s.mcpAuth != nil {
 		if _, path, err := s.cfg.MCPAuth.metadataURL(); err == nil {
-			r.Get(path, s.mcpResourceMetadata().ServeHTTP)
-			r.Options(path, s.mcpResourceMetadata().ServeHTTP)
+			r.Get(path, s.mcpAuth.resourceMetadata().ServeHTTP)
+			r.Options(path, s.mcpAuth.resourceMetadata().ServeHTTP)
 		}
+		r.Get(wellKnownAuthServer, s.mcpAuth.serverMetadata)
+		r.Post(mcpTokenPath, s.mcpAuth.token)
 	}
 
 	r.Route("/api/v1", func(r chi.Router) {
@@ -163,8 +171,8 @@ func (s *Server) Router() http.Handler {
 
 		// Read-only MCP server for LLM clients (mcp.go), authenticated by
 		// its own access tokens when MCPAuth is set (mcp_auth.go).
-		if s.cfg.MCPAuth != nil {
-			r.With(s.mcpAuthMiddleware()).Handle("/mcp", s.mcpHandler())
+		if s.mcpAuth != nil {
+			r.With(s.mcpAuth.middleware()).Handle("/mcp", s.mcpHandler())
 		}
 
 		r.Group(func(r chi.Router) {
@@ -223,7 +231,7 @@ func (s *Server) Router() http.Handler {
 
 			r.Post("/events/sessions", s.createEventsSession)
 
-			if s.cfg.MCPAuth == nil {
+			if s.mcpAuth == nil {
 				r.Handle("/mcp", s.mcpHandler())
 			}
 		})

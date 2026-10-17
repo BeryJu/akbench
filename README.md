@@ -162,33 +162,80 @@ claude mcp add --transport http akbench https://<host>/api/v1/mcp \
   --header "Authorization: Bearer $AKBENCH_TOKEN"
 ```
 
-With `--mcp-resource-url` set, it uses
-MCP Enterprise-Managed Authorization (SEP-990, ID-JAG) instead and accepts nothing else. The MCP client signs the
-user in at the enterprise IdP, exchanges the ID token there for an ID-JAG
-(RFC 8693), and trades the ID-JAG at the authorization server named by
-`--mcp-auth-issuer` for an access token (RFC 7523 JWT bearer grant).
-akbench is only the resource server in that flow. It serves RFC 9728
-metadata at `/.well-known/oauth-protected-resource/api/v1/mcp` pointing at
-that server. It accepts tokens signed by that issuer whose `aud` is the
-resource URL (`--mcp-audience` overrides this) and that carry
-`--mcp-scopes`. Such a token opens nothing else in the API.
-`--mcp-auth-issuer` defaults to `--oidc-issuer`, so one authentik provider can
-serve both the UI and MCP. That only works if it issues MCP tokens with the
-resource as `aud`. akbench refuses to start when MCP would accept the UI's
-issuer *and* client ID as audience, because UI and MCP tokens would then be
-interchangeable. Use a separate provider in that case.
+With `--mcp-resource-url` set, it uses MCP Enterprise-Managed Authorization
+(SEP-990, ID-JAG) instead and accepts nothing else. akbench is its own
+authorization server, with the origin of `--mcp-resource-url` as its issuer
+(e.g. `https://bench.example.com`, no trailing slash). The MCP client signs
+the user in at the enterprise IdP and exchanges the ID token there for an
+ID-JAG addressed to that issuer (RFC 8693). It then trades the ID-JAG at
+akbench's `/oauth/token` for a one-hour access token (RFC 7523 JWT bearer
+grant, `client_secret_post` or `client_secret_basic`).
+
+akbench serves RFC 9728 metadata at
+`/.well-known/oauth-protected-resource/api/v1/mcp` and RFC 8414 metadata at
+`/.well-known/oauth-authorization-server`. It accepts an ID-JAG only if all
+of these hold:
+
+- its `typ` is `oauth-id-jag+jwt`
+- it's signed by `--mcp-idp-issuer` (keys from its OIDC discovery)
+- its `aud` is akbench's issuer and its `client_id` is `--mcp-client-id`,
+  the client that authenticated with `BENCH_MCP_CLIENT_SECRET`
+- its `resource` is the MCP URL
+- it's unexpired and its `jti` hasn't been used before
+
+The access token never carries more scopes than the ID-JAG's `scope` claim.
+To use MCP it must carry `--mcp-scopes`, if set. Calls are attributed to
+`<sub> via <act.sub>`, the agent named by the ID-JAG's `act` claim.
+
+Access tokens are signed with a key generated at startup. A restart logs MCP
+clients out, and the `jti` replay cache lives in memory, so both assume a
+single apiserver replica. An access token opens nothing else in the API.
 
 [`hack/mcp-ema-client`](hack/mcp-ema-client/main.go) runs that whole flow
 from the client side. It prints every token, checks the ID-JAG against the
 draft's required header and claims, then lists (and optionally calls) the
-tools. It's meant for testing an IdP's or authorization server's ID-JAG
-implementation, such as authentik's:
+tools. It's meant for testing an IdP's ID-JAG implementation, such as
+authentik's:
 
 ```sh
 go run ./hack/mcp-ema-client -insecure -mcp-url https://localhost:8443/api/v1/mcp \
   -idp-issuer https://idp.example.com/application/o/enterprise/ -idp-client-id <id> \
-  -mcp-client-id <id> [-id-token <jwt>] [-call list_test_cases]
+  -mcp-client-id <id> -mcp-client-secret <secret> [-id-token <jwt>] [-call list_test_cases]
 ```
+
+#### Example: authentik as the IdP
+
+[`hack/mcp-ema-client/authentik-blueprint.yaml`](hack/mcp-ema-client/authentik-blueprint.yaml)
+sets up authentik's `akbench-ema-idp` provider as the enterprise IdP. What
+it may mint ID-JAGs for lives on an authentik system agent, which the
+ID-JAG's `act` claim names.
+
+1. Import the blueprint, and copy the `akbench-ema-idp` client secret.
+2. In authentik's admin interface, under Directory > Agents (an enterprise
+   feature), create an agent with no parent user. Edit it to add the
+   `akbench EMA IdP` application and set these ID-JAG fields:
+   - audience: akbench's issuer, the origin of `--mcp-resource-url` without
+     a trailing slash (`https://localhost:8443`)
+   - client ID: `akbench-mcp`
+   - resources: `https://localhost:8443/api/v1/mcp`
+3. Start akbench as the MCP authorization server, trusting that IdP. Pick
+   any secret for the MCP client:
+
+   ```sh
+   BENCH_MCP_CLIENT_SECRET=<mcp secret> go run ./cmd/apiserver \
+     --mcp-resource-url https://localhost:8443/api/v1/mcp \
+     --mcp-idp-issuer https://authentik.company/application/o/akbench-ema-idp/ \
+     --mcp-client-id akbench-mcp
+   ```
+
+4. Run the client. It logs you in at the IdP in the browser:
+
+   ```sh
+   IDP_CLIENT_SECRET=... MCP_CLIENT_SECRET=<mcp secret> \
+   go run ./hack/mcp-ema-client -insecure -mcp-url https://localhost:8443/api/v1/mcp \
+     -idp-issuer https://authentik.company/application/o/akbench-ema-idp/ \
+     -idp-client-id akbench-ema-idp -mcp-client-id akbench-mcp -call list_test_cases
+   ```
 
 ### Running the tests
 

@@ -21,7 +21,7 @@ import (
 // holding one proves the browser recently held a valid API credential. It's
 // a signed expiry timestamp, nothing more - no server-side session state,
 // same as the rest of this server - signed with a key generated per process
-// (newGrafanaSessionKey), so a restart simply invalidates every cookie and
+// (newSessionKey), so a restart simply invalidates every cookie and
 // the UI mints a fresh one on its next Grafana page load.
 const (
 	grafanaSessionCookie = "akbench_grafana"
@@ -34,12 +34,12 @@ const (
 	grafanaProxyPathPrefix = "/grafana-proxy/"
 )
 
-func newGrafanaSessionKey() []byte {
+func newSessionKey() []byte {
 	key := make([]byte, 32)
 	if _, err := rand.Read(key); err != nil {
 		// crypto/rand never fails on supported platforms; refusing to run
 		// beats signing with a predictable key.
-		panic("generate Grafana session key: " + err.Error())
+		panic("generate session key: " + err.Error())
 	}
 	return key
 }

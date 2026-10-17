@@ -1,14 +1,15 @@
 // Command mcp-ema-client drives MCP Enterprise-Managed Authorization
 // (SEP-990) end to end against akbench's MCP endpoint, as a test client for
-// identity providers / authorization servers implementing ID-JAG (Identity
-// Assertion JWT Authorization Grant) - authentik in particular:
+// identity providers implementing ID-JAG (Identity Assertion JWT
+// Authorization Grant) - authentik in particular. akbench is the
+// authorization server:
 //
 //  1. discovery: an unauthenticated MCP request's 401 challenge -> RFC 9728
 //     protected resource metadata -> the MCP authorization server
 //  2. OIDC login at the IdP (authorization code + PKCE, local callback), or
 //     a given -id-token
 //  3. RFC 8693 token exchange at the IdP: ID token -> ID-JAG
-//  4. RFC 7523 JWT bearer grant at the MCP authorization server: ID-JAG ->
+//  4. RFC 7523 JWT bearer grant at akbench's authorization server: ID-JAG ->
 //     access token
 //  5. MCP tools/list (and optionally one tools/call) with that token
 //
@@ -19,7 +20,7 @@
 //
 //	go run ./hack/mcp-ema-client -mcp-url https://localhost:8443/api/v1/mcp -insecure \
 //	  -idp-issuer https://idp.example.com/application/o/enterprise/ -idp-client-id ... \
-//	  -mcp-client-id ...
+//	  -mcp-client-id ... -mcp-client-secret ...
 package main
 
 import (
@@ -216,8 +217,7 @@ func authorize(ctx context.Context, o *options, httpClient *http.Client) (string
 		"token_type is Bearer (got %v)", granted["token_type"])
 	_, atClaims := printJWT("access token", accessToken)
 	if atClaims != nil {
-		check(audienceContains(atClaims["aud"], resource), "access token aud contains the resource %s "+
-			"(else start akbench with --mcp-audience)", resource)
+		check(audienceContains(atClaims["aud"], resource), "access token aud contains the resource %s", resource)
 	}
 	return accessToken, nil
 }
@@ -248,7 +248,7 @@ func discover(ctx context.Context, o *options, httpClient *http.Client) (resourc
 		}
 	}
 	check(resp.StatusCode == http.StatusUnauthorized && metadataURL != "",
-		"401 with a resource_metadata challenge (is akbench running with --mcp-auth-issuer?)")
+		"401 with a resource_metadata challenge (is akbench running with --mcp-resource-url?)")
 	if metadataURL == "" {
 		if resource == "" || authServer == "" {
 			return "", "", errors.New("no resource metadata to discover from; pass -resource and -mcp-auth-server")

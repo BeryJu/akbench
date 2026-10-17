@@ -8,6 +8,7 @@ import (
 	"maps"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -17,20 +18,20 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// fakeIssuer is an OAuth authorization server reduced to what akbench's
-// MCP auth needs from one: OIDC discovery and a JWKS to verify against.
-type fakeIssuer struct {
+// fakeIdP is an enterprise IdP reduced to what akbench's MCP authorization
+// server needs from one: OIDC discovery and a JWKS to verify ID-JAGs against.
+type fakeIdP struct {
 	*httptest.Server
 	key *rsa.PrivateKey
 }
 
-func newFakeIssuer(t *testing.T) *fakeIssuer {
+func newFakeIdP(t *testing.T) *fakeIdP {
 	t.Helper()
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		t.Fatal(err)
 	}
-	f := &fakeIssuer{key: key}
+	f := &fakeIdP{key: key}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
@@ -48,10 +49,10 @@ func newFakeIssuer(t *testing.T) *fakeIssuer {
 	return f
 }
 
-func (f *fakeIssuer) sign(t *testing.T, claims map[string]any) string {
+func (f *fakeIdP) sign(t *testing.T, typ string, claims map[string]any) string {
 	t.Helper()
 	signer, err := jose.NewSigner(jose.SigningKey{Algorithm: jose.RS256, Key: f.key},
-		(&jose.SignerOptions{}).WithType("at+jwt").WithHeader("kid", "k"))
+		(&jose.SignerOptions{}).WithType(jose.ContentType(typ)).WithHeader("kid", "k"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,31 +63,70 @@ func (f *fakeIssuer) sign(t *testing.T, claims map[string]any) string {
 	return raw
 }
 
-const testMCPResource = "https://bench.example.com/api/v1/mcp"
+const (
+	testMCPResource = "https://bench.example.com/api/v1/mcp"
+	testMCPIssuer   = "https://bench.example.com"
+)
 
-func (f *fakeIssuer) accessToken(t *testing.T, overrides map[string]any) string {
+// idJAG is an ID-JAG as authentik mints it, with overrides applied (a nil
+// value removes the claim).
+func (f *fakeIdP) idJAG(t *testing.T, overrides map[string]any) string {
 	claims := map[string]any{
-		"iss": f.URL, "sub": "u1", "aud": testMCPResource, "preferred_username": "alice",
-		"client_id": "claude", "scope": "akbench:mcp",
-		"exp": time.Now().Add(time.Hour).Unix(), "iat": time.Now().Unix(),
+		"iss": f.URL, "sub": "u1", "aud": testMCPIssuer, "client_id": "claude", "resource": testMCPResource,
+		"scope": "akbench:mcp", "jti": rand.Text(), "act": map[string]any{"sub": "agent-1"},
+		"exp": time.Now().Add(5 * time.Minute).Unix(), "iat": time.Now().Unix(),
 	}
 	maps.Copy(claims, overrides)
-	return f.sign(t, claims)
+	maps.DeleteFunc(claims, func(_ string, v any) bool { return v == nil })
+	return f.sign(t, idJAGType, claims)
 }
 
-func newMCPAuthServer(t *testing.T, issuer *fakeIssuer) *httptest.Server {
+func newMCPAuthServer(t *testing.T, idp *fakeIdP) *httptest.Server {
 	t.Helper()
 	s, _ := newServer(t, Config{MCPAuth: &MCPAuthConfig{
-		Issuer: issuer.URL, Resource: testMCPResource, Scopes: []string{"akbench:mcp"},
+		Resource: testMCPResource, IdPIssuer: idp.URL, ClientID: "claude", ClientSecret: "s3cret",
+		Scopes: []string{"akbench:mcp"},
 	}})
 	srv := httptest.NewServer(s.Router())
 	t.Cleanup(srv.Close)
 	return srv
 }
 
-func postMCP(t *testing.T, url, token string) *http.Response {
+// grant runs the JWT bearer grant and returns the status and response body.
+func grant(t *testing.T, srvURL string, form url.Values) (int, map[string]any) {
 	t.Helper()
-	req, _ := http.NewRequest(http.MethodPost, url+"/api/v1/mcp",
+	resp, err := http.PostForm(srvURL+mcpTokenPath, form)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	var body map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	return resp.StatusCode, body
+}
+
+func grantForm(assertion string) url.Values {
+	return url.Values{
+		"grant_type": {grantTypeJWTBearer}, "assertion": {assertion},
+		"client_id": {"claude"}, "client_secret": {"s3cret"},
+	}
+}
+
+func accessToken(t *testing.T, srvURL string, idJAG string) string {
+	t.Helper()
+	status, body := grant(t, srvURL, grantForm(idJAG))
+	token, _ := body["access_token"].(string)
+	if status != http.StatusOK || token == "" {
+		t.Fatalf("grant: %d %v", status, body)
+	}
+	return token
+}
+
+func postMCP(t *testing.T, srvURL, token string) *http.Response {
+	t.Helper()
+	req, _ := http.NewRequest(http.MethodPost, srvURL+"/api/v1/mcp",
 		strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json, text/event-stream")
@@ -101,30 +141,44 @@ func postMCP(t *testing.T, url, token string) *http.Response {
 	return resp
 }
 
-func TestMCPAuthServesResourceMetadata(t *testing.T) {
-	issuer := newFakeIssuer(t)
-	srv := newMCPAuthServer(t, issuer)
-
-	resp, err := http.Get(srv.URL + "/.well-known/oauth-protected-resource/api/v1/mcp")
+func getJSON(t *testing.T, metadataURL string, into any) {
+	t.Helper()
+	resp, err := http.Get(metadataURL)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = resp.Body.Close() }()
+	if err := json.NewDecoder(resp.Body).Decode(into); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestMCPAuthServesMetadata(t *testing.T) {
+	srv := newMCPAuthServer(t, newFakeIdP(t))
+
 	var prm struct {
 		Resource             string   `json:"resource"`
 		AuthorizationServers []string `json:"authorization_servers"`
-		ScopesSupported      []string `json:"scopes_supported"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&prm); err != nil {
-		t.Fatal(err)
-	}
-	if prm.Resource != testMCPResource || len(prm.AuthorizationServers) != 1 || prm.AuthorizationServers[0] != issuer.URL {
+	getJSON(t, srv.URL+"/.well-known/oauth-protected-resource/api/v1/mcp", &prm)
+	if prm.Resource != testMCPResource || len(prm.AuthorizationServers) != 1 || prm.AuthorizationServers[0] != testMCPIssuer {
 		t.Fatalf("unexpected resource metadata: %+v", prm)
+	}
+
+	var asm struct {
+		Issuer              string   `json:"issuer"`
+		TokenEndpoint       string   `json:"token_endpoint"`
+		GrantTypesSupported []string `json:"grant_types_supported"`
+	}
+	getJSON(t, srv.URL+"/.well-known/oauth-authorization-server", &asm)
+	if asm.Issuer != testMCPIssuer || asm.TokenEndpoint != testMCPIssuer+mcpTokenPath ||
+		len(asm.GrantTypesSupported) != 1 || asm.GrantTypesSupported[0] != grantTypeJWTBearer {
+		t.Fatalf("unexpected authorization server metadata: %+v", asm)
 	}
 }
 
 func TestMCPAuthChallengesWithResourceMetadata(t *testing.T) {
-	srv := newMCPAuthServer(t, newFakeIssuer(t))
+	srv := newMCPAuthServer(t, newFakeIdP(t))
 	resp := postMCP(t, srv.URL, "")
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("status %d, want 401", resp.StatusCode)
@@ -135,55 +189,14 @@ func TestMCPAuthChallengesWithResourceMetadata(t *testing.T) {
 	}
 }
 
-func TestMCPAuthRejectsOtherTokens(t *testing.T) {
-	issuer := newFakeIssuer(t)
-	srv := newMCPAuthServer(t, issuer)
-	other := newFakeIssuer(t)
-
-	for name, tc := range map[string]struct {
-		token string
-		want  int
-	}{
-		// EMA only: the API's own static token no longer opens MCP.
-		"static API token": {testToken, http.StatusUnauthorized},
-		"wrong audience":   {issuer.accessToken(t, map[string]any{"aud": "web-ui"}), http.StatusUnauthorized},
-		"expired":          {issuer.accessToken(t, map[string]any{"exp": time.Now().Add(-time.Hour).Unix()}), http.StatusUnauthorized},
-		"other issuer":     {other.accessToken(t, map[string]any{"iss": issuer.URL}), http.StatusUnauthorized},
-		"missing scope":    {issuer.accessToken(t, map[string]any{"scope": "openid"}), http.StatusForbidden},
-	} {
-		t.Run(name, func(t *testing.T) {
-			if resp := postMCP(t, srv.URL, tc.token); resp.StatusCode != tc.want {
-				t.Fatalf("status %d, want %d", resp.StatusCode, tc.want)
-			}
-		})
-	}
-}
-
-// An MCP access token must not work on the rest of the API: its audience
-// is the MCP resource, never the web UI's client ID.
-func TestMCPAuthTokenDoesNotOpenTheAPI(t *testing.T) {
-	issuer := newFakeIssuer(t)
-	srv := newMCPAuthServer(t, issuer)
-	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/api/v1/testcases", nil)
-	req.Header.Set("Authorization", "Bearer "+issuer.accessToken(t, nil))
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_ = resp.Body.Close()
-	if resp.StatusCode != http.StatusUnauthorized {
-		t.Fatalf("status %d, want 401", resp.StatusCode)
-	}
-}
-
-func TestMCPAuthAcceptsValidToken(t *testing.T) {
-	issuer := newFakeIssuer(t)
-	srv := newMCPAuthServer(t, issuer)
+func TestMCPAuthGrantsForValidIDJAG(t *testing.T) {
+	idp := newFakeIdP(t)
+	srv := newMCPAuthServer(t, idp)
 
 	client := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "v0"}, nil)
 	session, err := client.Connect(context.Background(), &mcp.StreamableClientTransport{
 		Endpoint:             srv.URL + "/api/v1/mcp",
-		HTTPClient:           &http.Client{Transport: bearerTransport{issuer.accessToken(t, nil)}},
+		HTTPClient:           &http.Client{Transport: bearerTransport{accessToken(t, srv.URL, idp.idJAG(t, nil))}},
 		DisableStandaloneSSE: true,
 	}, nil)
 	if err != nil {
@@ -195,29 +208,112 @@ func TestMCPAuthAcceptsValidToken(t *testing.T) {
 	}
 }
 
-func TestMCPAuthConfigValidate(t *testing.T) {
-	ui := OIDCConfig{Issuer: "https://idp/application/o/bench/", ClientID: "web-ui"}
+func TestMCPAuthRejectsBadGrants(t *testing.T) {
+	idp := newFakeIdP(t)
+	other := newFakeIdP(t)
+	srv := newMCPAuthServer(t, idp)
+	replayed := idp.idJAG(t, nil)
+	accessToken(t, srv.URL, replayed)
+
+	withForm := func(assertion string, set map[string]string) url.Values {
+		form := grantForm(assertion)
+		for k, v := range set {
+			form.Set(k, v)
+		}
+		return form
+	}
 	for name, tc := range map[string]struct {
-		cfg MCPAuthConfig
-		ok  bool
+		form url.Values
+		want string
 	}{
-		"no resource":       {MCPAuthConfig{Issuer: "https://idp"}, false},
-		"no issuer":         {MCPAuthConfig{Resource: testMCPResource}, false},
-		"relative resource": {MCPAuthConfig{Issuer: "https://idp", Resource: "/api/v1/mcp"}, false},
-		// The UI's own issuer is fine as long as MCP tokens carry the
-		// resource as their audience...
-		"shared issuer": {MCPAuthConfig{Issuer: ui.Issuer, Resource: testMCPResource}, true},
-		// ...but not the UI's client ID: the tokens would be interchangeable.
-		"shared issuer and audience": {
-			MCPAuthConfig{Issuer: "https://idp/application/o/bench", Resource: testMCPResource, Audience: "web-ui"}, false,
-		},
-		"separate provider, same client ID": {
-			MCPAuthConfig{Issuer: "https://idp/application/o/bench-mcp/", Resource: testMCPResource, Audience: "web-ui"}, true,
-		},
+		"wrong secret":     {withForm(idp.idJAG(t, nil), map[string]string{"client_secret": "nope"}), "invalid_client"},
+		"other client":     {withForm(idp.idJAG(t, nil), map[string]string{"client_id": "other"}), "invalid_client"},
+		"wrong grant type": {withForm(idp.idJAG(t, nil), map[string]string{"grant_type": "client_credentials"}), "unsupported_grant_type"},
+		"plain JWT":        {grantForm(idp.sign(t, "JWT", map[string]any{"iss": idp.URL, "aud": testMCPIssuer})), "invalid_grant"},
+		"other issuer":     {grantForm(other.idJAG(t, map[string]any{"iss": idp.URL})), "invalid_grant"},
+		"wrong audience":   {grantForm(idp.idJAG(t, map[string]any{"aud": testMCPIssuer + "/"})), "invalid_grant"},
+		"wrong client_id":  {grantForm(idp.idJAG(t, map[string]any{"client_id": "other"})), "invalid_grant"},
+		"wrong resource":   {grantForm(idp.idJAG(t, map[string]any{"resource": "https://other/mcp"})), "invalid_grant"},
+		"expired":          {grantForm(idp.idJAG(t, map[string]any{"exp": time.Now().Add(-time.Minute).Unix()})), "invalid_grant"},
+		"no iat":           {grantForm(idp.idJAG(t, map[string]any{"iat": nil})), "invalid_grant"},
+		"no jti":           {grantForm(idp.idJAG(t, map[string]any{"jti": nil})), "invalid_grant"},
+		"replayed":         {grantForm(replayed), "invalid_grant"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			if err := tc.cfg.Validate(ui); (err == nil) != tc.ok {
-				t.Fatalf("Validate() = %v, want ok=%v", err, tc.ok)
+			if _, body := grant(t, srv.URL, tc.form); body["error"] != tc.want {
+				t.Fatalf("got %v, want error %s", body, tc.want)
+			}
+		})
+	}
+}
+
+// The granted scopes never exceed the ID-JAG's.
+func TestMCPAuthLimitsScopesToIDJAG(t *testing.T) {
+	idp := newFakeIdP(t)
+	srv := newMCPAuthServer(t, idp)
+
+	form := grantForm(idp.idJAG(t, map[string]any{"scope": "openid"}))
+	form.Set("scope", "openid akbench:mcp")
+	status, body := grant(t, srv.URL, form)
+	if status != http.StatusOK || body["scope"] != "openid" {
+		t.Fatalf("grant: %d %v, want scope openid only", status, body)
+	}
+	if resp := postMCP(t, srv.URL, body["access_token"].(string)); resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("MCP status %d, want 403 for the missing scope", resp.StatusCode)
+	}
+}
+
+func TestMCPAuthRejectsOtherTokens(t *testing.T) {
+	idp := newFakeIdP(t)
+	srv := newMCPAuthServer(t, idp)
+	for name, token := range map[string]string{
+		// EMA only: the API's own static token no longer opens MCP.
+		"static API token": testToken,
+		// The ID-JAG is a grant, not an access token.
+		"ID-JAG": idp.idJAG(t, nil),
+		// Neither is a token from another akbench (or this one before a restart).
+		"other akbench": accessToken(t, newMCPAuthServer(t, idp).URL, idp.idJAG(t, nil)),
+	} {
+		t.Run(name, func(t *testing.T) {
+			if resp := postMCP(t, srv.URL, token); resp.StatusCode != http.StatusUnauthorized {
+				t.Fatalf("status %d, want 401", resp.StatusCode)
+			}
+		})
+	}
+}
+
+// An MCP access token must not work on the rest of the API.
+func TestMCPAuthTokenDoesNotOpenTheAPI(t *testing.T) {
+	idp := newFakeIdP(t)
+	srv := newMCPAuthServer(t, idp)
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/api/v1/testcases", nil)
+	req.Header.Set("Authorization", "Bearer "+accessToken(t, srv.URL, idp.idJAG(t, nil)))
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("status %d, want 401", resp.StatusCode)
+	}
+}
+
+func TestMCPAuthConfigValidate(t *testing.T) {
+	valid := MCPAuthConfig{Resource: testMCPResource, IdPIssuer: "https://idp", ClientID: "c", ClientSecret: "s"}
+	if err := valid.Validate(); err != nil {
+		t.Fatalf("Validate() = %v", err)
+	}
+	for name, mutate := range map[string]func(*MCPAuthConfig){
+		"no IdP":            func(c *MCPAuthConfig) { c.IdPIssuer = "" },
+		"no client":         func(c *MCPAuthConfig) { c.ClientID = "" },
+		"no secret":         func(c *MCPAuthConfig) { c.ClientSecret = "" },
+		"relative resource": func(c *MCPAuthConfig) { c.Resource = "/api/v1/mcp" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			cfg := valid
+			mutate(&cfg)
+			if cfg.Validate() == nil {
+				t.Fatal("Validate() = nil, want an error")
 			}
 		})
 	}

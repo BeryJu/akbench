@@ -91,14 +91,14 @@ func run() error {
 		"Comma-separated scopes the web UI requests. Defaults to openid,profile,email.")
 	flag.StringVar(&oidcCfg.RequiredGroup, "oidc-required-group", os.Getenv("BENCH_OIDC_REQUIRED_GROUP"),
 		"If set, OIDC tokens must list this group in their groups claim.")
-	flag.StringVar(&mcpAuth.Issuer, "mcp-auth-issuer", os.Getenv("BENCH_MCP_AUTH_ISSUER"),
-		"Issuer of the OAuth authorization server that mints MCP access tokens from ID-JAG grants "+
-			"(Enterprise-Managed Authorization). Defaults to --oidc-issuer.")
 	flag.StringVar(&mcpAuth.Resource, "mcp-resource-url", os.Getenv("BENCH_MCP_RESOURCE_URL"),
 		"Public URL of the MCP endpoint (e.g. https://bench.example.com/api/v1/mcp), its OAuth resource "+
-			"identifier. Setting it makes /api/v1/mcp accept only Enterprise-Managed Authorization tokens.")
-	flag.StringVar(&mcpAuth.Audience, "mcp-audience", os.Getenv("BENCH_MCP_AUDIENCE"),
-		"Audience MCP access tokens must carry. Defaults to --mcp-resource-url.")
+			"identifier. Setting it makes /api/v1/mcp accept only Enterprise-Managed Authorization tokens, "+
+			"granted by akbench itself as the authorization server at this URL's origin.")
+	flag.StringVar(&mcpAuth.IdPIssuer, "mcp-idp-issuer", os.Getenv("BENCH_MCP_IDP_ISSUER"),
+		"Issuer of the enterprise IdP whose ID-JAGs akbench trusts for MCP access tokens.")
+	flag.StringVar(&mcpAuth.ClientID, "mcp-client-id", os.Getenv("BENCH_MCP_CLIENT_ID"),
+		"Client ID of the MCP client at akbench's token endpoint; its secret is read from BENCH_MCP_CLIENT_SECRET.")
 	flag.StringVar(&mcpScopes, "mcp-scopes", os.Getenv("BENCH_MCP_SCOPES"),
 		"Comma-separated scopes MCP access tokens must carry. Optional.")
 	flag.StringVar(&shellBinary, "shell", envOr("BENCH_SHELL", "/bin/bash"),
@@ -151,18 +151,16 @@ func run() error {
 	}
 
 	var mcpAuthCfg *api.MCPAuthConfig
-	if mcpAuth.Issuer != "" || mcpAuth.Resource != "" {
-		if mcpAuth.Issuer == "" {
-			mcpAuth.Issuer = oidcCfg.Issuer
-		}
+	if mcpAuth.Resource != "" {
+		mcpAuth.ClientSecret = os.Getenv("BENCH_MCP_CLIENT_SECRET")
 		if mcpScopes != "" {
 			mcpAuth.Scopes = strings.Split(mcpScopes, ",")
 		}
-		if err := mcpAuth.Validate(oidcCfg); err != nil {
+		if err := mcpAuth.Validate(); err != nil {
 			return err
 		}
 		mcpAuthCfg = &mcpAuth
-		log.Info("MCP Enterprise-Managed Authorization enabled", "issuer", mcpAuth.Issuer, "resource", mcpAuth.Resource)
+		log.Info("MCP Enterprise-Managed Authorization enabled", "idpIssuer", mcpAuth.IdPIssuer, "resource", mcpAuth.Resource)
 	}
 
 	wsOrigins := wsOriginPatterns(corsOrigin)
