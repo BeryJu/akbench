@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"math"
 	"net/http"
 	"net/url"
@@ -304,6 +305,43 @@ type compareResponse struct {
 	Window  string          `json:"window"`
 	Metrics []CompareMetric `json:"metrics"`
 	Results []CompareResult `json:"results"`
+	// Errors is keyed by testid: a Prometheus that one testid resolves to
+	// can be unreachable (its WorkloadCluster torn down, say) without that
+	// costing every other testid in the same request its data.
+	Errors map[string]string `json:"errors,omitempty"`
+}
+
+// promErrors collects per-testid Prometheus failures for compare and
+// metricsRange. Only when not a single Prometheus query of the request
+// succeeded does the request as a whole fail, so a dashboard asking about
+// many testids at once still renders the ones it can reach.
+type promErrors struct {
+	byTestID  map[string]string
+	succeeded bool
+}
+
+func (e *promErrors) add(testid, baseURL string, err error) {
+	if e.byTestID == nil {
+		e.byTestID = map[string]string{}
+	}
+	msg := fmt.Sprintf("query Prometheus %q: %s", baseURL, err)
+	if baseURL == "" {
+		msg = err.Error()
+	}
+	if prev, ok := e.byTestID[testid]; ok {
+		msg = prev + "; " + msg
+	}
+	e.byTestID[testid] = msg
+}
+
+// failed reports whether every query failed, with one of the errors to
+// return as the request's own.
+func (e *promErrors) failed() (string, bool) {
+	if e.succeeded || len(e.byTestID) == 0 {
+		return "", false
+	}
+	ids := slices.Sorted(maps.Keys(e.byTestID))
+	return fmt.Sprintf("%s: %s", ids[0], e.byTestID[ids[0]]), true
 }
 
 // compare answers GET /metrics/compare?testids=a,b,c[&window=5m][&time=...],
@@ -343,6 +381,7 @@ func (s *Server) compare(w http.ResponseWriter, r *http.Request) {
 	at := r.URL.Query().Get("time")
 
 	resp := compareResponse{Window: window, Metrics: compareMetrics}
+	var errs promErrors
 	for _, id := range testids {
 		baseURLs := s.prometheusURLsForTestID(r.Context(), id)
 		selector := fmt.Sprintf("testid=%q", id)
@@ -362,14 +401,16 @@ func (s *Server) compare(w http.ResponseWriter, r *http.Request) {
 			ensureRow(target)
 		}
 
-		for _, m := range compareMetrics {
-			query := m.fill(selector, window)
-			for _, baseURL := range baseURLs {
-				samples, err := s.promInstantMulti(r.Context(), baseURL, query, at)
+		for _, baseURL := range baseURLs {
+			for _, m := range compareMetrics {
+				samples, err := s.promInstantMulti(r.Context(), baseURL, m.fill(selector, window), at)
 				if err != nil {
-					writeError(w, r, http.StatusBadGateway, err.Error())
-					return
+					// The rest of this Prometheus' metrics would fail the
+					// same way; move on to the next one.
+					errs.add(id, baseURL, err)
+					break
 				}
+				errs.succeeded = true
 				for _, sample := range samples {
 					ensureRow(sample.Target).Values[m.Key] = sample.Value
 				}
@@ -385,6 +426,11 @@ func (s *Server) compare(w http.ResponseWriter, r *http.Request) {
 			resp.Results = append(resp.Results, *rows[target])
 		}
 	}
+	if msg, failed := errs.failed(); failed {
+		writeError(w, r, http.StatusBadGateway, msg)
+		return
+	}
+	resp.Errors = errs.byTestID
 	writeJSON(w, r, http.StatusOK, resp)
 }
 
@@ -406,6 +452,8 @@ type RangeSeries struct {
 type rangeResponse struct {
 	Metric CompareMetric `json:"metric"`
 	Series []RangeSeries `json:"series"`
+	// Errors is keyed by testid, same as compareResponse.Errors.
+	Errors map[string]string `json:"errors,omitempty"`
 }
 
 // metricsRange answers GET
@@ -476,6 +524,7 @@ func (s *Server) metricsRange(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := rangeResponse{Metric: *metric}
+	var errs promErrors
 	for _, id := range testids {
 		selector := fmt.Sprintf("testid=%q", id)
 		query := metric.fill(selector, window)
@@ -483,9 +532,10 @@ func (s *Server) metricsRange(w http.ResponseWriter, r *http.Request) {
 		for _, baseURL := range s.prometheusURLsForTestID(r.Context(), id) {
 			got, err := s.promRangeMulti(r.Context(), baseURL, query, start, end, step)
 			if err != nil {
-				writeError(w, r, http.StatusBadGateway, err.Error())
-				return
+				errs.add(id, baseURL, err)
+				continue
 			}
+			errs.succeeded = true
 			series = append(series, got...)
 		}
 		byTarget := make(map[string][]RangePoint, len(series))
@@ -522,6 +572,11 @@ func (s *Server) metricsRange(w http.ResponseWriter, r *http.Request) {
 			resp.Series = append(resp.Series, RangeSeries{TestID: id, Points: []RangePoint{}})
 		}
 	}
+	if msg, failed := errs.failed(); failed {
+		writeError(w, r, http.StatusBadGateway, msg)
+		return
+	}
+	resp.Errors = errs.byTestID
 	writeJSON(w, r, http.StatusOK, resp)
 }
 

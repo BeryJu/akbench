@@ -25,7 +25,7 @@ export function DashboardPage() {
     const alerts = useResource(() => api.alerts(), [], 30000);
 
     const burnTests = (testCases.data ?? [])
-        .filter((tc) => tc.spec.profile === "Burn")
+        .filter((tc) => tc.spec.profile === "Burn" && !tc.spec.archived)
         .sort((a, b) => a.metadata.name.localeCompare(b.metadata.name));
     const burnIDs = burnTests.map((tc) => tc.metadata.name);
     const live = useResource(

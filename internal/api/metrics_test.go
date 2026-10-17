@@ -427,3 +427,47 @@ func TestMetricsRangeWithoutPrometheus(t *testing.T) {
 		"/api/v1/metrics/range?testids=login-a&metric=http_reqs&start=1700000000&end=1700000015", nil)
 	requireStatus(t, rec, http.StatusBadGateway)
 }
+
+// TestMetricsToleratesOneUnreachablePrometheus: one testid whose
+// Prometheus is gone (its WorkloadCluster torn down, say) must not cost
+// every other testid in the same request its data - the dashboard asks
+// about every Burn TestCase at once.
+func TestMetricsToleratesOneUnreachablePrometheus(t *testing.T) {
+	mgmtProm := fakePrometheus(t, func(string) (string, string, bool) {
+		return "42", "topo-mgmt", true
+	})
+	wc := &benchv1alpha1.WorkloadCluster{
+		Name: "wc1", Namespace: testNamespace,
+		Status: benchv1alpha1.WorkloadClusterStatus{PrometheusURL: "http://127.0.0.1:1"},
+	}
+	topoMgmt := sampleDeployment("topo-mgmt")
+	topoWC := sampleDeployment("topo-wc")
+	topoWC.Spec.ClusterRef = corev1.LocalObjectReference{Name: "wc1"}
+	tcMgmt := sampleTestCase("login-mgmt", "topo-mgmt", benchv1alpha1.ProfileBurn)
+	tcWC := sampleTestCase("login-wc", "topo-wc", benchv1alpha1.ProfileBurn)
+	s, _ := newServer(t, Config{PrometheusURL: mgmtProm.URL}, wc, topoMgmt, topoWC, tcMgmt, tcWC)
+
+	rec := do(t, s, http.MethodGet, "/api/v1/metrics/compare?testids=login-mgmt,login-wc", nil)
+	requireStatus(t, rec, http.StatusOK)
+	compare := decodeBody[compareResponse](t, rec)
+	if _, ok := compare.Errors["login-wc"]; !ok || len(compare.Errors) != 1 {
+		t.Errorf("compare errors = %v, want only login-wc", compare.Errors)
+	}
+	for _, row := range compare.Results {
+		if row.TestID == "login-mgmt" && row.Values["http_reqs"] != 42 {
+			t.Errorf("login-mgmt http_reqs = %v, want 42", row.Values["http_reqs"])
+		}
+	}
+
+	rec = do(t, s, http.MethodGet,
+		"/api/v1/metrics/range?testids=login-mgmt,login-wc&metric=http_reqs&start=1700000000&end=1700000015", nil)
+	requireStatus(t, rec, http.StatusOK)
+	rng := decodeBody[rangeResponse](t, rec)
+	if _, ok := rng.Errors["login-wc"]; !ok || len(rng.Errors) != 1 {
+		t.Errorf("range errors = %v, want only login-wc", rng.Errors)
+	}
+
+	// Asked about on its own, the unreachable testid is still an error.
+	rec = do(t, s, http.MethodGet, "/api/v1/metrics/compare?testids=login-wc", nil)
+	requireStatus(t, rec, http.StatusBadGateway)
+}

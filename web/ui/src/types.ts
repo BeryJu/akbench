@@ -358,6 +358,9 @@ export interface CompareResponse {
     // One row per (testid, target) pair - a testid driving more than one
     // AuthentikDeployment produces more than one row, target always populated.
     results: { testid: string; target: string; values: Record<string, number> }[];
+    // Keyed by testid: a testid whose Prometheus couldn't be queried, while
+    // the others in the same request still could.
+    errors?: Record<string, string>;
 }
 
 export interface RangePoint {
@@ -374,6 +377,8 @@ export interface RangeSeries {
 export interface RangeResponse {
     metric: CompareMetric;
     series: RangeSeries[];
+    // Keyed by testid, same as CompareResponse.errors.
+    errors?: Record<string, string>;
 }
 
 // TraceBreakdown mirrors internal/api/traces.go: a sample of each target's
